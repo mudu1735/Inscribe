@@ -12,7 +12,8 @@ from pymongo.server_api import ServerApi
 
 from extractor import extract_people_for_ui, get_article_data
 
-app = Flask(__name__)
+# templates/ and static/ are located under the app/ folder.
+app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 # -------------------------
