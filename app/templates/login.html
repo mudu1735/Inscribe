@@ -415,6 +415,14 @@
 
   let mode = "login";
 
+  function clearAuthFields() {
+    document.getElementById("email").value = "";
+    document.getElementById("password").value = "";
+    document.getElementById("firstName").value = "";
+    document.getElementById("lastName").value = "";
+    document.getElementById("confirmPassword").value = "";
+  }
+
   function setMode(nextMode) {
     mode = nextMode;
     message.textContent = "";
@@ -443,7 +451,9 @@
   }
 
   toggleModeBtn.addEventListener("click", () => {
-    setMode(mode === "login" ? "register" : "login");
+    const nextMode = mode === "login" ? "register" : "login";
+    clearAuthFields();
+    setMode(nextMode);
   });
 
   forgotBtn.addEventListener("click", () => {
