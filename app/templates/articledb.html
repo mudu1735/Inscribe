@@ -173,7 +173,7 @@ a:hover{ text-decoration: underline; }
 }
 .title h1{
   margin:0;
-  font-size: 22px;
+  font-size: 26px; /* Updated to match interviewdb.html */
   letter-spacing: -0.02em;
   font-weight: 650;
 }
@@ -197,19 +197,13 @@ a:hover{ text-decoration: underline; }
   gap: 12px;
   align-items:center;
   flex-wrap:wrap;
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  margin-bottom: 14px;
-  margin-left: 0;
-  margin-right: 0;
+  padding: 0;
+  margin-bottom: 20px;
 }
 
 .searchWrap{
-  flex: 1 1 420px;
-  min-width: 260px;
+  flex: 1 1 0;
+  min-width: 0;
   position: relative;
 }
 .searchWrap input{
@@ -511,6 +505,8 @@ tr:hover td{ background: #fafafa; }
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height:1.25;
+  overflow-wrap:anywhere;
+  word-break:break-word;
 }
 #dTitleInput{
   font-size: 15px;
@@ -539,7 +535,7 @@ tr:hover td{ background: #fafafa; }
 
 .drawerBody{
   padding: 14px 16px;
-  overflow:auto;
+  overflow:hidden;
   flex: 1;
 }
 .kv{
@@ -551,7 +547,16 @@ tr:hover td{ background: #fafafa; }
   font-size: 13px;
 }
 .kv .k{ color: var(--muted); }
-.kv .v{ color: var(--text); }
+.kv .v{
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.kv .v a{
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
 
 .drawerSectionTitle{
   margin: 14px 0 8px;
@@ -702,23 +707,6 @@ tr:hover td{ background: #fafafa; }
       </div>
     </div>
 
-<div class="controlRow">
-  <div class="searchWrap">
-    <span class="searchIcon">⌕</span>
-    <input id="q" type="search" placeholder="Search title, author, URL, interviewees, tags…" autocomplete="off" />
-  </div>
-
-  <select id="dateRange" class="select" title="Date range">
-    <option value="">Any time</option>
-    <option value="7">Last 7 days</option>
-    <option value="30">Last 30 days</option>
-    <option value="90">Last 90 days</option>
-  </select>
-
-  <button class="btn" id="btnClear">Clear</button>
-  <span class="kbd" title="Tip: press / to focus search">/</span>
-</div>
-
 <div class="grid">
   <!-- Sidebar -->
   <aside class="panel sidebar">
@@ -745,6 +733,25 @@ tr:hover td{ background: #fafafa; }
 
   <!-- Main table -->
   <main class="panel main">
+    <div class="main-controls">
+      <div class="controlRow">
+        <div class="searchWrap">
+          <span class="searchIcon">⌕</span>
+          <input id="q" type="search" placeholder="Search title, author, URL, interviewees..." autocomplete="off" />
+        </div>
+
+        <select id="dateRange" class="select" title="Date range">
+          <option value="">Any time</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="90">Last 365 days</option>
+        </select>
+
+        <button class="btn" id="btnClear">Clear</button>
+      </div>
+    </div>
+
     <div class="activeFilters" id="activeFilters"></div>
 
     <div class="tableWrap">

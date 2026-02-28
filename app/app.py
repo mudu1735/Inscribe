@@ -25,7 +25,7 @@ MONGO_URI = "mongodb+srv://mudu1375:mudu2008@cluster0.jeailsf.mongodb.net/?appNa
 MONGO_DB = "mudu1735"
 INTERVIEW_COLLECTION = "interviewRecords"
 ARTICLE_COLLECTION = "articleRecords"
-USER_COLLECTION = "loginInfo"
+USER_COLLECTION = "loginInfov2"
 
 mongo_client = MongoClient(MONGO_URI, server_api=ServerApi("1"))
 db = mongo_client[MONGO_DB]
