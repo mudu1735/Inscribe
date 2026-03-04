@@ -570,12 +570,15 @@
       <div class="top-actions">
         <button class="link" id="historyBtn" type="button">Interview Records</button>
         <button class="link" id="archivesBtn" type="button">Article Archives</button>
+        {% if user_is_admin %}
+        <button class="link" id="adminBtn" type="button">Admin Dashboard</button>
+        {% endif %}
         <div class="userpill" title="Current user">
           <button class="userpill-button" id="userMenuToggle" type="button" aria-expanded="false" aria-haspopup="true">
             <div class="avatar" id="avatar">{{ user_initials or 'U' }}</div>
             <div style="display:flex;flex-direction:column;line-height:1.1">
               <div style="font-weight:800;font-size:13px" id="userName">{{ user_display_name or 'User' }}</div>
-              <small id="userRole">Signed in</small>
+              <small id="userRole">{{ user_role_label or 'Viewer' }}</small>
             </div>
           </button>
           <div class="userpill-menu" id="userMenu" role="menu">
@@ -679,7 +682,7 @@
     const CURRENT_USER = {
       name: "{{ user_display_name or 'User' }}",
       initials: "{{ user_initials or 'U' }}",
-      role: "Signed in"
+      role: "{{ user_role_label or 'Viewer' }}"
     };
     const GRADES = ["", "9", "10", "11", "12", "Staff"];
     const HOUSES = ["", "SMCS", "Global", "Humanities", "ISP"]; // edit as needed
@@ -792,6 +795,16 @@
       try {
         const u = new URL(value);
         return u.protocol === "http:" || u.protocol === "https:";
+      } catch {
+        return false;
+      }
+    }
+
+    function isPoolesvillePulseUrl(value){
+      try {
+        const u = new URL(value);
+        const host = (u.hostname || "").toLowerCase().replace(/\.$/, "");
+        return host === "poolesvillepulse.org" || host.endsWith(".poolesvillepulse.org");
       } catch {
         return false;
       }
@@ -924,7 +937,7 @@
       // Only clear the error after the user fixes it.
       if (urlErrorActive){
         const v = urlInput.value.trim();
-        if (v && isValidUrl(v)) setUrlError("");
+        if (v && isValidUrl(v) && isPoolesvillePulseUrl(v)) setUrlError("");
       }
     });
     autoGrow(urlInput);
@@ -950,6 +963,11 @@
       // basic validation (persistent under input until valid)
       if (!isValidUrl(url)){
         setUrlError("Please enter a valid URL");
+        urlInput.focus();
+        return;
+      }
+      if (!isPoolesvillePulseUrl(url)){
+        setUrlError("Please use a Poolesville Pulse link (poolesvillepulse.org). Example: https://poolesvillepulse.org/... ");
         urlInput.focus();
         return;
       }
@@ -993,7 +1011,12 @@
         openModal();
 
       } catch (err) {
-        showStatusMsg(err?.message || "Something went wrong", "error");
+        const msg = err?.message || "Something went wrong";
+        if (/poolesville\s*pulse|poolesvillepulse\.org/i.test(msg)){
+          setUrlError("Please use a Poolesville Pulse link (poolesvillepulse.org).");
+          urlInput.focus();
+        }
+        showStatusMsg(msg, "error");
       }
     }
 
@@ -1125,6 +1148,13 @@
     document.getElementById("archivesBtn").addEventListener("click", () => {
       window.location.href = "/articles";
     });
+
+    const adminBtn = document.getElementById("adminBtn");
+    if (adminBtn) {
+      adminBtn.addEventListener("click", () => {
+        window.location.href = "/admin";
+      });
+    }
   </script>
 </body>
 </html>
