@@ -236,6 +236,27 @@
       text-decoration: underline;
     }
 
+    .guest-link {
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .guest-btn {
+      width: 100%;
+      padding: 11px 14px;
+      background: #ffffff;
+      color: #1a202c;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .guest-btn:hover {
+      background: #f8fafc;
+    }
+
     .form-message {
       margin-top: 16px;
       font-size: 14px;
@@ -306,6 +327,10 @@
       <div class="signup-link">
         <span id="toggle-text">Don't have an account?</span>
         <button type="button" id="toggle-mode">Sign up</button>
+      </div>
+
+      <div class="guest-link" style="text-align:center; margin-top:8px; color:#718096; font-size:14px;">
+        <button type="button" id="guest-btn" style="background:transparent;border:none;color:#1230AE;text-decoration:none;font-weight:600;cursor:pointer;padding:0;">Continue as Guest</button>
       </div>
     </div>
   </div>
@@ -412,6 +437,7 @@
   const lastGroup = document.getElementById("last-group");
   const message = document.getElementById("form-message");
   const forgotBtn = document.getElementById("forgot-btn");
+  const guestBtn = document.getElementById("guest-btn");
 
   let mode = "login";
 
@@ -493,6 +519,12 @@
       message.textContent = "Network error. Please try again.";
     }
   });
+
+  if (guestBtn) {
+    guestBtn.addEventListener("click", () => {
+      window.location.href = "/records";
+    });
+  }
 </script>
 
 </body>

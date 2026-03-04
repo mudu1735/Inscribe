@@ -677,19 +677,28 @@ tr:hover td{ background: #fafafa; }
       </div>
 
       <div class="app-actions">
+        {% if can_access_add_article %}
         <button class="navlink" id="navHome" type="button">Add Article</button>
+        {% endif %}
         <button class="navlink" id="navRecords" type="button">Interview Records</button>
         <button class="navlink" id="navArticles" type="button">Article Archives</button>
+        {% if user_is_admin %}
+        <button class="navlink" id="navAdmin" type="button">Admin Dashboard</button>
+        {% endif %}
         <div class="userpill" title="Current user">
           <button class="userpill-button" id="userMenuToggle" type="button" aria-expanded="false" aria-haspopup="true">
             <div class="avatar" id="avatar">{{ user_initials or 'U' }}</div>
             <div style="display:flex;flex-direction:column;line-height:1.1">
               <div style="font-weight:900;font-size:13px" id="userName">{{ user_display_name or 'User' }}</div>
-              <small id="userRole">Signed in</small>
+              <small id="userRole">{{ user_role_label or 'Viewer' }}</small>
             </div>
           </button>
           <div class="userpill-menu" id="userMenu" role="menu">
+            {% if is_guest %}
+            <button class="menu-item" id="signInBtn" type="button">Sign in</button>
+            {% else %}
             <button class="menu-item" id="logoutBtn" type="button">Log out</button>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -842,10 +851,12 @@ tr:hover td{ background: #fafafa; }
 <div class="drawerFooter">
   <button class="mutedBtn viewOnly" id="btnCopyLink">Copy Link</button>
   <div style="display:flex; gap:10px;">
+    {% if can_edit %}
     <button class="btn btnPrimary viewOnly" id="btnEditMeta">Edit</button>
     <button class="btn btnDanger viewOnly" id="btnDelete">Delete</button>
     <button class="mutedBtn editOnly hide" id="btnCancelEdit">Cancel</button>
     <button class="btn btnPrimary editOnly hide" id="btnSaveEdit">Save</button>
+    {% endif %}
   </div>
 </div>
 
@@ -1474,14 +1485,17 @@ tr:hover td{ background: #fafafa; }
       const navHome = document.getElementById("navHome");
       const navRecords = document.getElementById("navRecords");
       const navArticles = document.getElementById("navArticles");
+      const navAdmin = document.getElementById("navAdmin");
 
       if(navHome) navHome.addEventListener("click", ()=> window.location.href = "/");
       if(navRecords) navRecords.addEventListener("click", ()=> window.location.href = "/records");
       if(navArticles) navArticles.addEventListener("click", ()=> window.location.href = "/articles");
+      if(navAdmin) navAdmin.addEventListener("click", ()=> window.location.href = "/admin");
 
       const toggle = document.getElementById("userMenuToggle");
       const menu = document.getElementById("userMenu");
       const logoutBtn = document.getElementById("logoutBtn");
+      const signInBtn = document.getElementById("signInBtn");
 
       if(toggle && menu){
         toggle.addEventListener("click", (e)=>{
@@ -1502,6 +1516,12 @@ tr:hover td{ background: #fafafa; }
       if(logoutBtn){
         logoutBtn.addEventListener("click", async ()=>{
           try{ await fetch("/logout", { method: "POST" }); }catch{}
+          window.location.href = "/login";
+        });
+      }
+
+      if(signInBtn){
+        signInBtn.addEventListener("click", ()=>{
           window.location.href = "/login";
         });
       }

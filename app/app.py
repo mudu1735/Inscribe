@@ -1,7 +1,8 @@
 import os
+from functools import wraps
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson import ObjectId
 from datetime import datetime, date, timezone
@@ -26,12 +27,43 @@ MONGO_DB = "mudu1735"
 INTERVIEW_COLLECTION = "interviewRecords"
 ARTICLE_COLLECTION = "articleRecords"
 USER_COLLECTION = "loginInfov2"
+ALLOWED_ARTICLE_DOMAIN = "poolesvillepulse.org"
+ROLE_VIEWER = "viewer"
+ROLE_EDITOR = "editor"
+ROLE_ADMIN = "admin"
+VALID_ROLES = {ROLE_VIEWER, ROLE_EDITOR, ROLE_ADMIN}
+ROLE_LABELS = {
+    ROLE_VIEWER: "Viewer",
+    ROLE_EDITOR: "Editor",
+    ROLE_ADMIN: "Admin",
+}
+ROLE_RANK = {
+    ROLE_VIEWER: 1,
+    ROLE_EDITOR: 2,
+    ROLE_ADMIN: 3,
+}
 
 mongo_client = MongoClient(MONGO_URI, server_api=ServerApi("1"))
 db = mongo_client[MONGO_DB]
 
 try:
     db[USER_COLLECTION].create_index("email", unique=True)
+except Exception:
+    pass
+
+try:
+    db[USER_COLLECTION].update_many(
+        {"$or": [{"role": {"$exists": False}}, {"role": None}]},
+        {"$set": {"role": ROLE_VIEWER}},
+    )
+except Exception:
+    pass
+
+try:
+    db[USER_COLLECTION].update_many(
+        {"role": {"$nin": list(VALID_ROLES)}},
+        {"$set": {"role": ROLE_VIEWER}},
+    )
 except Exception:
     pass
 
@@ -46,6 +78,73 @@ class User(UserMixin):
         self.email = doc.get("email", "")
         self.first_name = doc.get("firstName", "")
         self.last_name = doc.get("lastName", "")
+        self.role = normalize_role(doc.get("role"))
+
+
+def normalize_role(role_value) -> str:
+    role = str(role_value or "").strip().lower()
+    if role not in VALID_ROLES:
+        return ROLE_VIEWER
+    return role
+
+
+def role_label(role_value) -> str:
+    return ROLE_LABELS.get(normalize_role(role_value), "Viewer")
+
+
+def get_current_role() -> str:
+    if current_user.is_authenticated:
+        return normalize_role(getattr(current_user, "role", ROLE_VIEWER))
+    return ROLE_VIEWER
+
+
+def default_landing_for_role(role_value: str) -> str:
+    if ROLE_RANK.get(normalize_role(role_value), 1) >= ROLE_RANK[ROLE_EDITOR]:
+        return url_for("index")
+    return url_for("records_page")
+
+
+def _forbidden_response(message: str = "Forbidden"):
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "error": message}), 403
+    # For non-API requests, redirect to login page with next param
+    return redirect(url_for("login_page", next=request.path))
+
+
+def require_any_role(allowed_roles: list[str]):
+    normalized_allowed = {normalize_role(x) for x in allowed_roles}
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            role = get_current_role()
+            if role not in normalized_allowed:
+                return _forbidden_response()
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def require_role(role_name: str):
+    return require_any_role([role_name])
+
+
+def require_role_at_least(role_name: str):
+    target = normalize_role(role_name)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            role = get_current_role()
+            if ROLE_RANK.get(role, 1) < ROLE_RANK.get(target, 1):
+                return _forbidden_response()
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 @login_manager.user_loader
@@ -73,15 +172,55 @@ def _now_iso() -> str:
 
 
 def _current_user_display() -> tuple[str, str]:
+    if not current_user.is_authenticated:
+        return "Guest", "G"
+
     display_name = ((getattr(current_user, "first_name", "") or "").strip() + " " + (getattr(current_user, "last_name", "") or "").strip()).strip()
     if not display_name:
-        display_name = "User"
+        display_name = (getattr(current_user, "email", "") or "User").strip()
     initials = "".join([part[:1].upper() for part in display_name.split() if part])[:2] or "U"
     return display_name, initials
 
 
+def _template_user_context() -> dict:
+    display_name, initials = _current_user_display()
+    role = get_current_role()
+    is_guest = not current_user.is_authenticated
+    user_role_label = "Guest (Viewer)" if is_guest else role_label(role)
+    can_edit = ROLE_RANK.get(role, 1) >= ROLE_RANK[ROLE_EDITOR]
+    return {
+        "user_display_name": display_name,
+        "user_initials": initials,
+        "user_role_label": user_role_label,
+        "user_is_admin": role == ROLE_ADMIN,
+        "can_edit": can_edit,
+        "can_access_add_article": can_edit,
+        "is_guest": is_guest,
+    }
+
+
 def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
+
+
+def is_allowed_article_url(url: str) -> bool:
+    raw = (url or "").strip()
+    if not raw:
+        return False
+
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return False
+
+    if parsed.scheme not in {"http", "https"}:
+        return False
+
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].lower().strip(".")
+    if not host:
+        return False
+
+    return host == ALLOWED_ARTICLE_DOMAIN or host.endswith(f".{ALLOWED_ARTICLE_DOMAIN}")
 
 
 def find_user_by_email(email: str):
@@ -95,6 +234,7 @@ def create_user(email: str, password: str, first_name: str, last_name: str):
         "passwordHash": generate_password_hash(password),
         "firstName": (first_name or "").strip(),
         "lastName": (last_name or "").strip(),
+        "role": ROLE_VIEWER,
         "createdAt": now_iso,
         "lastLoginAt": now_iso,
     }
@@ -107,31 +247,34 @@ def create_user(email: str, password: str, first_name: str, last_name: str):
 # Pages
 # -------------------------
 @app.get("/")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def index():
-    display_name, initials = _current_user_display()
-    return render_template("mainPage.html", user_display_name=display_name, user_initials=initials)
+    return render_template("mainPage.html", **_template_user_context())
 
 
 @app.get("/login")
 def login_page():
     if current_user.is_authenticated:
-        return redirect(url_for("index"))
+        return redirect(default_landing_for_role(get_current_role()))
     return render_template("login.html")
 
 
 @app.get("/records")
-@login_required
+@require_any_role([ROLE_VIEWER, ROLE_EDITOR, ROLE_ADMIN])
 def records_page():
-    display_name, initials = _current_user_display()
-    return render_template("interviewdb.html", user_display_name=display_name, user_initials=initials)
+    return render_template("interviewdb.html", **_template_user_context())
 
 
 @app.get("/articles")
-@login_required
+@require_any_role([ROLE_VIEWER, ROLE_EDITOR, ROLE_ADMIN])
 def articles_page():
-    display_name, initials = _current_user_display()
-    return render_template("articledb.html", user_display_name=display_name, user_initials=initials)
+    return render_template("articledb.html", **_template_user_context())
+
+
+@app.get("/admin")
+@require_role(ROLE_ADMIN)
+def admin_dashboard_page():
+    return render_template("adminDashboard.html", **_template_user_context())
 
 
 @app.post("/login")
@@ -156,7 +299,7 @@ def login_action():
     login_user(User(user_doc))
     db[USER_COLLECTION].update_one({"_id": user_doc["_id"]}, {"$set": {"lastLoginAt": _now_iso()}})
 
-    next_url = request.args.get("next") or url_for("index")
+    next_url = request.args.get("next") or default_landing_for_role(user_doc.get("role"))
     return jsonify({"ok": True, "redirect": next_url})
 
 
@@ -191,13 +334,13 @@ def register_action():
     user_doc = create_user(email, password, first_name, last_name)
     login_user(User(user_doc))
 
-    return jsonify({"ok": True, "redirect": url_for("index")})
+    return jsonify({"ok": True, "redirect": default_landing_for_role(user_doc.get("role"))})
 
 
 @app.post("/logout")
-@login_required
 def logout_action():
-    logout_user()
+    if current_user.is_authenticated:
+        logout_user()
     return jsonify({"ok": True})
 
 
@@ -205,12 +348,14 @@ def logout_action():
 # APIs
 # -------------------------
 @app.post("/api/extract")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_extract():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"ok": False, "error": "Missing url"}), 400
+    if not is_allowed_article_url(url):
+        return jsonify({"ok": False, "error": "Please paste a Poolesville Pulse link (poolesvillepulse.org)."}), 400
     if not GEMINI_API_KEY:
         return jsonify({"ok": False, "error": "Server missing GEMINI_API_KEY"}), 500
 
@@ -222,7 +367,7 @@ def api_extract():
 
 
 @app.post("/api/save")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_save_interviewees():
     """Save extracted people for a given article URL.
 
@@ -247,6 +392,8 @@ def api_save_interviewees():
     article_url = (data.get("articleUrl") or data.get("article_url") or "").strip()
     if not article_url:
         return jsonify({"ok": False, "error": "Missing articleUrl"}), 400
+    if not is_allowed_article_url(article_url):
+        return jsonify({"ok": False, "error": "Only Poolesville Pulse links (poolesvillepulse.org) can be saved."}), 400
 
     # Save/refresh article metadata in articleRecords
     try:
@@ -337,7 +484,7 @@ def api_save_interviewees():
 
 
 @app.get("/api/interview-records")
-@login_required
+@require_any_role([ROLE_VIEWER, ROLE_EDITOR, ROLE_ADMIN])
 def api_interview_records():
     col = db[INTERVIEW_COLLECTION]
 
@@ -363,7 +510,7 @@ def api_interview_records():
 
 
 @app.get("/api/article-records")
-@login_required
+@require_any_role([ROLE_VIEWER, ROLE_EDITOR, ROLE_ADMIN])
 def api_article_records():
     """Return article records from MongoDB.
 
@@ -537,7 +684,7 @@ def _normalize_published_date(value: str) -> str:
 
 
 @app.post("/api/article-records/<record_id>")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_update_article_record(record_id: str):
     """Update a single article record by Mongo _id.
 
@@ -587,6 +734,8 @@ def api_update_article_record(record_id: str):
         new_url = str(payload.get("url") or "").strip()
         if not new_url:
             return jsonify({"ok": False, "error": "url is required"}), 400
+        if not is_allowed_article_url(new_url):
+            return jsonify({"ok": False, "error": "URL must be from poolesvillepulse.org"}), 400
 
         if new_url != old_url:
             conflict = art_col.find_one({"url": new_url, "_id": {"$ne": oid}})
@@ -642,7 +791,7 @@ def api_update_article_record(record_id: str):
 
 
 @app.delete("/api/article-records/<record_id>")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_delete_article_record(record_id: str):
     try:
         oid = ObjectId(record_id)
@@ -674,14 +823,14 @@ def api_delete_article_record(record_id: str):
 
 
 @app.post("/api/article-records/<record_id>/delete")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_delete_article_record_post(record_id: str):
     # Convenience endpoint for clients that can't send DELETE.
     return api_delete_article_record(record_id)
 
 
 @app.post("/api/interview-records/<record_id>")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_update_interview_record(record_id: str):
     """Update a single interview record by Mongo _id.
 
@@ -733,7 +882,7 @@ def api_update_interview_record(record_id: str):
 
 
 @app.delete("/api/interview-records/<record_id>")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_delete_interview_record(record_id: str):
     try:
         oid = ObjectId(record_id)
@@ -748,10 +897,71 @@ def api_delete_interview_record(record_id: str):
 
 
 @app.post("/api/interview-records/<record_id>/delete")
-@login_required
+@require_role_at_least(ROLE_EDITOR)
 def api_delete_interview_record_post(record_id: str):
     # Convenience endpoint for clients that can't send DELETE.
     return api_delete_interview_record(record_id)
+
+
+@app.get("/api/admin/users")
+@require_role(ROLE_ADMIN)
+def api_admin_users():
+    users = []
+    cursor = db[USER_COLLECTION].find({}, {"firstName": 1, "lastName": 1, "email": 1, "role": 1}).sort(
+        [("role", 1), ("lastName", 1), ("firstName", 1), ("email", 1)]
+    )
+
+    for doc in cursor:
+        users.append(
+            {
+                "id": str(doc.get("_id")),
+                "firstName": (doc.get("firstName") or "").strip(),
+                "lastName": (doc.get("lastName") or "").strip(),
+                "email": (doc.get("email") or "").strip(),
+                "role": normalize_role(doc.get("role")),
+            }
+        )
+
+    return jsonify({"ok": True, "users": users})
+
+
+@app.post("/api/admin/users/<user_id>/role")
+@require_role(ROLE_ADMIN)
+def api_admin_update_user_role(user_id: str):
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid user id"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    requested_role = str(payload.get("role") or "").strip().lower()
+    if requested_role not in VALID_ROLES:
+        return jsonify({"ok": False, "error": "Invalid role"}), 400
+
+    user_doc = db[USER_COLLECTION].find_one({"_id": oid})
+    if not user_doc:
+        return jsonify({"ok": False, "error": "User not found"}), 404
+
+    db[USER_COLLECTION].update_one({"_id": oid}, {"$set": {"role": requested_role}})
+    return jsonify({"ok": True, "id": user_id, "role": requested_role})
+
+
+@app.delete("/api/admin/users/<user_id>")
+@require_role(ROLE_ADMIN)
+def api_admin_delete_user(user_id: str):
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid user id"}), 400
+
+    if current_user.is_authenticated and str(getattr(current_user, "id", "")) == str(user_id):
+        return jsonify({"ok": False, "error": "You cannot delete your own account."}), 400
+
+    res = db[USER_COLLECTION].delete_one({"_id": oid})
+    if res.deleted_count == 0:
+        return jsonify({"ok": False, "error": "User not found"}), 404
+
+    return jsonify({"ok": True, "deletedId": user_id})
 
 
 if __name__ == "__main__":
