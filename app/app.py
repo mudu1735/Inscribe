@@ -1,4 +1,7 @@
 import os
+from pathlib import Path
+import io
+import csv
 from functools import wraps
 
 from flask import Flask, request, jsonify, render_template, redirect, url_for
@@ -10,24 +13,31 @@ from collections import defaultdict
 from urllib.parse import urlparse
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from dotenv import load_dotenv
 
 from extractor import extract_people_for_ui, get_article_data
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # templates/ and static/ are located under the app/ folder.
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 # -------------------------
-# Keys / config (hardcoded for now)
+# Keys / config
 # -------------------------
-GEMINI_API_KEY = "AIzaSyBEJl7vqwpev4QXEy57Ph_KUf_hUWmLufc"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-MONGO_URI = "mongodb+srv://mudu1375:mudu2008@cluster0.jeailsf.mongodb.net/?appName=Cluster0"
-MONGO_DB = "mudu1735"
-INTERVIEW_COLLECTION = "interviewRecords"
-ARTICLE_COLLECTION = "articleRecords"
-USER_COLLECTION = "loginInfov2"
-ALLOWED_ARTICLE_DOMAIN = "poolesvillepulse.org"
+MONGO_URI = os.getenv("MONGO_URI", "")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI is not set. Add it to your .env file.")
+
+MONGO_DB = os.getenv("MONGO_DB", "mudu1735")
+INTERVIEW_COLLECTION = os.getenv("INTERVIEW_COLLECTION", "interviewRecords")
+ARTICLE_COLLECTION = os.getenv("ARTICLE_COLLECTION", "articleRecords")
+USER_COLLECTION = os.getenv("USER_COLLECTION", "loginInfov2")
+NAMES_COLLECTION = os.getenv("NAMES_COLLECTION", "names")
+ALLOWED_ARTICLE_DOMAIN = os.getenv("ALLOWED_ARTICLE_DOMAIN", "poolesvillepulse.org")
 ROLE_VIEWER = "viewer"
 ROLE_EDITOR = "editor"
 ROLE_ADMIN = "admin"
@@ -962,6 +972,84 @@ def api_admin_delete_user(user_id: str):
         return jsonify({"ok": False, "error": "User not found"}), 404
 
     return jsonify({"ok": True, "deletedId": user_id})
+
+
+@app.post("/api/admin/names/upload")
+@require_role(ROLE_ADMIN)
+def api_admin_upload_names_csv():
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify({"ok": False, "error": "CSV file is required."}), 400
+
+    filename = (upload.filename or "").strip()
+    if not filename.lower().endswith(".csv"):
+        return jsonify({"ok": False, "error": "Only .csv files are supported."}), 400
+
+    try:
+        raw = upload.read()
+        text = raw.decode("utf-8-sig")
+    except Exception:
+        return jsonify({"ok": False, "error": "Could not read CSV. Please use UTF-8 encoding."}), 400
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return jsonify({"ok": False, "error": "CSV must include a header row."}), 400
+
+    header_map = {}
+    for h in reader.fieldnames:
+        key = (h or "").strip().lower().replace("_", "").replace(" ", "")
+        if key:
+            header_map[key] = h
+
+    first_col = header_map.get("firstname") or header_map.get("first")
+    last_col = header_map.get("lastname") or header_map.get("last")
+    grade_col = header_map.get("grade")
+    house_col = header_map.get("house")
+
+    if not first_col or not last_col:
+        return jsonify({"ok": False, "error": "CSV must contain firstName and lastName columns."}), 400
+
+    docs = []
+    skipped = 0
+    for row in reader:
+        if not isinstance(row, dict):
+            skipped += 1
+            continue
+
+        first_name = str(row.get(first_col) or "").strip()
+        last_name = str(row.get(last_col) or "").strip()
+        grade = str(row.get(grade_col) or "").strip() if grade_col else ""
+        house = str(row.get(house_col) or "").strip() if house_col else ""
+
+        if not first_name or not last_name:
+            skipped += 1
+            continue
+
+        docs.append({
+            "firstName": first_name,
+            "lastName": last_name,
+            "grade": grade,
+            "house": house,
+        })
+
+    if not docs:
+        return jsonify({"ok": False, "error": "No valid rows found. Ensure firstName and lastName are filled."}), 400
+
+    col = db[NAMES_COLLECTION]
+    col.delete_many({})
+    col.insert_many(docs)
+
+    try:
+        col.create_index([("firstName", 1), ("lastName", 1)])
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "inserted": len(docs),
+        "skipped": skipped,
+        "collection": NAMES_COLLECTION,
+    })
 
 
 if __name__ == "__main__":

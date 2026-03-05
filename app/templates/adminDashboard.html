@@ -29,7 +29,8 @@
       display:flex;align-items:center;justify-content:space-between;gap:12px;
     }
     .brand{display:flex;align-items:center;gap:10px;font-weight:900}
-    .logo{width:34px;height:34px;border-radius:10px;background:#0f172a;color:#fff;display:grid;place-items:center;font-size:14px}
+    .logo{width:44px;height:44px;display:grid;place-items:center;overflow:hidden}
+    .logo img{width:100%;height:100%;object-fit:contain;display:block}
     .app-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .navlink{background:transparent;border:none;color:var(--muted);font-weight:700;cursor:pointer;padding:8px 10px;border-radius:10px}
     .navlink:hover{background:rgba(15,23,42,.06);color:var(--text)}
@@ -54,7 +55,8 @@
     .group{margin-top:14px;border:1px solid var(--border);border-radius:14px;background:#fff;overflow:hidden}
     .group summary{cursor:pointer;list-style:none;padding:12px 14px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
     .group summary::-webkit-details-marker{display:none}
-    .count{color:var(--muted);font-size:12px;font-weight:700}
+    .group-arrow{display:inline-block;width:14px;text-align:center;line-height:1;color:var(--muted);font-size:12px;transform-origin:50% 50%;transition:transform .18s ease,color .18s ease}
+    details[open] .group-arrow{transform:rotate(180deg);color:var(--text)}
 
     .table-wrap{overflow:auto;border-top:1px solid var(--border)}
     table{width:100%;border-collapse:collapse;min-width:760px}
@@ -69,13 +71,25 @@
     .status{margin-top:12px;color:var(--muted);font-size:13px}
     .error{color:#991b1b}
     .success{color:#065f46}
+
+    .section-title{margin:0;font-size:18px;font-weight:800;letter-spacing:-.01em}
+    .section-sub{margin:6px 0 0;color:var(--muted);font-size:13px}
+    .upload-card{margin-top:14px;border:1px solid var(--border);border-radius:14px;background:#fff;padding:14px}
+    .upload-help{margin:0 0 10px;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.5}
+    .upload-help li{margin:4px 0}
+    .upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .file-input{border:1px solid var(--border);border-radius:10px;padding:9px 10px;background:#fff;font-size:13px}
+    .btnPrimary{border:1px solid #0f172a;background:#0f172a;color:#fff;padding:9px 12px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer}
+    .btnPrimary:hover{background:#020617}
+    .btnPrimary[disabled]{opacity:.55;cursor:not-allowed}
+    .upload-note{margin-top:8px;color:var(--muted);font-size:12px}
   </style>
 </head>
 <body>
   <div class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <div class="logo">FJ</div>
+        <div class="logo"><img src="/static/quill_logov2.png" alt="Falcon Journalism logo"></div>
         <div>
           <div>Falcon Journalism</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;margin-top:2px;">Admin Dashboard</div>
@@ -116,21 +130,38 @@
       </div>
 
       <details class="group" id="group-admin" open>
-        <summary>Admins <span class="count" id="count-admin">0</span></summary>
+        <summary>Admins <span class="group-arrow" aria-hidden="true">⌄</span></summary>
         <div class="table-wrap"><table><thead><tr><th>First name</th><th>Last name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead><tbody id="tbody-admin"></tbody></table></div>
       </details>
 
       <details class="group" id="group-editor" open>
-        <summary>Editors <span class="count" id="count-editor">0</span></summary>
+        <summary>Editors <span class="group-arrow" aria-hidden="true">⌄</span></summary>
         <div class="table-wrap"><table><thead><tr><th>First name</th><th>Last name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead><tbody id="tbody-editor"></tbody></table></div>
       </details>
 
       <details class="group" id="group-viewer" open>
-        <summary>Viewers <span class="count" id="count-viewer">0</span></summary>
+        <summary>Viewers <span class="group-arrow" aria-hidden="true">⌄</span></summary>
         <div class="table-wrap"><table><thead><tr><th>First name</th><th>Last name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead><tbody id="tbody-viewer"></tbody></table></div>
       </details>
 
       <div class="status" id="statusText"></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2 class="section-title">Update Staff and Student Names</h2>
+      <p class="section-sub">Upload a CSV to update the names list used for interviewee matching</p>
+      <div class="upload-card">
+        <ul class="upload-help">
+          <li>Only CSV files are accepted</li>
+          <li>Required columns: <strong>firstName</strong>, <strong>lastName</strong>, <strong>grade</strong>, and <strong>house</strong></li>
+          <li>Uploading will replace all existing names</li>
+        </ul>
+        <div class="upload-row">
+          <input id="namesCsvFile" class="file-input" type="file" accept=".csv,text/csv" />
+          <button id="uploadNamesBtn" class="btnPrimary" type="button">Upload CSV and Replace</button>
+        </div>
+        <div class="upload-note"></div>
+      </div>
     </div>
   </div>
 
@@ -170,10 +201,7 @@
 
     function renderRows(role, list){
       const tbody = document.getElementById(`tbody-${role}`);
-      const count = document.getElementById(`count-${role}`);
-      if(!tbody || !count) return;
-
-      count.textContent = String(list.length);
+      if(!tbody) return;
       if(!list.length){
         tbody.innerHTML = `<tr><td colspan="5" class="empty">No users in this group</td></tr>`;
         return;
@@ -255,6 +283,23 @@
       }
     }
 
+    async function uploadNamesCsv(file){
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/admin/names/upload", {
+        method: "POST",
+        body: formData,
+        headers: { "Accept": "application/json" }
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok || !data.ok){
+        throw new Error(data.error || "CSV upload failed");
+      }
+      return data;
+    }
+
     document.addEventListener("change", async (e) => {
       const el = e.target;
       if(!(el instanceof HTMLSelectElement)) return;
@@ -302,6 +347,42 @@
 
     document.getElementById("searchInput")?.addEventListener("input", () => {
       render();
+    });
+
+    document.getElementById("uploadNamesBtn")?.addEventListener("click", async ()=>{
+      const fileInput = document.getElementById("namesCsvFile");
+      if(!(fileInput instanceof HTMLInputElement)) return;
+
+      const file = fileInput.files?.[0];
+      if(!file){
+        showStatus("Choose a CSV file first.", "error");
+        return;
+      }
+
+      const fileName = normalize(file.name).toLowerCase();
+      if(!fileName.endsWith(".csv")){
+        showStatus("Only .csv files are allowed.", "error");
+        return;
+      }
+
+      const btn = document.getElementById("uploadNamesBtn");
+      if(btn instanceof HTMLButtonElement){
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+      }
+
+      try{
+        const result = await uploadNamesCsv(file);
+        showStatus(`Names updated: ${result.inserted || 0} inserted${result.skipped ? `, ${result.skipped} skipped` : ""}.`, "success");
+        fileInput.value = "";
+      }catch(err){
+        showStatus(err?.message || "CSV upload failed", "error");
+      }finally{
+        if(btn instanceof HTMLButtonElement){
+          btn.disabled = false;
+          btn.textContent = "Upload CSV and Replace";
+        }
+      }
     });
 
     (function(){
