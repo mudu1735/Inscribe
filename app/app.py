@@ -15,7 +15,8 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
 
-from extractor import extract_people_for_ui, get_article_data
+#from extractor import extract_people_for_ui, get_article_data
+from app.extractor import extract_people_for_ui, get_article_data
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
