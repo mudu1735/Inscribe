@@ -60,16 +60,18 @@ a:hover{ text-decoration: underline; }
   letter-spacing: .2px;
 }
 .logo{
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background:#0f172a;
+  width: 44px;
+  height: 44px;
   display:grid;
   place-items:center;
-  color:#fff;
-  font-weight: 900;
-  font-size: 14px;
+  overflow:hidden;
   user-select:none;
+}
+.logo img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  display:block;
 }
 .app-actions{
   display:flex;
@@ -669,7 +671,7 @@ tr:hover td{ background: #fafafa; }
   <div class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <div class="logo">FJ</div>
+        <div class="logo"><img src="/static/quill_logov2.png" alt="Falcon Journalism logo"></div>
         <div>
           <div>Falcon Journalism</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;margin-top:2px;">Article Archives</div>
@@ -712,7 +714,6 @@ tr:hover td{ background: #fafafa; }
         <p>Browse extracted interview records across articles. Click a row to inspect details.</p>
       </div>
       <div class="actions">
-        <button class="btn btnGhost" id="btnExport" title="Export current view to CSV">⤓ Export</button>
       </div>
     </div>
 
@@ -1261,36 +1262,6 @@ tr:hover td{ background: #fafafa; }
       });
     }
 
-    // ---------- Export CSV ----------
-    function exportCSV(rows){
-      const cols = ["title","domain","author","publishedAt","tags","interviewees","url"];
-      const lines = [
-        cols.join(","),
-        ...rows.map(r=>{
-          const obj = {
-            ...r,
-            tags: (r.tags || []).join("|"),
-            interviewees: (r.interviewees || []).map(p=>p.name).join("|")
-          };
-          return cols.map(c => csvCell(obj[c])).join(",");
-        })
-      ];
-      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `falcon_interviews_export_${new Date().toISOString().slice(0,10)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function csvCell(v){
-      const s = (v ?? "").toString().replaceAll('"','""');
-      return `"${s}"`;
-    }
-
     // ---------- Render ----------
     function render(){
       // Sync chip pressed states
@@ -1358,11 +1329,6 @@ tr:hover td{ background: #fafafa; }
       // Drawer close
       on("drawerOverlay", "click", closeDrawer);
       on("drawerClose", "click", closeDrawer);
-
-      // Export
-      on("btnExport", "click", ()=>{
-        exportCSV(filtered());
-      });
 
       on("btnEditMeta", "click", ()=>{
         const r = DATA.find(x=>x.id === state.selectedId);
