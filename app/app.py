@@ -1,10 +1,11 @@
 import os
+import re
 from pathlib import Path
 import io
 import csv
 from functools import wraps
 
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson import ObjectId
@@ -15,14 +16,20 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
 
-#from extractor import extract_people_for_ui, get_article_data
-from app.extractor import extract_people_for_ui, get_article_data
+# Supports both `python -m app.app` and `python app/app.py` execution modes.
+try:
+    from app.extractor import extract_people_for_ui, get_article_data
+except ModuleNotFoundError:
+    from extractor import extract_people_for_ui, get_article_data
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # templates/ and static/ are located under the app/ folder.
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("FLASK_ENV", "").lower() == "production"
 
 # -------------------------
 # Keys / config
@@ -122,6 +129,67 @@ def _forbidden_response(message: str = "Forbidden"):
     return redirect(url_for("login_page", next=request.path))
 
 
+def _is_same_origin_request() -> bool:
+    """Basic CSRF protection using Origin/Referer validation for unsafe methods."""
+    host = request.host_url.rstrip("/")
+    origin = (request.headers.get("Origin") or "").strip()
+    referer = (request.headers.get("Referer") or "").strip()
+
+    if origin:
+        return origin.rstrip("/") == host
+    if referer:
+        try:
+            parsed = urlparse(referer)
+            ref_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+            return ref_origin == host
+        except Exception:
+            return False
+
+    # If neither header is present, fail closed for authenticated unsafe requests.
+    return False
+
+
+@app.before_request
+def csrf_guard_for_authenticated_users():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+
+    # Login and registration are unauthenticated entry points.
+    if request.path in {"/login", "/register"}:
+        return None
+
+    if current_user.is_authenticated and not _is_same_origin_request():
+        return jsonify({"ok": False, "error": "CSRF validation failed."}), 403
+
+    return None
+
+
+@app.before_request
+def validate_active_session_cookie():
+    cookie_name = app.config.get("SESSION_COOKIE_NAME", "session")
+    session_cookie_present = bool(request.cookies.get(cookie_name))
+    has_user_id_in_session = bool(session.get("_user_id"))
+
+    if current_user.is_authenticated and (not session_cookie_present or not has_user_id_in_session):
+        logout_user()
+        return redirect(url_for("login_page"))
+
+    return None
+
+
+def _sanitize_next_url(next_url: str) -> str:
+    candidate = (next_url or "").strip()
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    # Allow only local relative paths, and block schema-relative redirects.
+    if parsed.scheme or parsed.netloc or not candidate.startswith("/") or candidate.startswith("//"):
+        return ""
+
+    return candidate
+
+
 def require_any_role(allowed_roles: list[str]):
     normalized_allowed = {normalize_role(x) for x in allowed_roles}
 
@@ -214,6 +282,15 @@ def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
 
 
+def is_valid_email(email: str) -> bool:
+    candidate = normalize_email(email)
+    if not candidate or len(candidate) > 254:
+        return False
+
+    # Practical email validation: local@domain with at least one dot in domain.
+    return bool(re.match(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$", candidate))
+
+
 def is_allowed_article_url(url: str) -> bool:
     raw = (url or "").strip()
     if not raw:
@@ -300,6 +377,9 @@ def login_action():
     if not email or not password:
         return jsonify({"ok": False, "error": "Email and password are required."}), 400
 
+    if not is_valid_email(email):
+        return jsonify({"ok": False, "error": "Please enter a valid email address."}), 400
+
     user_doc = find_user_by_email(email)
     if not user_doc:
         return jsonify({"ok": False, "error": "Invalid email or password."}), 401
@@ -307,10 +387,10 @@ def login_action():
     if not check_password_hash(user_doc.get("passwordHash", ""), password):
         return jsonify({"ok": False, "error": "Invalid email or password."}), 401
 
-    login_user(User(user_doc))
+    login_user(User(user_doc), remember=False)
     db[USER_COLLECTION].update_one({"_id": user_doc["_id"]}, {"$set": {"lastLoginAt": _now_iso()}})
 
-    next_url = request.args.get("next") or default_landing_for_role(user_doc.get("role"))
+    next_url = _sanitize_next_url(request.args.get("next") or "") or default_landing_for_role(user_doc.get("role"))
     return jsonify({"ok": True, "redirect": next_url})
 
 
@@ -332,6 +412,9 @@ def register_action():
     if not email or not password:
         return jsonify({"ok": False, "error": "Email and password are required."}), 400
 
+    if not is_valid_email(email):
+        return jsonify({"ok": False, "error": "Please enter a valid email address."}), 400
+
     if confirm and confirm != password:
         return jsonify({"ok": False, "error": "Passwords do not match."}), 400
 
@@ -343,7 +426,7 @@ def register_action():
         return jsonify({"ok": False, "error": "Email is already registered."}), 409
 
     user_doc = create_user(email, password, first_name, last_name)
-    login_user(User(user_doc))
+    login_user(User(user_doc), remember=False)
 
     return jsonify({"ok": True, "redirect": default_landing_for_role(user_doc.get("role"))})
 
@@ -1054,4 +1137,4 @@ def api_admin_upload_names_csv():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=os.getenv("FLASK_DEBUG", "0") == "1", port=5000)

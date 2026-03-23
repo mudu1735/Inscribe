@@ -667,11 +667,11 @@ tr:hover td{ background: #fafafa; }
   </style>
 </head>
 
-<body>
+<body data-is-guest="{{ 'true' if is_guest else 'false' }}">
   <div class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <div class="logo"><img src="/static/quill_logov2.png" alt="Falcon Journalism logo"></div>
+        <div class="logo"><img src="/static/quill_logo.png" alt="Falcon Journalism logo"></div>
         <div>
           <div>Falcon Journalism</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;margin-top:2px;">Article Archives</div>
@@ -867,6 +867,24 @@ tr:hover td{ background: #fafafa; }
   <div class="toast" id="toast">Copied</div>
 
   <script>
+    const BROWSER_SESSION_KEY = "falcon_browser_session_active";
+    (function enforceBrowserSessionForAuthenticatedUser(){
+      const isGuest = document.body.dataset.isGuest === "true";
+      if (isGuest) return;
+      try {
+        const marker = sessionStorage.getItem(BROWSER_SESSION_KEY);
+        if (!marker) {
+          fetch("/logout", { method: "POST", keepalive: true }).finally(() => {
+            window.location.replace("/login");
+          });
+          return;
+        }
+        sessionStorage.setItem(BROWSER_SESSION_KEY, "1");
+      } catch {
+        window.location.replace("/login");
+      }
+    })();
+
     // ---------- Data (loaded from your API) ----------
     let DATA = [];
 
@@ -1482,6 +1500,7 @@ tr:hover td{ background: #fafafa; }
       if(logoutBtn){
         logoutBtn.addEventListener("click", async ()=>{
           try{ await fetch("/logout", { method: "POST" }); }catch{}
+          try { sessionStorage.removeItem(BROWSER_SESSION_KEY); } catch {}
           window.location.href = "/login";
         });
       }
