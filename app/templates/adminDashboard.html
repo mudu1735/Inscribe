@@ -89,7 +89,7 @@
   <div class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <div class="logo"><img src="/static/quill_logov2.png" alt="Falcon Journalism logo"></div>
+        <div class="logo"><img src="/static/quill_logo.png" alt="Falcon Journalism logo"></div>
         <div>
           <div>Falcon Journalism</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;margin-top:2px;">Admin Dashboard</div>
@@ -166,6 +166,22 @@
   </div>
 
   <script>
+    const BROWSER_SESSION_KEY = "falcon_browser_session_active";
+    (function enforceBrowserSessionForAuthenticatedUser(){
+      try {
+        const marker = sessionStorage.getItem(BROWSER_SESSION_KEY);
+        if (!marker) {
+          fetch("/logout", { method: "POST", keepalive: true }).finally(() => {
+            window.location.replace("/login");
+          });
+          return;
+        }
+        sessionStorage.setItem(BROWSER_SESSION_KEY, "1");
+      } catch {
+        window.location.replace("/login");
+      }
+    })();
+
     let users = [];
 
     const roleOrder = ["admin", "editor", "viewer"];
@@ -419,6 +435,7 @@
       if(logoutBtn){
         logoutBtn.addEventListener("click", async ()=>{
           try{ await fetch("/logout", { method: "POST" }); }catch{}
+          try { sessionStorage.removeItem(BROWSER_SESSION_KEY); } catch {}
           window.location.href = "/login";
         });
       }

@@ -1,28 +1,25 @@
 import re
 import json
+import os
 import requests
 from typing import List, Dict, Tuple
 from bs4 import BeautifulSoup
-import sys
 
 
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-
-
-# ============================================================
-# 🔒 HARD-CODED MongoDB connection (temporary)
-# ============================================================
-MONGO_URI = "mongodb+srv://[REDACTED-MONGODB-URI]"
-MONGO_DB = "mudu1735"
-MONGO_COLLECTION = "names"
+MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_DB = os.getenv("MONGO_DB", "mudu1735")
+MONGO_COLLECTION = os.getenv("NAMES_COLLECTION", "names")
 
 
 # ============================================================
 # Mongo connection (READ-ONLY usage)
 # ============================================================
 def get_mongo_db():
+    if not MONGO_URI:
+        raise RuntimeError("MONGO_URI is not set. Add it to your .env file.")
     client = MongoClient(MONGO_URI, server_api=ServerApi("1"))
     return client[MONGO_DB]
 

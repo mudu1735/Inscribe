@@ -643,11 +643,11 @@
   </style>
 </head>
 
-<body>
+<body data-is-guest="{{ 'true' if is_guest else 'false' }}">
   <div class="appbar">
     <div class="appbar-inner">
       <div class="brand">
-        <div class="logo"><img src="/static/quill_logov2.png" alt="Falcon Journalism logo"></div>
+        <div class="logo"><img src="/static/quill_logo.png" alt="Falcon Journalism logo"></div>
         <div>
           <div>Falcon Journalism</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;margin-top:2px;">Interview Records</div>
@@ -710,9 +710,7 @@
 
         <div class="sideSection">
           <span class="sideLabel">House</span>
-          <select id="house" class="select" style="width:100%">
-            <option value="">All houses</option>
-          </select>
+          <div class="chips" id="houseChips"></div>
         </div>
 
         <div class="sideSection">
@@ -843,6 +841,24 @@
   <div class="toast" id="toast">Copied</div>
 
   <script>
+    const BROWSER_SESSION_KEY = "falcon_browser_session_active";
+    (function enforceBrowserSessionForAuthenticatedUser(){
+      const isGuest = document.body.dataset.isGuest === "true";
+      if (isGuest) return;
+      try {
+        const marker = sessionStorage.getItem(BROWSER_SESSION_KEY);
+        if (!marker) {
+          fetch("/logout", { method: "POST", keepalive: true }).finally(() => {
+            window.location.replace("/login");
+          });
+          return;
+        }
+        sessionStorage.setItem(BROWSER_SESSION_KEY, "1");
+      } catch {
+        window.location.replace("/login");
+      }
+    })();
+
     // =========================================================
     // Mock data (replace with your API payload)
     //
@@ -886,7 +902,7 @@
       q: "",
       dateRangeDays: "",
       grades: [],          // multiple grades can be selected
-      house: "",
+      houses: [],          // multiple houses can be selected
       sortKey: "dateAdded",
       sortDir: "desc",
       selectedId: null,
@@ -973,16 +989,27 @@
         gradeWrap.appendChild(btn);
       });
 
-      // House select from data
-      const houseOrder = ["SMCS", "Global", "Humanities", "ISP", "N/A"];
+      // House chips from data (no N/A option)
+      const houseWrap = $("houseChips");
+      const houseOrder = ["SMCS", "Global", "Humanities", "ISP"];
       const availableHouses = Array.from(new Set(state.all.map(p => p.house).filter(Boolean)));
       const houses = houseOrder.filter(h => availableHouses.includes(h));
-      const houseSel = $("house");
       houses.forEach(h=>{
-        const opt = document.createElement("option");
-        opt.value = h;
-        opt.textContent = h;
-        houseSel.appendChild(opt);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "chip";
+        btn.textContent = h;
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", ()=>{
+          const idx = state.houses.indexOf(h);
+          if(idx > -1){
+            state.houses.splice(idx, 1);
+          } else {
+            state.houses.push(h);
+          }
+          render();
+        });
+        houseWrap.appendChild(btn);
       });
     }
 
@@ -1010,7 +1037,7 @@
           }
 
           if(state.grades.length > 0 && !state.grades.includes(grade)) return false;
-          if(state.house && house !== state.house) return false;
+          if(state.houses.length > 0 && !state.houses.includes(house)) return false;
 
           if(cutoff){
             const ts = new Date((p.dateAdded || "") + "T00:00:00").getTime();
@@ -1062,7 +1089,9 @@
       state.grades.forEach(g=>{
         addPill(`Grade: ${g}`, ()=>{ state.grades = state.grades.filter(x => x !== g); render(); });
       });
-      if(state.house) addPill(`House: ${state.house}`, ()=>{ state.house=""; $("house").value=""; render(); });
+      state.houses.forEach(h=>{
+        addPill(`House: ${h}`, ()=>{ state.houses = state.houses.filter(x => x !== h); render(); });
+      });
       if(state.dateRangeDays) addPill(`Added: last ${state.dateRangeDays}d`, ()=>{ state.dateRangeDays=""; $("dateRange").value=""; render(); });
 
       wrap.style.display = wrap.children.length ? "flex" : "none";
@@ -1273,6 +1302,10 @@
         const g = btn.textContent;
         btn.setAttribute("aria-pressed", state.grades.includes(g) ? "true" : "false");
       });
+      document.querySelectorAll("#houseChips .chip").forEach(btn=>{
+        const h = btn.textContent;
+        btn.setAttribute("aria-pressed", state.houses.includes(h) ? "true" : "false");
+      });
 
       renderActivePills();
       const rows = filtered();
@@ -1293,11 +1326,6 @@
         render();
       });
 
-      on("house", "change", (e)=>{
-        state.house = e.target.value;
-        render();
-      });
-
       on("sort", "change", (e)=>{
         const [k, d] = e.target.value.split(":");
         state.sortKey = k;
@@ -1309,19 +1337,17 @@
         state.q = "";
         state.dateRangeDays = "";
         state.grades = [];
-        state.house = "";
+        state.houses = [];
 
         $("q").value = "";
         $("dateRange").value = "";
-        $("house").value = "";
 
         render();
       });
 
       on("btnResetSide", "click", ()=>{
         state.grades = [];
-        state.house = "";
-        $("house").value = "";
+        state.houses = [];
         render();
       });
 
@@ -1417,6 +1443,7 @@
       if(logoutBtn){
         logoutBtn.addEventListener("click", async ()=>{
           try{ await fetch("/logout", { method: "POST" }); }catch{}
+          try { sessionStorage.removeItem(BROWSER_SESSION_KEY); } catch {}
           window.location.href = "/login";
         });
       }

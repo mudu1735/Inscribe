@@ -215,6 +215,45 @@
       box-shadow: 0 8px 16px rgba(0,0,0,0.2);
     }
 
+    .login-btn:disabled {
+      opacity: 0.85;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .dots-loader {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 18px;
+    }
+
+    .dots-loader span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #fff;
+      animation: dotPulse 1s infinite ease-in-out;
+      opacity: 0.45;
+    }
+
+    .dots-loader span:nth-child(1) { animation-delay: 0s; }
+    .dots-loader span:nth-child(2) { animation-delay: 0.15s; }
+    .dots-loader span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes dotPulse {
+      0%, 80%, 100% {
+        transform: translateY(0);
+        opacity: 0.45;
+      }
+      40% {
+        transform: translateY(-3px);
+        opacity: 1;
+      }
+    }
+
     .signup-link {
       text-align: center;
       margin-top: 24px;
@@ -257,6 +296,13 @@
       background: #f8fafc;
     }
 
+    #guest-btn:hover,
+    #guest-btn:focus-visible {
+      text-decoration: underline !important;
+      text-underline-offset: 2px;
+      text-decoration-thickness: 2px;
+    }
+
     .form-message {
       margin-top: 16px;
       font-size: 14px;
@@ -287,7 +333,7 @@
 
   <div class="right-panel">
     <div class="login-box">
-      <h1 id="form-title">Welcome back</h1>
+      <h1 id="form-title">Welcome back!</h1>
       <p id="form-subtitle">Please enter your details to sign in</p>
 
       <form id="auth-form" novalidate>
@@ -438,6 +484,31 @@
   const message = document.getElementById("form-message");
   const forgotBtn = document.getElementById("forgot-btn");
   const guestBtn = document.getElementById("guest-btn");
+  const BROWSER_SESSION_KEY = "falcon_browser_session_active";
+  const LOGIN_DELAY_MIN_MS = 800;
+  const LOGIN_DELAY_MAX_MS = 1200;
+  const DOTS_LOADER_HTML = '<span class="dots-loader" aria-hidden="true"><span></span><span></span><span></span></span>';
+
+  function randomLoginDelayMs() {
+    return LOGIN_DELAY_MIN_MS + Math.floor(Math.random() * (LOGIN_DELAY_MAX_MS - LOGIN_DELAY_MIN_MS + 1));
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function setSubmitLoading(isLoading) {
+    if (isLoading) {
+      submitBtn.disabled = true;
+      submitBtn.dataset.originalText = submitBtn.textContent;
+      submitBtn.innerHTML = DOTS_LOADER_HTML;
+      return;
+    }
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = submitBtn.dataset.originalText || (mode === "register" ? "Create account" : "Sign in");
+    delete submitBtn.dataset.originalText;
+  }
 
   let mode = "login";
 
@@ -451,7 +522,8 @@
 
   function setMode(nextMode) {
     mode = nextMode;
-    message.textContent = "";
+    message.innerHTML = "";
+    message.style.color = "#dc2626";
 
     if (mode === "register") {
       title.textContent = "Create account";
@@ -464,7 +536,7 @@
       toggleModeBtn.textContent = "Sign in";
       forgotBtn.style.visibility = "hidden";
     } else {
-      title.textContent = "Welcome back";
+      title.textContent = "Welcome back!";
       subtitle.textContent = "Please enter your details to sign in";
       submitBtn.textContent = "Sign in";
       nameGroup.style.display = "none";
@@ -483,12 +555,16 @@
   });
 
   forgotBtn.addEventListener("click", () => {
+    message.style.color = "#dc2626";
     message.textContent = "Password reset isn't configured yet.";
   });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    message.textContent = "";
+    if (submitBtn.disabled) return;
+    message.innerHTML = "";
+    message.style.color = "#dc2626";
+    setSubmitLoading(true);
 
     const payload = {
       email: document.getElementById("email").value.trim(),
@@ -502,6 +578,8 @@
     }
 
     try {
+      await sleep(randomLoginDelayMs());
+
       const res = await fetch(mode === "login" ? "/login" : "/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -510,13 +588,39 @@
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
+        message.style.color = "#dc2626";
         message.textContent = data.error || "Something went wrong.";
+        setSubmitLoading(false);
         return;
       }
 
-      window.location.href = data.redirect || "/";
+      if (mode === "register") {
+        setSubmitLoading(false);
+        message.style.color = "#16a34a";
+        message.innerHTML = 'Account created! Click <a href="#" id="registerSuccessLoginLink" style="color:#1230AE;font-weight:600;text-decoration:underline;">here</a> to login';
+
+        const registerSuccessLoginLink = document.getElementById("registerSuccessLoginLink");
+        if (registerSuccessLoginLink) {
+          registerSuccessLoginLink.addEventListener("click", (evt) => {
+            evt.preventDefault();
+            clearAuthFields();
+            setMode("login");
+          });
+        }
+        return;
+      }
+
+      const redirectTarget = data.redirect || "/";
+      if (redirectTarget) {
+        try { sessionStorage.setItem(BROWSER_SESSION_KEY, "1"); } catch {}
+        window.location.href = redirectTarget;
+        return;
+      }
+
+      setSubmitLoading(false);
     } catch (err) {
       message.textContent = "Network error. Please try again.";
+      setSubmitLoading(false);
     }
   });
 
