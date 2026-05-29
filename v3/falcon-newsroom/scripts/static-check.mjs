@@ -8,12 +8,18 @@ const authComponent = await readFile("src/components/ui/login-signup.tsx", "utf8
 
 const expectedAppSnippets = [
   "Falcon Newsroom",
+  "LandingPage",
+  "LandingDeskScene",
+  "Move school journalism",
+  "Open newsroom",
+  "Review stories",
   "Pitch Board",
   "Stories",
   "StoriesPage",
   "initialStories",
   "Open Google Doc",
   "Copy link",
+  "Link doc",
   "Submitted",
   "Needs Revision",
   "Doc unavailable",
@@ -82,15 +88,15 @@ for (const snippet of expectedAppSnippets) {
   }
 }
 
-for (const snippet of ["Refresh</Button>", "Other interviewees in this article", "Why this structure works better", "Faculty / Staff", "Open pipeline", "+9 new", "+3 this week", "label: \"Pipeline\"", "label: \"Assignments\"", "label: \"Articles\"", "label: \"Interviewees\"", "Move to Development", "out of 2", "No pitches here", "Save Feedback", "PitchDetailBreadcrumb", "{ id: \"extractor\"", "ExtractorPage", "Mock extraction complete", "Quote evidence", "Confidence", "Review extracted interviewees", "Remove selected", "Deselect all", "Select all", "interviewee found.", "linked</StatusBadge>"]) {
+for (const snippet of ["Refresh</Button>", "Other interviewees in this article", "Why this structure works better", "Faculty / Staff", "Open pipeline", "+9 new", "+3 this week", "label: \"Pipeline\"", "label: \"Assignments\"", "label: \"Articles\"", "label: \"Interviewees\"", "Move to Development", "out of 2", "No pitches here", "Save Feedback", "PitchDetailBreadcrumb", "{ id: \"extractor\"", "ExtractorPage", "Mock extraction complete", "Quote evidence", "Confidence", "Review extracted interviewees", "Remove selected", "Deselect all", "Select all", "interviewee found.", "linked</StatusBadge>", "StoryQueueMetric", "STORY_FILTER_EDITORS", "editorFilter", "MiniStat", ">Owner</th>", ">Doc</th>", "StatusBadge tone={storyStatusTone", "{story.section} / Last edited", "fmt(story.wordCount)} words", "story.sourceCount} sources", "story.revisionCount} revisions"]) {
   if (app.includes(snippet)) {
     throw new Error(`Found removed App.jsx snippet: ${snippet}`);
   }
 }
 
-for (const snippet of ["@tailwind base", "@tailwind components", "@tailwind utilities"]) {
+for (const snippet of ["@tailwind base", "@tailwind components", "@tailwind utilities", ".landing-page", "oklch("]) {
   if (!css.includes(snippet)) {
-    throw new Error(`Missing Tailwind directive: ${snippet}`);
+    throw new Error(`Missing expected CSS snippet: ${snippet}`);
   }
 }
 
