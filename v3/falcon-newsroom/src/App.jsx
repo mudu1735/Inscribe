@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   Area,
   AreaChart,
@@ -455,10 +455,30 @@ const calendarItems = [
   { day: 22, title: "Prom trends pitch", type: "Pitch", section: "Culture" },
 ];
 
-const STORY_STATUSES = ["Submitted", "In Review", "Needs Revision", "Ready for Publish", "Returned", "Published"];
+const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Review", "Needs Revision", "Returned", "Ready for Publish", "Published"];
 const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
 const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
-const STORY_FILTER_EDITORS = ["All editors", "Ava Patel", "Maya Johnson", "Noah Kim"];
+const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
+const STORY_WORKFLOW_COLUMNS = [
+  {
+    id: "ready",
+    title: "Ready for Review",
+    description: "Submitted drafts that need an editor pass.",
+    statuses: ["Submitted", "In Review"],
+  },
+  {
+    id: "progress",
+    title: "In Progress",
+    description: "Assigned, reporting, drafting, or back with the writer.",
+    statuses: ["Assigned", "Reporting", "Drafting", "Needs Revision", "Returned"],
+  },
+  {
+    id: "approval",
+    title: "Teacher Approval",
+    description: "Editor-reviewed stories waiting for adviser sign-off.",
+    statuses: ["Ready for Publish"],
+  },
+];
 
 const initialStories = [
   {
@@ -565,6 +585,300 @@ const initialStories = [
     summary: "A culture piece on how students choose, photograph, and share prom outfits.",
     nextStep: "Writer needs to restore the shared Google Doc link and add at least two student voices.",
     editorNote: "Doc link missing. Keep it returned until the submission is accessible.",
+  },
+  {
+    id: "s7",
+    title: "Exam Week Sleep Survey Finds Uneven Study Habits",
+    section: "News",
+    writer: "Mina Rao",
+    editor: "Ava Patel",
+    status: "Submitted",
+    priority: "Normal",
+    deadline: "Today",
+    dueSoon: true,
+    submittedAt: "May 18, 2026, 10:05 AM",
+    lastEdited: "24 min ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconExamSleepSurvey/edit",
+    revisionCount: 1,
+    wordCount: 934,
+    sourceCount: 4,
+    unread: true,
+    summary: "Survey results and counselor interviews show how students adjust sleep during exam season.",
+    nextStep: "Check that survey numbers are clearly attributed and ask for one counselor verification.",
+    editorNote: "Promising data story. Needs a cleaner chart note before teacher approval.",
+  },
+  {
+    id: "s8",
+    title: "Student Musicians Prepare for Spring Showcase",
+    section: "Culture",
+    writer: "Jordan Ellis",
+    editor: "Maya Johnson",
+    status: "Drafting",
+    priority: "Normal",
+    deadline: "Tomorrow",
+    dueSoon: true,
+    submittedAt: "May 18, 2026, 9:20 AM",
+    lastEdited: "1 hr ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconSpringShowcase/edit",
+    revisionCount: 0,
+    wordCount: 488,
+    sourceCount: 2,
+    unread: false,
+    summary: "A preview of the spring music showcase through student rehearsals and setlist decisions.",
+    nextStep: "Writer is adding rehearsal color and one quote from the choir director.",
+    editorNote: "Keep the focus on preparation instead of a basic event listing.",
+  },
+  {
+    id: "s9",
+    title: "Varsity Baseball Leans on Younger Pitchers",
+    section: "Sports",
+    writer: "Ethan Miller",
+    editor: "Noah Kim",
+    status: "Reporting",
+    priority: "High",
+    deadline: "May 20",
+    dueSoon: true,
+    submittedAt: "May 17, 2026, 7:11 PM",
+    lastEdited: "2 hrs ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconBaseballPitchers/edit",
+    revisionCount: 0,
+    wordCount: 312,
+    sourceCount: 2,
+    unread: false,
+    summary: "A sports analysis story on how underclassmen pitchers are changing the team's playoff depth.",
+    nextStep: "Needs coach context and one stat check before draft review.",
+    editorNote: "Good angle. Ask for exact innings pitched, not vague workload language.",
+  },
+  {
+    id: "s10",
+    title: "Library Adds Quiet Hours During AP Testing",
+    section: "News",
+    writer: "Priya Shah",
+    editor: "Ava Patel",
+    status: "Ready for Publish",
+    priority: "Normal",
+    deadline: "May 20",
+    dueSoon: true,
+    submittedAt: "May 16, 2026, 2:46 PM",
+    lastEdited: "36 min ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconLibraryQuietHours/edit",
+    revisionCount: 2,
+    wordCount: 621,
+    sourceCount: 3,
+    unread: false,
+    summary: "Library staff explain new quiet-hour rules and how students can reserve study space.",
+    nextStep: "Send to adviser once the sidebar confirms room reservation instructions.",
+    editorNote: "Clean and useful. Needs teacher approval before it goes live.",
+  },
+  {
+    id: "s11",
+    title: "Robotics Mentors Build Summer Outreach Plan",
+    section: "Science & Technology",
+    writer: "Kai Nguyen",
+    editor: "Mina Rao",
+    status: "Assigned",
+    priority: "Low",
+    deadline: "May 23",
+    dueSoon: false,
+    submittedAt: "May 15, 2026, 8:30 AM",
+    lastEdited: "Yesterday",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconRoboticsOutreach/edit",
+    revisionCount: 0,
+    wordCount: 0,
+    sourceCount: 0,
+    unread: false,
+    summary: "Assignment for a short feature on how robotics students plan to teach middle school workshops.",
+    nextStep: "Writer should schedule two mentor interviews and collect photos from the first planning meeting.",
+    editorNote: "Set a reporting checkpoint before drafting starts.",
+  },
+  {
+    id: "s12",
+    title: "Opinion: Hallway Phone Rules Need Clearer Enforcement",
+    section: "Opinion",
+    writer: "Nora Kim",
+    editor: "Maya Johnson",
+    status: "Submitted",
+    priority: "Normal",
+    deadline: "May 21",
+    dueSoon: false,
+    submittedAt: "May 17, 2026, 4:09 PM",
+    lastEdited: "3 hrs ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconPhoneRulesOpinion/edit",
+    revisionCount: 1,
+    wordCount: 708,
+    sourceCount: 2,
+    unread: true,
+    summary: "An opinion column arguing that hallway phone rules are inconsistently communicated.",
+    nextStep: "Check fairness language and ask for a clear distinction between reporting and opinion.",
+    editorNote: "The stance is clear. Tone needs one pass before approval.",
+  },
+  {
+    id: "s13",
+    title: "Photo Essay: Cafeteria Rush Between Lunch Waves",
+    section: "Photo",
+    writer: "Luca Bennett",
+    editor: "Noah Kim",
+    status: "In Review",
+    priority: "High",
+    deadline: "Today",
+    dueSoon: true,
+    submittedAt: "May 18, 2026, 11:22 AM",
+    lastEdited: "16 min ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconLunchWavePhotos/edit",
+    revisionCount: 1,
+    wordCount: 284,
+    sourceCount: 3,
+    unread: true,
+    summary: "Photo captions and short observations document the pressure points in the lunch line.",
+    nextStep: "Confirm all photo subjects are cleared and tighten the caption sequence.",
+    editorNote: "Strong visuals. Verify names before sending to teacher.",
+  },
+  {
+    id: "s14",
+    title: "Environmental Club Pushes Compost Pilot",
+    section: "Features",
+    writer: "Olivia Grant",
+    editor: "Ava Patel",
+    status: "Needs Revision",
+    priority: "Normal",
+    deadline: "May 22",
+    dueSoon: false,
+    submittedAt: "May 16, 2026, 6:40 PM",
+    lastEdited: "Yesterday",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconCompostPilot/edit",
+    revisionCount: 2,
+    wordCount: 1018,
+    sourceCount: 5,
+    unread: false,
+    summary: "Environmental Club members describe a composting pilot and the logistical hurdles ahead.",
+    nextStep: "Writer needs to add facilities perspective and clarify what is approved.",
+    editorNote: "Return with comments on scope, evidence, and exact timeline.",
+  },
+  {
+    id: "s15",
+    title: "Theater Crew Designs a Minimalist Set",
+    section: "Culture",
+    writer: "Sam Rivera",
+    editor: "Maya Johnson",
+    status: "Drafting",
+    priority: "Low",
+    deadline: "May 25",
+    dueSoon: false,
+    submittedAt: "May 15, 2026, 12:18 PM",
+    lastEdited: "2 days ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconTheaterSet/edit",
+    revisionCount: 0,
+    wordCount: 557,
+    sourceCount: 2,
+    unread: false,
+    summary: "A behind-the-scenes look at how stage crew builds a set with limited materials.",
+    nextStep: "Draft should add scene detail from rehearsal and one technical explanation.",
+    editorNote: "Good candidate for a photo-led package.",
+  },
+  {
+    id: "s16",
+    title: "Math Team Qualifies for Regional Tournament",
+    section: "News",
+    writer: "Grace Lin",
+    editor: "Mina Rao",
+    status: "Ready for Publish",
+    priority: "Normal",
+    deadline: "May 22",
+    dueSoon: false,
+    submittedAt: "May 14, 2026, 9:55 PM",
+    lastEdited: "4 hrs ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconMathTeamRegionals/edit",
+    revisionCount: 2,
+    wordCount: 678,
+    sourceCount: 3,
+    unread: false,
+    summary: "Math team members describe their regional qualification and preparation routine.",
+    nextStep: "Awaiting adviser approval after headline and photo credit check.",
+    editorNote: "Ready for final sign-off.",
+  },
+  {
+    id: "s17",
+    title: "Students Debate Later Start Time Proposal",
+    section: "News",
+    writer: "Talia Green",
+    editor: "Noah Kim",
+    status: "Reporting",
+    priority: "High",
+    deadline: "May 24",
+    dueSoon: false,
+    submittedAt: "May 13, 2026, 3:02 PM",
+    lastEdited: "Today",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconStartTimeProposal/edit",
+    revisionCount: 0,
+    wordCount: 401,
+    sourceCount: 3,
+    unread: false,
+    summary: "Students and staff weigh possible benefits and scheduling conflicts around a later start time.",
+    nextStep: "Needs district context and one parent voice before draft review.",
+    editorNote: "Treat this as a reported explainer, not a reaction roundup.",
+  },
+  {
+    id: "s18",
+    title: "Senior Map Tracks College Decisions",
+    section: "Features",
+    writer: "Hannah Cole",
+    editor: "Ava Patel",
+    status: "Assigned",
+    priority: "Low",
+    deadline: "May 27",
+    dueSoon: false,
+    submittedAt: "May 12, 2026, 1:47 PM",
+    lastEdited: "2 days ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconSeniorMap/edit",
+    revisionCount: 0,
+    wordCount: 0,
+    sourceCount: 0,
+    unread: false,
+    summary: "A data-assisted feature mapping where seniors plan to study, work, or take gap years.",
+    nextStep: "Writer needs form results and privacy-safe display rules before drafting.",
+    editorNote: "Keep individual student details opt-in only.",
+  },
+  {
+    id: "s19",
+    title: "Lacrosse Captains Reset After Rivalry Loss",
+    section: "Sports",
+    writer: "Miles Carter",
+    editor: "Noah Kim",
+    status: "Submitted",
+    priority: "Normal",
+    deadline: "May 21",
+    dueSoon: false,
+    submittedAt: "May 18, 2026, 7:58 AM",
+    lastEdited: "48 min ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconLacrosseCaptains/edit",
+    revisionCount: 1,
+    wordCount: 849,
+    sourceCount: 4,
+    unread: true,
+    summary: "Team captains explain how the lacrosse roster is responding after a close rivalry game.",
+    nextStep: "Review for sports cliches and verify the final score before teacher approval.",
+    editorNote: "Lead with the adjustment, not the loss.",
+  },
+  {
+    id: "s20",
+    title: "AI Club Hosts First Prompt Design Workshop",
+    section: "Science & Technology",
+    writer: "Sofia Chen",
+    editor: "Mina Rao",
+    status: "In Review",
+    priority: "Normal",
+    deadline: "May 23",
+    dueSoon: false,
+    submittedAt: "May 17, 2026, 8:33 PM",
+    lastEdited: "1 hr ago",
+    googleDocUrl: "https://docs.google.com/document/d/1FalconAIClubWorkshop/edit",
+    revisionCount: 1,
+    wordCount: 779,
+    sourceCount: 3,
+    unread: false,
+    summary: "AI Club members explain how they teach prompt writing while addressing classroom concerns.",
+    nextStep: "Check that the story explains student safeguards and avoids promotional language.",
+    editorNote: "Good balance. One quote needs stronger attribution.",
   },
   {
     id: "s6",
@@ -749,13 +1063,35 @@ function storyDocIsOpenable(story) {
   return isValidHttpUrl(story.googleDocUrl);
 }
 
-function storyStatusTone(status) {
-  if (status === "Ready for Publish") return "green";
+function storyStatusTextClass(status) {
+  if (status === "Ready for Publish" || status === "Published") return "text-emerald-300";
+  if (status === "Needs Revision") return "text-amber-300";
+  if (status === "Returned") return "text-rose-300";
+  if (status === "In Review" || status === "Drafting") return "text-violet-300";
+  if (status === "Reporting" || status === "Assigned") return "text-zinc-300";
+  if (status === "Submitted") return "text-sky-300";
+  return "text-zinc-300";
+}
+
+function storyBadgeTone(status) {
+  if (status === "Ready for Publish" || status === "Published") return "green";
   if (status === "Needs Revision") return "amber";
   if (status === "Returned") return "rose";
-  if (status === "In Review") return "violet";
+  if (status === "In Review" || status === "Drafting") return "violet";
   if (status === "Submitted") return "blue";
   return "neutral";
+}
+
+function storyColumnForStatus(status) {
+  return STORY_WORKFLOW_COLUMNS.find((column) => column.statuses.includes(status)) || STORY_WORKFLOW_COLUMNS[1];
+}
+
+function storyColumnForStory(story) {
+  return storyColumnForStatus(story?.status);
+}
+
+function isActiveStory(story) {
+  return ACTIVE_STORY_STATUSES.includes(story.status);
 }
 
 function storySearchText(story) {
@@ -773,17 +1109,59 @@ function storySearchText(story) {
     .toLowerCase();
 }
 
-function storyMatchesFilters(story, query, status, section, editor) {
+function storyMatchesFilters(story, query, status, section) {
   const needle = query.trim().toLowerCase();
   if (needle && !storySearchText(story).includes(needle)) return false;
   if (status !== "All statuses" && story.status !== status) return false;
   if (section !== "All sections" && story.section !== section) return false;
-  if (editor !== "All editors" && story.editor !== editor) return false;
   return true;
 }
 
-function storyNeedsAttention(story) {
-  return ["Submitted", "In Review"].includes(story.status) || !storyDocIsOpenable(story);
+function storyCommentCount(story) {
+  return (Array.isArray(story.feedback) ? story.feedback.length : 0) + (Array.isArray(story.comments) ? story.comments.length : 0) + (story.editorNote ? 1 : 0);
+}
+
+function storyWorkflowAction(story) {
+  if (!story) return null;
+  if (story.status === "Ready for Publish") {
+    return { label: "Mark approved", nextStatus: "Published" };
+  }
+  if (story.status === "Submitted" || story.status === "In Review") {
+    return { label: "Send to teacher", nextStatus: "Ready for Publish" };
+  }
+  return { label: "Mark ready", nextStatus: "Submitted" };
+}
+
+function storyFeedbackItems(story) {
+  const items = [];
+  if (story?.editorNote) {
+    items.push({ id: `${story.id}-editor-note`, author: story.editor || "Editor", text: story.editorNote, time: story.lastEdited || "Recently" });
+  }
+  if (Array.isArray(story?.feedback)) {
+    items.push(...story.feedback);
+  }
+  return items;
+}
+
+function storySourceItems(story) {
+  if (Array.isArray(story?.sources) && story.sources.length) return story.sources;
+  const count = Number(story?.sourceCount) || 0;
+  if (!count) return [];
+  return Array.from({ length: Math.min(count, 4) }, (_, index) => ({
+    id: `${story.id}-source-${index}`,
+    name: ["Student voice", "Adviser or staff source", "Primary document", "Follow-up source"][index] || `Source ${index + 1}`,
+    status: index < Math.max(1, count - 1) ? "Confirmed" : "Needs check",
+    note: ["Quote verified", "Availability confirmed", "Policy or record linked", "Waiting on response"][index] || "Tracking note",
+  }));
+}
+
+function storyActivityItems(story) {
+  if (Array.isArray(story?.activity) && story.activity.length) return story.activity;
+  return [
+    { id: `${story.id}-activity-1`, text: `${story.writer} submitted draft`, time: story.submittedAt || "Submitted" },
+    { id: `${story.id}-activity-2`, text: "Draft last edited", time: story.lastEdited || "Recently" },
+    { id: `${story.id}-activity-3`, text: `Status set to ${story.status}`, time: "Current" },
+  ];
 }
 
 function optionsWithCurrent(options, value) {
@@ -1256,7 +1634,7 @@ function runPrototypeTests() {
   console.assert(initialStories.every((story) => STORY_STATUSES.includes(story.status)), "Every story should use a supported workflow status.");
   console.assert(initialStories.some((story) => story.status === "Submitted"), "Stories page needs submitted examples.");
   console.assert(initialStories.some((story) => story.status === "Needs Revision"), "Stories page needs revision examples.");
-  console.assert(storyMatchesFilters(initialStories[0], "parking", "All statuses", "All sections", "All editors"), "Stories search should include title text.");
+  console.assert(storyMatchesFilters(initialStories[0], "parking", "All statuses", "All sections"), "Stories search should include title text.");
   console.assert(!storyDocIsOpenable(initialStories.find((story) => story.id === "s5")), "Missing Google Doc links should be treated as unavailable.");
   console.assert(initialArticles.some((a) => a.status === "Published"), "Prototype needs published article data.");
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
@@ -1305,25 +1683,23 @@ function Card({ children, className = "" }) {
   return <div className={cx("rounded-2xl border border-white/[0.08] bg-white/[0.035] shadow-2xl shadow-black/20 backdrop-blur", className)}>{children}</div>;
 }
 
-function PageShell({ title, eyebrow, children, right, titleAction, className = "" }) {
+function PageShell({ title, eyebrow, description, breadcrumb, children, right, titleAction, className = "" }) {
   return (
-    <motion.div
-      key={title}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22 }}
+    <div
       className={cx("mx-auto px-5 py-6 md:px-8", className || "max-w-[1640px]")}
     >
+      {breadcrumb ? <div className="mb-4">{breadcrumb}</div> : null}
       <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="relative">
           {eyebrow ? <div className="mb-2 text-xs text-zinc-500">{eyebrow}</div> : null}
           {titleAction ? <div className="mb-2 md:absolute md:-left-12 md:top-1 md:mb-0">{titleAction}</div> : null}
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{title}</h1>
+          <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{title}</h1>
+          {description ? <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">{description}</p> : null}
         </div>
         {right}
       </div>
       {children}
-    </motion.div>
+    </div>
   );
 }
 
@@ -1369,6 +1745,7 @@ function TooltipBox({ active, payload, label }) {
 function initialAppPage() {
   const pathPage = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, "");
   if (pathPage.startsWith("pitches/")) return "pitches";
+  if (pathPage.startsWith("stories/")) return "stories";
   return navItems.some((item) => item.id === pathPage) ? pathPage : "dashboard";
 }
 
@@ -1376,11 +1753,216 @@ function pagePath(page) {
   return `/${page}`;
 }
 
+function storyDetailPath(id) {
+  return `/stories/${encodeURIComponent(id)}`;
+}
+
+function initialStoryDetailId() {
+  const match = window.location.pathname.match(/^\/stories\/([^/]+)/i);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function pushAppPath(path) {
   if (window.location.pathname !== path) {
     window.history.pushState(null, "", path);
   }
   window.dispatchEvent(new Event("falcon-route-change"));
+}
+
+function isLandingRoute() {
+  const path = window.location.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  return path === "/" || path === "/landing";
+}
+
+const landingWorkflowSteps = [
+  {
+    label: "Pitch",
+    title: "Start from a real assignment queue.",
+    body: "Editors see what writers are proposing, what needs a decision, and which drafts are ready to move.",
+  },
+  {
+    label: "Draft",
+    title: "Keep the article in Google Docs.",
+    body: "Line edits and comments stay in the Doc, while Falcon keeps the link, status, deadline, and editor context close.",
+  },
+  {
+    label: "Review",
+    title: "Make the next step obvious.",
+    body: "Submitted, in review, needs revision, ready for publish, returned, and published all read as plain workflow states.",
+  },
+  {
+    label: "Publish",
+    title: "Carry records into the archive.",
+    body: "Article metadata, sources, interviewees, and publication details stay connected after the story leaves the draft queue.",
+  },
+];
+
+const landingDeskRows = [
+  ["Senior Parking Rules", "Submitted", "Today"],
+  ["Robotics Build Week", "Needs Revision", "May 20"],
+  ["Cafeteria Menu Changes", "Ready for Publish", "May 21"],
+];
+
+function LandingPage() {
+  const reduceMotion = useReducedMotion();
+  const revealInitial = reduceMotion ? false : { opacity: 0, y: 18 };
+  const revealAnimate = { opacity: 1, y: 0 };
+  const revealTransition = { duration: 0.7, ease: [0.19, 1, 0.22, 1] };
+
+  return (
+    <main className="landing-page">
+      <section className="landing-hero" aria-labelledby="landing-title">
+        <LandingDeskScene />
+        <nav className="landing-nav" aria-label="Landing navigation">
+          <a href="/" className="landing-mark" aria-label="Falcon Newsroom home">
+            <span>F</span>
+            <strong>Falcon Newsroom</strong>
+          </a>
+          <div className="landing-nav-links">
+            <a href="#workflow">Workflow</a>
+            <a href="#review">Docs review</a>
+            <a href="/dashboard">Open app</a>
+          </div>
+        </nav>
+
+        <div className="landing-hero-copy">
+          <p className="landing-kicker">For student editors and advisers</p>
+          <h1 id="landing-title">Falcon Newsroom</h1>
+          <p className="landing-hero-lede">
+            Move school journalism from scattered Classroom submissions to one live editorial desk.
+          </p>
+          <p className="landing-hero-body">
+            Pitches, Google Doc drafts, deadlines, sources, and publish-ready review stay visible without pulling writers out of the tools they already use.
+          </p>
+          <div className="landing-mobile-queue" aria-hidden="true">
+            <span>Draft queue: 3 ready</span>
+          </div>
+          <div className="landing-actions" aria-label="Primary actions">
+            <a className="landing-action-primary" href="/dashboard">Open newsroom</a>
+            <a className="landing-action-secondary" href="/stories">Review stories</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" className="landing-section landing-section-flow" aria-labelledby="workflow-title">
+        <div className="landing-section-heading">
+          <p className="landing-kicker">Editorial flow</p>
+          <h2 id="workflow-title">Every draft has a next move.</h2>
+          <p>
+            Falcon gives editors the review queue Google Classroom never quite becomes, while Google Docs remains the place for line edits and detailed feedback.
+          </p>
+        </div>
+        <ol className="landing-workflow-list">
+          {landingWorkflowSteps.map((step, index) => (
+            <motion.li
+              key={step.label}
+              initial={revealInitial}
+              whileInView={revealAnimate}
+              viewport={{ once: true, amount: 0.25 }}
+              transition={{ ...revealTransition, delay: reduceMotion ? 0 : index * 0.06 }}
+            >
+              <span>{step.label}</span>
+              <div>
+                <h3>{step.title}</h3>
+                <p>{step.body}</p>
+              </div>
+            </motion.li>
+          ))}
+        </ol>
+      </section>
+
+      <section id="review" className="landing-section landing-section-review" aria-labelledby="review-title">
+        <motion.div
+          className="landing-review-copy"
+          initial={revealInitial}
+          whileInView={revealAnimate}
+          viewport={{ once: true, amount: 0.35 }}
+          transition={revealTransition}
+        >
+          <p className="landing-kicker">Docs stay central</p>
+          <h2 id="review-title">Open the draft first. Update the workflow second.</h2>
+          <p>
+            Editors can jump straight into the Google Doc, return a draft, mark it ready, or link a missing Doc without turning review into another inbox.
+          </p>
+        </motion.div>
+        <motion.div
+          className="landing-doc-rail"
+          aria-label="Google Doc workflow preview"
+          initial={revealInitial}
+          whileInView={revealAnimate}
+          viewport={{ once: true, amount: 0.25 }}
+          transition={revealTransition}
+        >
+          <div className="landing-doc-title">Robotics Build Week</div>
+          <div className="landing-doc-meta">By Daniel Wu, editor: Ava Patel</div>
+          <div className="landing-doc-action">Open Google Doc</div>
+          <div className="landing-doc-action landing-doc-action-secondary">Status: Needs Revision</div>
+          <p>Scene detail needed. Clarify the competition stakes before another editor pass.</p>
+        </motion.div>
+      </section>
+
+      <section className="landing-section landing-section-fit" aria-labelledby="fit-title">
+        <div className="landing-section-heading">
+          <p className="landing-kicker">Why it fits a newsroom</p>
+          <h2 id="fit-title">Designed around deadlines, not dashboards.</h2>
+        </div>
+        <div className="landing-fit-grid">
+          <div>
+            <h3>For editors</h3>
+            <p>See which drafts need attention, who owns them, and where the feedback belongs.</p>
+          </div>
+          <div>
+            <h3>For writers</h3>
+            <p>Keep working in Docs while the submission stays visible to the newsroom.</p>
+          </div>
+          <div>
+            <h3>For advisers</h3>
+            <p>Check the publication pipeline without rebuilding the whole class workflow.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-final" aria-labelledby="final-title">
+        <div>
+          <p className="landing-kicker">Ready for the copy desk</p>
+          <h2 id="final-title">Give every story a visible path from pitch to publish.</h2>
+        </div>
+        <a className="landing-action-primary" href="/dashboard">Enter Falcon Newsroom</a>
+      </section>
+    </main>
+  );
+}
+
+function LandingDeskScene() {
+  return (
+    <div className="landing-desk-scene" aria-hidden="true">
+      <div className="landing-desk-grid" />
+      <div className="landing-paper landing-paper-main">
+        <div className="landing-paper-heading">
+          <span>Draft queue</span>
+          <strong>May issue</strong>
+        </div>
+        {landingDeskRows.map((row) => (
+          <div className="landing-paper-row" key={row[0]}>
+            <span>{row[0]}</span>
+            <span>{row[1]}</span>
+            <span>{row[2]}</span>
+          </div>
+        ))}
+      </div>
+      <div className="landing-paper landing-paper-doc">
+        <div className="landing-doc-lines">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="landing-editor-note">Comment: tighten the nut graf</div>
+      </div>
+      <div className="landing-deadline-strip">Deadline: Today</div>
+      <div className="landing-source-strip">Sources confirmed: 5</div>
+    </div>
+  );
 }
 
 function AppShell() {
@@ -1393,7 +1975,7 @@ function AppShell() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [articleExtractorOpen, setArticleExtractorOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState("a1");
-  const [toast, setToast] = useState("Prototype ready: live article records load when the backend is running.");
+  const [toast, setToast] = useState("");
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
 
@@ -1432,6 +2014,13 @@ function AppShell() {
     setToast(`Updated story to ${status}.`);
   };
 
+  const updateStoryDocLink = (id, googleDocUrl) => {
+    setStories((prev) => prev.map((story) => (
+      story.id === id ? { ...story, googleDocUrl, lastEdited: "Updated just now" } : story
+    )));
+    setToast("Linked Google Doc.");
+  };
+
   const updateTaskStatus = (id, status) => {
     setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, status } : task)));
     setToast(`Updated task to ${status}.`);
@@ -1464,7 +2053,7 @@ function AppShell() {
   const pages = {
     dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
     pitches: <PitchBoardPage setToast={setToast} />,
-    stories: <StoriesPage stories={stories} updateStoryStatus={updateStoryStatus} setToast={setToast} />,
+    stories: <StoriesPage stories={stories} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
     interviewees: <IntervieweesPage />,
@@ -1507,12 +2096,12 @@ function AppShell() {
                 <span className="font-medium">Falcon</span>
               </div>
               <HeaderBreadcrumb page={page} locationPath={locationPath} navigatePage={navigatePage} />
-              <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 sm:flex">
                 <Button variant="ghost" icon="bell" className="hidden sm:inline-flex">
                   Alerts
                 </Button>
-                <Button icon="plus" onClick={() => setQuickCreateOpen(true)}>
-                  Create
+                <Button icon="plus" onClick={() => setQuickCreateOpen(true)} className="h-9 w-9 px-0 sm:h-auto sm:w-auto sm:px-3.5">
+                  <span className="sr-only sm:not-sr-only">Create</span>
                 </Button>
                 <div className="ml-1 flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-xs font-semibold">AP</div>
               </div>
@@ -1530,7 +2119,7 @@ function AppShell() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
             {pages[page]}
           </div>
         </main>
@@ -1545,6 +2134,7 @@ function AppShell() {
 function HeaderBreadcrumb({ page, locationPath, navigatePage }) {
   const pageLabel = navItems.find((item) => item.id === page)?.label || "Dashboard";
   const isPitchDetail = page === "pitches" && locationPath.toLowerCase().startsWith("/pitches/");
+  const isStoryDetail = page === "stories" && locationPath.toLowerCase().startsWith("/stories/");
 
   return (
     <div className="hidden min-w-0 flex-1 items-center gap-3 lg:flex">
@@ -1557,6 +2147,14 @@ function HeaderBreadcrumb({ page, locationPath, navigatePage }) {
           </button>
           <span className="text-zinc-700">/</span>
           <span className="truncate text-sm font-medium text-zinc-50">Pitch review</span>
+        </>
+      ) : isStoryDetail ? (
+        <>
+          <button type="button" onClick={() => navigatePage("stories")} className="text-sm text-zinc-400 transition hover:text-zinc-100">
+            Stories
+          </button>
+          <span className="text-zinc-700">/</span>
+          <span className="truncate text-sm font-medium text-zinc-50">Story review</span>
         </>
       ) : (
         <span className="truncate text-sm font-medium text-zinc-50">{pageLabel}</span>
@@ -2648,25 +3246,30 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
   );
 }
 
-function StoriesPage({ stories, updateStoryStatus, setToast }) {
+function StoriesPage({ stories, updateStoryStatus, updateStoryDocLink, setToast }) {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All statuses");
   const [sectionFilter, setSectionFilter] = useState("All sections");
-  const [editorFilter, setEditorFilter] = useState("All editors");
-  const [selectedStoryId, setSelectedStoryId] = useState(stories[0]?.id || "");
+  const [detailStoryId, setDetailStoryId] = useState(initialStoryDetailId);
 
+  useEffect(() => {
+    const syncFromPath = () => setDetailStoryId(initialStoryDetailId());
+    window.addEventListener("popstate", syncFromPath);
+    window.addEventListener("falcon-route-change", syncFromPath);
+    return () => {
+      window.removeEventListener("popstate", syncFromPath);
+      window.removeEventListener("falcon-route-change", syncFromPath);
+    };
+  }, []);
+
+  const activeStories = useMemo(() => stories.filter(isActiveStory), [stories]);
   const visibleStories = useMemo(
-    () => stories.filter((story) => storyMatchesFilters(story, query, statusFilter, sectionFilter, editorFilter)),
-    [stories, query, statusFilter, sectionFilter, editorFilter]
+    () =>
+      activeStories.filter((story) => {
+        return storyMatchesFilters(story, query, "All statuses", sectionFilter);
+      }),
+    [activeStories, query, sectionFilter]
   );
-  const selectedStory = stories.find((story) => story.id === selectedStoryId) || visibleStories[0] || stories[0];
-  const needsAttention = stories.filter(storyNeedsAttention).length;
-  const dueSoon = stories.filter((story) => story.dueSoon && story.status !== "Published").length;
-  const unreadSubmissions = stories.filter((story) => story.unread).length;
-
-  const selectStory = (story) => {
-    setSelectedStoryId(story.id);
-  };
+  const detailStory = stories.find((story) => story.id === detailStoryId) || null;
 
   const copyStoryDoc = async (story) => {
     if (!storyDocIsOpenable(story)) {
@@ -2681,240 +3284,293 @@ function StoriesPage({ stories, updateStoryStatus, setToast }) {
     }
   };
 
+  const navigateToStories = () => {
+    setDetailStoryId(null);
+    pushAppPath("/stories");
+  };
+
+  const navigateToStory = (story) => {
+    setDetailStoryId(story.id);
+    pushAppPath(storyDetailPath(story.id));
+  };
+
+  if (detailStoryId) {
+    return (
+      <StoryDetailPage
+        story={detailStory}
+        onBack={navigateToStories}
+        updateStoryStatus={updateStoryStatus}
+        updateStoryDocLink={updateStoryDocLink}
+        copyStoryDoc={copyStoryDoc}
+        setToast={setToast}
+      />
+    );
+  }
+
   return (
     <PageShell
       title="Stories"
-      eyebrow="Editorial queue / Google Docs review"
-      right={
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" icon="filter" onClick={() => {
-            setStatusFilter("Submitted");
-            setSectionFilter("All sections");
-            setEditorFilter("All editors");
-          }}>
-            New submissions
-          </Button>
-          <Button variant="ghost" icon="link" onClick={() => selectedStory && copyStoryDoc(selectedStory)}>
-            Copy selected doc
-          </Button>
-        </div>
-      }
+      eyebrow="Editorial workflow"
+      description="Scan active Google Doc drafts by review state, then open a story for notes, source checks, and approval actions."
     >
-      <div className="mb-5 grid gap-3 md:grid-cols-3">
-        <StoryQueueMetric label="Needs attention" value={needsAttention} helper="Submitted, in-review, or missing-doc stories" tone="blue" />
-        <StoryQueueMetric label="Due soon" value={dueSoon} helper="Deadlines marked today or tomorrow" tone="amber" />
-        <StoryQueueMetric label="Unread submissions" value={unreadSubmissions} helper="New writer activity waiting for an editor" tone="green" />
-      </div>
+      <section className="mb-5 grid gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
+        <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
+        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="h-10" />
+      </section>
 
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card className="p-5">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row">
-            <Input value={query} onChange={setQuery} placeholder="Search title, writer, editor, section, or next step" className="flex-1" />
-            <AnimatedDropdown
-              text={statusFilter}
-              items={STORY_FILTER_STATUSES.map((name) => ({ name, link: "#" }))}
-              onSelect={(item) => setStatusFilter(item.name)}
-              className="lg:w-52"
+      <section className="grid gap-4 lg:grid-cols-3" aria-label="Story workflow board">
+        {STORY_WORKFLOW_COLUMNS.map((column) => {
+          const columnStories = visibleStories.filter((story) => column.statuses.includes(story.status));
+          return (
+            <StoryKanbanColumn
+              key={column.id}
+              column={column}
+              stories={columnStories}
+              total={activeStories.filter((story) => column.statuses.includes(story.status)).length}
+              onOpenStory={navigateToStory}
             />
-            <AnimatedDropdown
-              text={sectionFilter}
-              items={STORY_FILTER_SECTIONS.map((name) => ({ name, link: "#" }))}
-              onSelect={(item) => setSectionFilter(item.name)}
-              className="lg:w-52"
-            />
-            <AnimatedDropdown
-              text={editorFilter}
-              items={STORY_FILTER_EDITORS.map((name) => ({ name, link: "#" }))}
-              onSelect={(item) => setEditorFilter(item.name)}
-              className="lg:w-48"
-            />
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-white/[0.035] text-xs uppercase text-zinc-600">
-                <tr>
-                  <th className="px-4 py-3">Story</th>
-                  <th className="hidden px-4 py-3 md:table-cell">Owner</th>
-                  <th className="hidden px-4 py-3 lg:table-cell">Deadline</th>
-                  <th className="px-4 py-3">Doc</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleStories.map((story) => {
-                  const hasDoc = storyDocIsOpenable(story);
-                  return (
-                    <tr
-                      key={story.id}
-                      onClick={() => selectStory(story)}
-                      className={cx(
-                        "cursor-pointer border-t border-white/[0.06] transition hover:bg-white/[0.04]",
-                        selectedStory?.id === story.id && "bg-white/[0.055]"
-                      )}
-                    >
-                      <td className="px-4 py-4 align-top">
-                        <div className="flex items-start gap-3">
-                          <span className={cx("mt-1 h-2.5 w-2.5 rounded-full", story.unread ? "bg-sky-400" : "bg-zinc-700")} />
-                          <div className="min-w-0">
-                            <div className="font-medium leading-5 text-zinc-100">{story.title}</div>
-                            <div className="mt-1 text-xs text-zinc-500">{story.section} / Last edited {story.lastEdited}</div>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <StatusBadge tone={storyStatusTone(story.status)}>{story.status}</StatusBadge>
-                              <StatusBadge tone={story.priority === "High" ? "amber" : "neutral"}>{story.priority}</StatusBadge>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="hidden px-4 py-4 align-top text-zinc-400 md:table-cell">
-                        <div>{story.writer}</div>
-                        <div className="mt-1 text-xs text-zinc-600">Editor: {story.editor}</div>
-                      </td>
-                      <td className="hidden px-4 py-4 align-top lg:table-cell">
-                        <span className={cx("text-sm", story.dueSoon ? "text-amber-300" : "text-zinc-500")}>{story.deadline}</span>
-                        <div className="mt-1 text-xs text-zinc-600">{story.submittedAt}</div>
-                      </td>
-                      <td className="px-4 py-4 align-top">
-                        {hasDoc ? (
-                          <a
-                            href={story.googleDocUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(event) => event.stopPropagation()}
-                            className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-xs font-medium text-zinc-200 transition hover:bg-white/[0.07] hover:text-zinc-50"
-                          >
-                            <Icon name="link" className="h-3.5 w-3.5" />
-                            Open Google Doc
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center gap-2 rounded-xl border border-rose-400/15 bg-rose-400/10 px-3 py-2 text-xs font-medium text-rose-300">
-                            <Icon name="x" className="h-3.5 w-3.5" />
-                            Doc unavailable
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {!visibleStories.length && (
-              <StateMessage
-                icon="search"
-                title="No stories match these filters"
-                body="Clear a filter or search for another writer, editor, section, status, or next step."
-              />
-            )}
-          </div>
-        </Card>
-
-        <StoryDetailPanel
-          story={selectedStory}
-          updateStoryStatus={updateStoryStatus}
-          copyStoryDoc={copyStoryDoc}
-        />
-      </div>
+          );
+        })}
+      </section>
     </PageShell>
   );
 }
 
-function StoryQueueMetric({ label, value, helper, tone }) {
-  const toneClasses = {
-    blue: "text-sky-300",
-    amber: "text-amber-300",
-    green: "text-emerald-300",
-  };
+function StoryKanbanColumn({ column, stories, total, onOpenStory }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className={cx("mt-2 text-3xl font-semibold", toneClasses[tone])}>{value}</div>
-      <div className="mt-2 text-xs leading-5 text-zinc-600">{helper}</div>
-    </div>
+    <section className="min-w-0 rounded-xl border border-white/[0.08] bg-white/[0.025]">
+      <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] px-3 py-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-zinc-100">{column.title}</h2>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">{column.description}</p>
+        </div>
+        <span className="text-xs font-medium text-zinc-500">{total}</span>
+      </div>
+      <div className="space-y-2 p-2">
+        {stories.map((story) => (
+          <StoryOverviewCard key={story.id} story={story} onOpen={() => onOpenStory(story)} />
+        ))}
+        {!stories.length ? (
+          <div className="rounded-lg border border-dashed border-white/[0.08] px-3 py-8 text-center text-sm text-zinc-600">
+            No stories in this lane.
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
-function StoryDetailPanel({ story, updateStoryStatus, copyStoryDoc }) {
+function StoryOverviewCard({ story, onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-white/[0.07] bg-black/20 px-3 py-2.5 text-left transition hover:border-white/[0.16] hover:bg-white/[0.045] focus:outline-none focus:ring-2 focus:ring-white/15"
+      aria-label={`Open story ${story.title}`}
+    >
+      <div className="min-w-0">
+        <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{story.title}</h3>
+        <p className="mt-1 truncate text-xs text-zinc-500">By {story.writer}</p>
+        <p className="mt-2 text-xs text-zinc-500">Deadline {story.deadline}</p>
+      </div>
+      <div className="flex h-full min-h-16 items-center">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition group-hover:border-white/[0.18] group-hover:text-zinc-100">
+          <Icon name="chevron" className="h-4 w-4 -rotate-90" />
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink, copyStoryDoc, setToast }) {
+  const [draftDocUrl, setDraftDocUrl] = useState("");
+  const [commentDraft, setCommentDraft] = useState("");
+  const [showDocTools, setShowDocTools] = useState(false);
+
+  useEffect(() => {
+    setDraftDocUrl("");
+    setCommentDraft("");
+    setShowDocTools(false);
+  }, [story?.id]);
+
   if (!story) {
     return (
-      <Card className="flex min-h-[560px] items-center justify-center p-5">
-        <div className="max-w-sm text-center">
-          <h3 className="text-lg font-semibold text-zinc-100">Select a story</h3>
-          <p className="mt-3 text-sm leading-6 text-zinc-500">Story metadata and Google Doc actions will appear here.</p>
-        </div>
-      </Card>
+      <PageShell
+        title="Story unavailable"
+        eyebrow="Stories"
+        description="This story may have been removed from the active queue."
+        titleAction={<Button variant="ghost" onClick={onBack}>Back</Button>}
+      >
+        <StateMessage icon="article" title="Story not found" body="Return to the Stories board and choose another active story." />
+      </PageShell>
     );
   }
 
   const hasDoc = storyDocIsOpenable(story);
+  const workflowAction = storyWorkflowAction(story);
+  const activityItems = storyActivityItems(story);
+
+  const linkStoryDoc = () => {
+    const nextUrl = draftDocUrl.trim();
+    if (!isValidHttpUrl(nextUrl)) {
+      setToast("Paste a valid Google Doc link.");
+      return;
+    }
+    updateStoryDocLink(story.id, nextUrl);
+    setDraftDocUrl("");
+    setShowDocTools(false);
+  };
+
+  const addComment = () => {
+    if (!commentDraft.trim()) {
+      setToast("Write a comment before adding it.");
+      return;
+    }
+    setCommentDraft("");
+    setToast("Comments are ready for backend wiring.");
+  };
+
   return (
-    <Card className="p-5">
-      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-5">
-        <div>
-          <div className="mb-2 flex flex-wrap gap-2">
-            <StatusBadge tone={storyStatusTone(story.status)}>{story.status}</StatusBadge>
-            <StatusBadge tone={story.dueSoon ? "amber" : "neutral"}>{story.deadline}</StatusBadge>
-          </div>
-          <h2 className="text-xl font-semibold leading-7 text-zinc-50">{story.title}</h2>
-          <p className="mt-2 text-sm text-zinc-500">{story.section} / {story.writer} / Editor: {story.editor}</p>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {hasDoc ? (
-            <a
-              href={story.googleDocUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 text-sm font-medium text-black transition hover:bg-white"
-            >
-              <Icon name="link" className="h-4 w-4" />
-              Open Google Doc
-            </a>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="inline-flex h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-rose-400/15 bg-rose-400/10 px-4 text-sm font-medium text-rose-300 opacity-75"
-            >
-              <Icon name="x" className="h-4 w-4" />
-              Google Doc unavailable
-            </button>
-          )}
-          <Button variant="ghost" icon="link" onClick={() => copyStoryDoc(story)} disabled={!hasDoc}>
-            Copy link
-          </Button>
-        </div>
-      </div>
+    <div className="mx-auto max-w-[1280px] px-5 py-6 md:px-8">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <main className="min-w-0">
+          <header className="border-b border-white/[0.14] pb-8">
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
+            <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+          </header>
 
-      <div className="grid gap-4 border-b border-white/[0.08] py-5 sm:grid-cols-3">
-        <MiniStat label="Words" value={fmt(story.wordCount)} />
-        <MiniStat label="Sources" value={story.sourceCount} />
-        <MiniStat label="Revisions" value={story.revisionCount} />
-      </div>
+          <section className="border-b border-white/[0.12] py-8">
+            <h2 className="text-sm font-semibold text-zinc-100">Story summary</h2>
+            <p className="mt-4 max-w-3xl break-words text-lg leading-8 text-zinc-100">{story.summary}</p>
+          </section>
 
-      <div className="space-y-5 py-5">
-        <div>
-          <div className="text-xs text-zinc-600">Summary</div>
-          <p className="mt-2 text-sm leading-6 text-zinc-300">{story.summary}</p>
-        </div>
-        <div>
-          <div className="text-xs text-zinc-600">Next step</div>
-          <p className="mt-2 text-sm leading-6 text-zinc-300">{story.nextStep}</p>
-        </div>
-        <div>
-          <div className="text-xs text-zinc-600">Editor note</div>
-          <p className="mt-2 rounded-2xl border border-white/[0.08] bg-black/25 p-3 text-sm leading-6 text-zinc-400">{story.editorNote}</p>
-        </div>
-      </div>
+          <section className="py-8">
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-50">Activity</h2>
+            <div className="mt-5 space-y-4">
+              {activityItems.map((item, index) => (
+                <div key={item.id} className="flex items-start gap-3">
+                  <div className={cx("mt-2 h-1.5 w-1.5 rounded-full", index === 0 ? "bg-zinc-300" : "bg-zinc-600")} />
+                  <div className="min-w-0">
+                    <p className={cx("break-words text-sm", index === 0 ? "font-medium text-zinc-300" : "text-zinc-500")}>{item.text}</p>
+                    <p className="mt-1 text-xs text-zinc-600">{item.time}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </main>
 
-      <div className="border-t border-white/[0.08] pt-5">
-        <label className="text-xs text-zinc-600">
-          Workflow status
-          <Select value={story.status} onChange={(status) => updateStoryStatus(story.id, status)} options={STORY_STATUSES} className="mt-2" />
-        </label>
-        <div className="mt-4 grid gap-3 text-sm text-zinc-500 sm:grid-cols-2">
-          <Field label="Submitted" value={story.submittedAt} />
-          <Field label="Last edited" value={story.lastEdited} />
-        </div>
+        <aside className="min-w-0 space-y-4">
+          <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
+            <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <h2 className="text-lg font-medium text-zinc-100">Review</h2>
+              <span className="text-sm text-zinc-500">{story.status}</span>
+            </div>
+            {hasDoc ? (
+              <StoryAttachment story={story} onCopy={() => copyStoryDoc(story)} compact />
+            ) : (
+              <div className="rounded-xl border border-white/[0.14] px-4 py-3 text-sm text-zinc-400">Doc unavailable</div>
+            )}
+
+            <Button variant="ghost" icon="plus" onClick={() => setShowDocTools((current) => !current)} className="mt-4 w-full rounded-full">
+              Add or create
+            </Button>
+
+            {showDocTools ? (
+              <div className="mt-3 space-y-2">
+                <Input value={draftDocUrl} onChange={setDraftDocUrl} placeholder="Paste Google Doc link" />
+                <Button icon="link" onClick={linkStoryDoc} className="w-full">Link doc</Button>
+              </div>
+            ) : null}
+
+            <div className="mt-4 space-y-2">
+              {story.status !== "Returned" && story.status !== "Needs Revision" ? (
+                <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
+              ) : null}
+              {workflowAction ? (
+                <Button onClick={() => updateStoryStatus(story.id, workflowAction.nextStatus)} className="w-full rounded-full">{workflowAction.label}</Button>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
+            <h2 className="text-base font-medium text-zinc-100">Private comments</h2>
+            <div className="mt-4 flex gap-2">
+              <input
+                value={commentDraft}
+                onChange={(event) => setCommentDraft(event.target.value)}
+                placeholder="Add private comment..."
+                className="h-10 min-w-0 flex-1 rounded-full border border-white/[0.14] bg-transparent px-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.28]"
+              />
+              <button
+                type="button"
+                onClick={addComment}
+                aria-label="Add private comment"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/[0.12] text-zinc-400 transition hover:border-white/[0.24] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20"
+              >
+                <Icon name="plus" className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-zinc-500">Visible to editors and advisers.</p>
+          </section>
+        </aside>
       </div>
-    </Card>
+    </div>
+  );
+}
+
+function StoryDetailBreadcrumb({ story, column, onBack }) {
+  return (
+    <nav className="flex min-w-0 flex-wrap items-center gap-2 text-sm" aria-label="Story breadcrumb">
+      <button type="button" onClick={onBack} className="text-zinc-400 transition hover:text-zinc-100">Stories</button>
+      <span className="text-zinc-700">/</span>
+      <span className="text-zinc-500">{column.title}</span>
+      <span className="hidden text-zinc-700 sm:inline">/</span>
+      <span className="hidden min-w-0 truncate font-medium text-zinc-100 sm:inline">{story.title}</span>
+    </nav>
+  );
+}
+
+function StoryAttachment({ story, onCopy, compact = false }) {
+  return (
+    <div className={cx("grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
+      <a
+        href={story.googleDocUrl}
+        target="_blank"
+        rel="noreferrer"
+        className={cx(
+          "grid overflow-hidden rounded-xl border border-white/[0.16] text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/20",
+          compact ? "min-h-14 grid-cols-[minmax(0,1fr)_52px]" : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
+        )}
+      >
+        <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
+          <div className="truncate text-sm font-medium text-zinc-100">{story.title}</div>
+          <div className="mt-1 text-xs text-zinc-500">Google Docs</div>
+        </div>
+        <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
+          <Icon name="article" className="h-5 w-5" />
+        </div>
+      </a>
+      {compact ? null : <Button variant="ghost" icon="link" onClick={onCopy} className="self-center">Copy link</Button>}
+    </div>
+  );
+}
+
+function StoryTextBlock({ label, children }) {
+  return (
+    <div>
+      <div className="text-xs text-zinc-500">{label}</div>
+      <p className="mt-2 break-words text-sm leading-6 text-zinc-300">{children}</p>
+    </div>
+  );
+}
+
+function StorySideLine({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className="text-zinc-500">{label}</span>
+      <span className="min-w-0 text-right font-medium text-zinc-200">{value}</span>
+    </div>
   );
 }
 
@@ -3296,15 +3952,6 @@ function ArticleDetailPanel({ article, loading }) {
         )}
       </div>
     </Card>
-  );
-}
-
-function MiniStat({ label, value }) {
-  return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-zinc-50">{value}</p>
-    </div>
   );
 }
 
@@ -4626,5 +5273,5 @@ function Integration({ name, status }) {
 }
 
 export default function FalconNewsroomFullInteractiveUI() {
-  return <AppShell />;
+  return isLandingRoute() ? <LandingPage /> : <AppShell />;
 }
