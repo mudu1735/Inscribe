@@ -174,6 +174,13 @@ const iconPaths = {
       <path d="M5 21h14" />
     </>
   ),
+  logout: (
+    <>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </>
+  ),
 };
 
 function Icon({ name, className = "h-4 w-4" }) {
@@ -315,7 +322,7 @@ const initialTasks = [
     owner: "Sofia Chen",
     status: "Review",
     priority: "High",
-    due: "Today",
+    due: "June 2, 2026",
   },
   {
     id: "t2",
@@ -351,7 +358,7 @@ const initialTasks = [
     owner: "Iris Park",
     status: "Done",
     priority: "Low",
-    due: "Yesterday",
+    due: "June 1, 2026",
   },
 ];
 
@@ -360,68 +367,73 @@ const users = [
     id: "u1",
     name: "Ava Patel",
     email: "ava@school.edu",
-    role: "Admin",
-    lastSeen: "12 min ago",
+    role: "admin",
+    lastSeen: "June 2, 2026",
   },
   {
     id: "u2",
     name: "Sofia Chen",
     email: "sofia@school.edu",
-    role: "Admin",
-    lastSeen: "1 hr ago",
+    role: "admin",
+    lastSeen: "June 2, 2026",
   },
   {
     id: "u3",
     name: "Maya Johnson",
     email: "maya@school.edu",
-    role: "Admin",
-    lastSeen: "Today",
+    role: "admin",
+    lastSeen: "June 2, 2026",
   },
   {
     id: "u4",
     name: "Noah Kim",
     email: "noah@school.edu",
-    role: "Editor",
-    lastSeen: "Yesterday",
+    role: "editor",
+    lastSeen: "June 1, 2026",
   },
   {
     id: "u5",
     name: "Mina Rao",
     email: "mina@school.edu",
-    role: "Editor",
-    lastSeen: "3 days ago",
+    role: "writer",
+    lastSeen: "May 30, 2026",
   },
   {
     id: "u6",
     name: "Daniel Wu",
     email: "daniel@school.edu",
-    role: "Viewer",
-    lastSeen: "4 days ago",
+    role: "writer",
+    lastSeen: "May 29, 2026",
   },
   {
     id: "u7",
     name: "Iris Park",
     email: "iris@school.edu",
-    role: "Viewer",
-    lastSeen: "1 week ago",
+    role: "viewer",
+    lastSeen: "May 26, 2026",
   },
 ];
 
 const ADMIN_ROLES = [
   {
-    id: "Admin",
+    id: "admin",
     label: "Admin",
     description: "Full workspace access, including users, settings, publishing, and all editorial tools.",
   },
   {
-    id: "Editor",
+    id: "editor",
     label: "Editor",
-    description: "Can create, edit, review, and publish newsroom content, but cannot manage users.",
+    description: "Can view every story and manage editorial workflow, but cannot manage users.",
   },
   {
-    id: "Viewer",
+    id: "writer",
+    label: "Writer",
+    description: "Can view assigned story work and owned pitches.",
+  },
+  {
+    id: "viewer",
     label: "Viewer",
-    description: "Read-only access to newsroom content and records.",
+    description: "Can view records, but cannot access stories, pitches, or admin tools.",
   },
 ];
 
@@ -489,11 +501,11 @@ const initialStories = [
     editor: "Maya Johnson",
     status: "Submitted",
     priority: "High",
-    deadline: "Today",
+    deadline: "June 2, 2026",
     dueSoon: true,
     submittedAt: "May 18, 2026, 8:42 AM",
-    lastEdited: "12 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconSeniorParkingDraft/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 2,
     wordCount: 842,
     sourceCount: 5,
@@ -510,11 +522,11 @@ const initialStories = [
     editor: "Noah Kim",
     status: "In Review",
     priority: "Normal",
-    deadline: "Tomorrow",
+    deadline: "June 3, 2026",
     dueSoon: true,
     submittedAt: "May 17, 2026, 5:18 PM",
-    lastEdited: "38 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconSportsPreviewDraft/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 1104,
     sourceCount: 3,
@@ -534,8 +546,8 @@ const initialStories = [
     deadline: "May 20",
     dueSoon: true,
     submittedAt: "May 16, 2026, 9:03 PM",
-    lastEdited: "Yesterday",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconRoboticsBuildWeek/edit",
+    lastEdited: "June 1, 2026",
+    googleDocUrl: "",
     revisionCount: 3,
     wordCount: 1328,
     sourceCount: 4,
@@ -555,8 +567,8 @@ const initialStories = [
     deadline: "May 21",
     dueSoon: false,
     submittedAt: "May 15, 2026, 3:24 PM",
-    lastEdited: "2 hours ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconCafeteriaMenuReady/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 2,
     wordCount: 763,
     sourceCount: 3,
@@ -576,7 +588,7 @@ const initialStories = [
     deadline: "May 24",
     dueSoon: false,
     submittedAt: "May 14, 2026, 1:02 PM",
-    lastEdited: "3 days ago",
+    lastEdited: "May 30, 2026",
     googleDocUrl: "",
     revisionCount: 1,
     wordCount: 516,
@@ -594,11 +606,11 @@ const initialStories = [
     editor: "Ava Patel",
     status: "Submitted",
     priority: "Normal",
-    deadline: "Today",
+    deadline: "June 2, 2026",
     dueSoon: true,
     submittedAt: "May 18, 2026, 10:05 AM",
-    lastEdited: "24 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconExamSleepSurvey/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 934,
     sourceCount: 4,
@@ -615,11 +627,11 @@ const initialStories = [
     editor: "Maya Johnson",
     status: "Drafting",
     priority: "Normal",
-    deadline: "Tomorrow",
+    deadline: "June 3, 2026",
     dueSoon: true,
     submittedAt: "May 18, 2026, 9:20 AM",
-    lastEdited: "1 hr ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconSpringShowcase/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 488,
     sourceCount: 2,
@@ -639,8 +651,8 @@ const initialStories = [
     deadline: "May 20",
     dueSoon: true,
     submittedAt: "May 17, 2026, 7:11 PM",
-    lastEdited: "2 hrs ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconBaseballPitchers/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 312,
     sourceCount: 2,
@@ -660,8 +672,8 @@ const initialStories = [
     deadline: "May 20",
     dueSoon: true,
     submittedAt: "May 16, 2026, 2:46 PM",
-    lastEdited: "36 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconLibraryQuietHours/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 2,
     wordCount: 621,
     sourceCount: 3,
@@ -681,8 +693,8 @@ const initialStories = [
     deadline: "May 23",
     dueSoon: false,
     submittedAt: "May 15, 2026, 8:30 AM",
-    lastEdited: "Yesterday",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconRoboticsOutreach/edit",
+    lastEdited: "June 1, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 0,
     sourceCount: 0,
@@ -702,8 +714,8 @@ const initialStories = [
     deadline: "May 21",
     dueSoon: false,
     submittedAt: "May 17, 2026, 4:09 PM",
-    lastEdited: "3 hrs ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconPhoneRulesOpinion/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 708,
     sourceCount: 2,
@@ -720,11 +732,11 @@ const initialStories = [
     editor: "Noah Kim",
     status: "In Review",
     priority: "High",
-    deadline: "Today",
+    deadline: "June 2, 2026",
     dueSoon: true,
     submittedAt: "May 18, 2026, 11:22 AM",
-    lastEdited: "16 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconLunchWavePhotos/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 284,
     sourceCount: 3,
@@ -744,8 +756,8 @@ const initialStories = [
     deadline: "May 22",
     dueSoon: false,
     submittedAt: "May 16, 2026, 6:40 PM",
-    lastEdited: "Yesterday",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconCompostPilot/edit",
+    lastEdited: "June 1, 2026",
+    googleDocUrl: "",
     revisionCount: 2,
     wordCount: 1018,
     sourceCount: 5,
@@ -765,8 +777,8 @@ const initialStories = [
     deadline: "May 25",
     dueSoon: false,
     submittedAt: "May 15, 2026, 12:18 PM",
-    lastEdited: "2 days ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconTheaterSet/edit",
+    lastEdited: "May 31, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 557,
     sourceCount: 2,
@@ -786,8 +798,8 @@ const initialStories = [
     deadline: "May 22",
     dueSoon: false,
     submittedAt: "May 14, 2026, 9:55 PM",
-    lastEdited: "4 hrs ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconMathTeamRegionals/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 2,
     wordCount: 678,
     sourceCount: 3,
@@ -807,8 +819,8 @@ const initialStories = [
     deadline: "May 24",
     dueSoon: false,
     submittedAt: "May 13, 2026, 3:02 PM",
-    lastEdited: "Today",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconStartTimeProposal/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 401,
     sourceCount: 3,
@@ -828,8 +840,8 @@ const initialStories = [
     deadline: "May 27",
     dueSoon: false,
     submittedAt: "May 12, 2026, 1:47 PM",
-    lastEdited: "2 days ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconSeniorMap/edit",
+    lastEdited: "May 31, 2026",
+    googleDocUrl: "",
     revisionCount: 0,
     wordCount: 0,
     sourceCount: 0,
@@ -849,8 +861,8 @@ const initialStories = [
     deadline: "May 21",
     dueSoon: false,
     submittedAt: "May 18, 2026, 7:58 AM",
-    lastEdited: "48 min ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconLacrosseCaptains/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 849,
     sourceCount: 4,
@@ -870,8 +882,8 @@ const initialStories = [
     deadline: "May 23",
     dueSoon: false,
     submittedAt: "May 17, 2026, 8:33 PM",
-    lastEdited: "1 hr ago",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconAIClubWorkshop/edit",
+    lastEdited: "June 2, 2026",
+    googleDocUrl: "",
     revisionCount: 1,
     wordCount: 779,
     sourceCount: 3,
@@ -892,7 +904,7 @@ const initialStories = [
     dueSoon: false,
     submittedAt: "May 7, 2026, 10:15 AM",
     lastEdited: "May 7, 2026",
-    googleDocUrl: "https://docs.google.com/document/d/1FalconSnapchatPublished/edit",
+    googleDocUrl: "",
     revisionCount: 4,
     wordCount: 987,
     sourceCount: 4,
@@ -920,10 +932,10 @@ const initialPitches = [
     notes: "Could work well with a sidebar showing what clubs learned from fall signups.",
     editorFeedback: "Strong service angle. Narrow the reporting to three clubs and include one adviser voice.",
     comments: [
-      { id: "c1", author: "Ava", text: "Ask each club for one specific tactic that changed attendance.", time: "10 min ago" },
-      { id: "c2", author: "Iris", text: "I can report this by Friday if the robotics lead replies.", time: "4 min ago" },
+      { id: "c1", author: "Ava", text: "Ask each club for one specific tactic that changed attendance.", time: "June 2, 2026" },
+      { id: "c2", author: "Iris", text: "I can report this by Friday if the robotics lead replies.", time: "June 2, 2026" },
     ],
-    updatedAt: "4 min ago",
+    updatedAt: "June 2, 2026",
   },
   {
     id: "p2",
@@ -935,8 +947,8 @@ const initialPitches = [
     submittedAt: "May 13, 2026",
     notes: "Needs a counselor interview and a student survey before drafting.",
     editorFeedback: "",
-    comments: [{ id: "c3", author: "Noah", text: "Could pair with a simple schedule graphic.", time: "Yesterday" }],
-    updatedAt: "Yesterday",
+    comments: [{ id: "c3", author: "Noah", text: "Could pair with a simple schedule graphic.", time: "June 1, 2026" }],
+    updatedAt: "June 1, 2026",
   },
   {
     id: "p3",
@@ -948,8 +960,8 @@ const initialPitches = [
     submittedAt: "May 11, 2026",
     notes: "Approved for a reported feature. Photo request should go in early.",
     editorFeedback: "Move forward. Keep the tone practical and avoid turning this into a medical advice piece.",
-    comments: [{ id: "c4", author: "Ava", text: "Approved for next week's sports package.", time: "2 days ago" }],
-    updatedAt: "2 days ago",
+    comments: [{ id: "c4", author: "Ava", text: "Approved for next week's sports package.", time: "May 31, 2026" }],
+    updatedAt: "May 31, 2026",
   },
   {
     id: "p4",
@@ -961,8 +973,8 @@ const initialPitches = [
     submittedAt: "May 10, 2026",
     notes: "Hold until food services can confirm interview availability.",
     editorFeedback: "Keep this on hold. It needs access before it can become a fair story.",
-    comments: [{ id: "c5", author: "Maya", text: "Revisit after the schedule changes are announced.", time: "3 days ago" }],
-    updatedAt: "3 days ago",
+    comments: [{ id: "c5", author: "Maya", text: "Revisit after the schedule changes are announced.", time: "May 30, 2026" }],
+    updatedAt: "May 30, 2026",
   },
   {
     id: "p5",
@@ -975,7 +987,7 @@ const initialPitches = [
     notes: "Needs permission checks for early morning access.",
     editorFeedback: "",
     comments: [],
-    updatedAt: "This morning",
+    updatedAt: "June 2, 2026",
   },
   {
     id: "p6",
@@ -987,14 +999,20 @@ const initialPitches = [
     submittedAt: "May 12, 2026",
     notes: "Could include photos of planner layouts if students agree.",
     editorFeedback: "Fun, but it needs a sharper nut graf. Find the larger behavior behind the trend.",
-    comments: [{ id: "c6", author: "Iris", text: "I know two students who would talk about this.", time: "1 day ago" }],
-    updatedAt: "1 day ago",
+    comments: [{ id: "c6", author: "Iris", text: "I know two students who would talk about this.", time: "June 1, 2026" }],
+    updatedAt: "June 1, 2026",
   },
 ];
 
 const cx = (...classes) => classes.filter(Boolean).join(" ");
 const fmt = (n) => n.toLocaleString("en-US");
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const FALLBACK_ACCOUNT = {
+  email: "",
+  firstName: "Newsroom",
+  lastName: "User",
+  role: "viewer",
+};
 const ARTICLE_PAGE_SIZE = 10;
 const EXTRACTOR_ADDED_BY = "Editor";
 const EXTRACTOR_GRADE_OPTIONS = ["", "9", "10", "11", "12", "Staff"];
@@ -1011,6 +1029,150 @@ function firstText(...values) {
     if (text) return text;
   }
   return "";
+}
+
+function accountDisplayName(user) {
+  const firstName = asText(user?.firstName);
+  const lastName = asText(user?.lastName);
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || asText(user?.email) || "Newsroom user";
+}
+
+function accountInitials(user) {
+  const nameParts = accountDisplayName(user).split(/\s+/).filter(Boolean);
+  const source = nameParts.length >= 2 ? [nameParts[0], nameParts[nameParts.length - 1]] : nameParts;
+  const initials = source.map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return initials || "FN";
+}
+
+function accountRoleLabel(role) {
+  const value = asText(role);
+  return value ? value[0].toUpperCase() + value.slice(1) : "Viewer";
+}
+
+function monthDayYear(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatDisplayDate(value) {
+  const raw = asText(value);
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  const now = new Date();
+  if (["today", "just now", "this morning", "updated just now"].includes(lower)) {
+    return monthDayYear(now);
+  }
+  if (lower === "yesterday") {
+    const date = new Date(now);
+    date.setDate(date.getDate() - 1);
+    return monthDayYear(date);
+  }
+  if (lower === "tomorrow") {
+    const date = new Date(now);
+    date.setDate(date.getDate() + 1);
+    return monthDayYear(date);
+  }
+  const relativeMatch = lower.match(/^(\d+)\s+(min|mins|minute|minutes|hr|hrs|hour|hours|day|days|week|weeks)\s+ago$/);
+  if (relativeMatch) {
+    const amount = Number(relativeMatch[1]);
+    const unit = relativeMatch[2];
+    const date = new Date(now);
+    if (unit.startsWith("day")) date.setDate(date.getDate() - amount);
+    else if (unit.startsWith("week")) date.setDate(date.getDate() - amount * 7);
+    return monthDayYear(date);
+  }
+  const monthDayMatch = raw.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}$/i);
+  if (monthDayMatch) {
+    const parsedMonthDay = Date.parse(`${raw}, ${now.getFullYear()}`);
+    if (!Number.isNaN(parsedMonthDay)) return monthDayYear(new Date(parsedMonthDay));
+  }
+  const parsed = Date.parse(raw.replace(/,\s*\d{1,2}:\d{2}\s*(AM|PM)$/i, ""));
+  if (!Number.isNaN(parsed)) return monthDayYear(new Date(parsed));
+  return raw;
+}
+
+function normalizeDisplayFeedback(item = {}) {
+  return {
+    ...item,
+    time: formatDisplayDate(item.time || item.createdAt || item.updatedAt),
+  };
+}
+
+function normalizeDisplayActivity(item = {}) {
+  return {
+    ...item,
+    time: formatDisplayDate(item.time || item.createdAt),
+  };
+}
+
+function normalizeDisplayStory(story = {}) {
+  return {
+    ...story,
+    submittedAt: formatDisplayDate(story.submittedAt),
+    lastEdited: formatDisplayDate(story.lastEdited),
+    deadline: formatDisplayDate(story.deadline) || story.deadline,
+    feedback: Array.isArray(story.feedback) ? story.feedback.map(normalizeDisplayFeedback) : story.feedback,
+    comments: Array.isArray(story.comments) ? story.comments.map(normalizeDisplayFeedback) : story.comments,
+  };
+}
+
+function normalizeDisplayPitch(pitch = {}) {
+  return {
+    ...pitch,
+    submittedAt: formatDisplayDate(pitch.submittedAt),
+    updatedAt: formatDisplayDate(pitch.updatedAt),
+    feedback: Array.isArray(pitch.feedback) ? pitch.feedback.map(normalizeDisplayFeedback) : pitch.feedback,
+    comments: Array.isArray(pitch.comments) ? pitch.comments.map(normalizeDisplayFeedback) : pitch.comments,
+  };
+}
+
+function normalizeDisplayUser(user = {}) {
+  return {
+    ...user,
+    lastSeen: formatDisplayDate(user.lastSeen),
+  };
+}
+
+function normalizeAppRole(role) {
+  const value = asText(role).toLowerCase();
+  return ADMIN_ROLE_OPTIONS.includes(value) ? value : "viewer";
+}
+
+function canManageEditorialWorkflow(role) {
+  return ["admin", "editor"].includes(normalizeAppRole(role));
+}
+
+function navItemsForRole(role) {
+  const currentRole = normalizeAppRole(role);
+  return navItems.filter((item) => {
+    if (item.id === "admin") return currentRole === "admin";
+    if (item.id === "pitches" || item.id === "stories") return currentRole !== "viewer";
+    return true;
+  });
+}
+
+function roleCanAccessPage(role, page) {
+  return navItemsForRole(role).some((item) => item.id === page);
+}
+
+function defaultPageForRole(role) {
+  const currentRole = normalizeAppRole(role);
+  if (currentRole === "viewer") return "interviewees";
+  if (currentRole === "writer") return "stories";
+  return "dashboard";
+}
+
+function loginRedirectForCurrentPath() {
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (!current || current === "/" || current.startsWith("/login") || current.startsWith("/signup")) {
+    return "/login";
+  }
+  return `/login?next=${encodeURIComponent(current)}`;
 }
 
 function toList(value) {
@@ -1156,12 +1318,97 @@ function storySourceItems(story) {
 }
 
 function storyActivityItems(story) {
-  if (Array.isArray(story?.activity) && story.activity.length) return story.activity;
-  return [
-    { id: `${story.id}-activity-1`, text: `${story.writer} submitted draft`, time: story.submittedAt || "Submitted" },
-    { id: `${story.id}-activity-2`, text: "Draft last edited", time: story.lastEdited || "Recently" },
-    { id: `${story.id}-activity-3`, text: `Status set to ${story.status}`, time: "Current" },
-  ];
+  return Array.isArray(story?.activity) ? story.activity : [];
+}
+
+function useWorkflowActivity(entityType, entityId, refreshKey = "") {
+  const [activity, setActivity] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!entityType || !entityId) {
+      setActivity([]);
+      setError("");
+      setLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    async function loadActivity() {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({ entityType, entityId });
+        const response = await fetch(`${API_BASE}/api/activity?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Activity is unavailable.");
+        }
+        setActivity(Array.isArray(payload.activity) ? payload.activity.map(normalizeDisplayActivity) : []);
+      } catch (fetchError) {
+        if (fetchError.name === "AbortError") return;
+        setActivity([]);
+        setError(fetchError instanceof Error ? fetchError.message : "Activity is unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+
+    loadActivity();
+    return () => controller.abort();
+  }, [entityType, entityId, refreshKey]);
+
+  return { activity, loading, error };
+}
+
+function useEntityFeedback(entityType, entityId, refreshKey = "") {
+  const [feedback, setFeedback] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!entityType || !entityId) {
+      setFeedback([]);
+      setError("");
+      setLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    async function loadFeedback() {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({ entityType, entityId });
+        const response = await fetch(`${API_BASE}/api/feedback?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Feedback is unavailable.");
+        }
+        setFeedback(Array.isArray(payload.feedback) ? payload.feedback.map(normalizeDisplayFeedback) : []);
+      } catch (fetchError) {
+        if (fetchError.name === "AbortError") return;
+        setFeedback([]);
+        setError(fetchError instanceof Error ? fetchError.message : "Feedback is unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+
+    loadFeedback();
+    return () => controller.abort();
+  }, [entityType, entityId, refreshKey]);
+
+  return { feedback, setFeedback, loading, error };
 }
 
 function optionsWithCurrent(options, value) {
@@ -1551,16 +1798,6 @@ function pitchDetailPath(id) {
   return `/pitches/${encodeURIComponent(id)}`;
 }
 
-function withPitchActivity(pitch, text) {
-  return {
-    ...pitch,
-    activity: [
-      { id: `a${Date.now()}`, text, time: "Just now" },
-      ...(pitch.activity || []),
-    ],
-  };
-}
-
 function runArticleMappingTests() {
   const withStringAuthor = normalizeArticleRecord({
     title: "A",
@@ -1620,11 +1857,13 @@ function groupAdminUsersByRole(staff, roleFilter = "All roles") {
 
 function runAdminPageTests() {
   const groupedRoles = groupAdminUsersByRole(users);
-  console.assert(groupedRoles.length === 3, "Admin page should return to three role groups when search is clear.");
+  console.assert(groupedRoles.length === 4, "Admin page should return to four role groups when search is clear.");
   console.assert(groupedRoles.every((group) => group.users.every((user) => user.role === group.id)), "Admin role groups should only contain matching users.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("maya"), "All roles")).map((user) => user.name).join("") === "Maya Johnson", "Admin search should match staff by name.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("school"), "All roles")).length === 0, "Admin search should not match email text.");
-  console.assert(users.filter((user) => adminUserMatches(user, "", "Viewer")).every((user) => user.role === "Viewer"), "Admin role filter should limit visible staff.");
+  console.assert(users.filter((user) => adminUserMatches(user, "", "viewer")).every((user) => user.role === "viewer"), "Admin role filter should limit visible staff.");
+  console.assert(navItemsForRole("viewer").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Viewers should not see story, pitch, or admin navigation.");
+  console.assert(navItemsForRole("writer").some((item) => item.id === "stories") && !navItemsForRole("writer").some((item) => item.id === "admin"), "Writers should see stories but not admin.");
 }
 runAdminPageTests();
 
@@ -1635,6 +1874,7 @@ function runPrototypeTests() {
   console.assert(initialStories.some((story) => story.status === "Submitted"), "Stories page needs submitted examples.");
   console.assert(initialStories.some((story) => story.status === "Needs Revision"), "Stories page needs revision examples.");
   console.assert(storyMatchesFilters(initialStories[0], "parking", "All statuses", "All sections"), "Stories search should include title text.");
+  console.assert(initialStories.every((story) => !storyDocIsOpenable(story)), "Default story records should start without attached Google Docs.");
   console.assert(!storyDocIsOpenable(initialStories.find((story) => story.id === "s5")), "Missing Google Doc links should be treated as unavailable.");
   console.assert(initialArticles.some((a) => a.status === "Published"), "Prototype needs published article data.");
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
@@ -1798,7 +2038,7 @@ const landingWorkflowSteps = [
 ];
 
 const landingDeskRows = [
-  ["Senior Parking Rules", "Submitted", "Today"],
+  ["Senior Parking Rules", "Submitted", "June 2, 2026"],
   ["Robotics Build Week", "Needs Revision", "May 20"],
   ["Cafeteria Menu Changes", "Ready for Publish", "May 21"],
 ];
@@ -1946,7 +2186,7 @@ function LandingDeskScene() {
           <div className="landing-paper-row" key={row[0]}>
             <span>{row[0]}</span>
             <span>{row[1]}</span>
-            <span>{row[2]}</span>
+            <span>{formatDisplayDate(row[2]) || row[2]}</span>
           </div>
         ))}
       </div>
@@ -1959,7 +2199,7 @@ function LandingDeskScene() {
         </div>
         <div className="landing-editor-note">Comment: tighten the nut graf</div>
       </div>
-      <div className="landing-deadline-strip">Deadline: Today</div>
+      <div className="landing-deadline-strip">Deadline: June 2, 2026</div>
       <div className="landing-source-strip">Sources confirmed: 5</div>
     </div>
   );
@@ -1969,15 +2209,22 @@ function AppShell() {
   const [page, setPage] = useState(initialAppPage);
   const [locationPath, setLocationPath] = useState(window.location.pathname);
   const [articles, setArticles] = useState(initialArticles);
-  const [stories, setStories] = useState(initialStories);
+  const [stories, setStories] = useState([]);
+  const [storiesLoading, setStoriesLoading] = useState(true);
+  const [storiesError, setStoriesError] = useState("");
   const [tasks, setTasks] = useState(initialTasks);
   const [globalSearch, setGlobalSearch] = useState("");
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [articleExtractorOpen, setArticleExtractorOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState("a1");
   const [toast, setToast] = useState("");
+  const [account, setAccount] = useState(null);
+  const [csrfToken, setCsrfToken] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
+  const accountRole = normalizeAppRole(account?.role);
+  const availableNavItems = navItemsForRole(accountRole);
 
   useEffect(() => {
     const syncLocationPath = () => setLocationPath(window.location.pathname);
@@ -1993,7 +2240,91 @@ function AppShell() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [page, locationPath]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadSession() {
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/session`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+        });
+        const payload = await response.json();
+        if (!active) return;
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Unable to verify your session.");
+        }
+        if (!payload?.authenticated) {
+          window.location.replace(loginRedirectForCurrentPath());
+          return;
+        }
+        setAccount(normalizeDisplayUser(payload.user || FALLBACK_ACCOUNT));
+        setCsrfToken(payload.csrfToken || "");
+      } catch (error) {
+        if (!active) return;
+        setToast(error instanceof Error ? error.message : "Unable to verify your session.");
+      }
+    }
+
+    loadSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!account) return;
+    if (!roleCanAccessPage(accountRole, page)) {
+      const nextPage = defaultPageForRole(accountRole);
+      setToast(`${accountRoleLabel(accountRole)} access does not include ${navItems.find((item) => item.id === page)?.label || page}.`);
+      setPage(nextPage);
+      pushAppPath(pagePath(nextPage));
+    }
+  }, [account, accountRole, page]);
+
+  useEffect(() => {
+    if (!account) return undefined;
+    const controller = new AbortController();
+
+    async function loadStories() {
+      setStoriesLoading(true);
+      setStoriesError("");
+      try {
+        const response = await fetch(`${API_BASE}/api/stories`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Stories are unavailable.");
+        }
+        setStories(Array.isArray(payload.stories) ? payload.stories.map(normalizeDisplayStory) : []);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        setStories([]);
+        setStoriesError(error instanceof Error ? error.message : "Stories are unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setStoriesLoading(false);
+      }
+    }
+
+    if (accountRole === "viewer") {
+      setStories([]);
+      setStoriesError("Stories are not available to viewers.");
+      setStoriesLoading(false);
+      return undefined;
+    }
+
+    loadStories();
+    return () => controller.abort();
+  }, [account, accountRole]);
+
   const navigatePage = (nextPage) => {
+    if (account && !roleCanAccessPage(accountRole, nextPage)) {
+      setToast(`${accountRoleLabel(accountRole)} access does not include ${navItems.find((item) => item.id === nextPage)?.label || nextPage}.`);
+      return;
+    }
     setPage(nextPage);
     pushAppPath(pagePath(nextPage));
   };
@@ -2009,16 +2340,62 @@ function AppShell() {
     setToast(`Moved story to ${status}.`);
   };
 
-  const updateStoryStatus = (id, status) => {
-    setStories((prev) => prev.map((story) => (story.id === id ? { ...story, status, lastEdited: "Updated just now" } : story)));
-    setToast(`Updated story to ${status}.`);
+  const updateStoryStatus = async (id, status) => {
+    if (!canManageEditorialWorkflow(accountRole)) {
+      setToast("Only admins and editors can change story status.");
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Story status update failed.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, status, lastEdited: "Updated just now" });
+      setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...updatedStory } : story)));
+      setToast(`Updated story to ${status}.`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Story status update failed.");
+    }
   };
 
-  const updateStoryDocLink = (id, googleDocUrl) => {
-    setStories((prev) => prev.map((story) => (
-      story.id === id ? { ...story, googleDocUrl, lastEdited: "Updated just now" } : story
-    )));
-    setToast("Linked Google Doc.");
+  const updateStoryDocLink = async (id, googleDocUrl) => {
+    if (!canManageEditorialWorkflow(accountRole)) {
+      setToast("Only admins and editors can update story documents.");
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ googleDocUrl }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not link Google Doc.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, googleDocUrl, lastEdited: "Updated just now" });
+      setStories((prev) => prev.map((story) => (
+        story.id === id ? { ...story, ...updatedStory } : story
+      )));
+      setToast("Linked Google Doc.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not link Google Doc.");
+    }
   };
 
   const updateTaskStatus = (id, status) => {
@@ -2050,17 +2427,59 @@ function AppShell() {
     setToast("Created a new article idea.");
   };
 
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Sign out failed.");
+      }
+      setAccount(null);
+      setCsrfToken("");
+      window.location.replace("/login");
+    } catch (error) {
+      setSigningOut(false);
+      setToast(error instanceof Error ? error.message : "Sign out failed.");
+    }
+  };
+
+  const handleStoryCreatedFromPitch = (story) => {
+    const nextStory = normalizeDisplayStory(story);
+    if (!nextStory?.id) return;
+    setStories((prev) => {
+      if (prev.some((item) => item.id === nextStory.id)) {
+        return prev.map((item) => (item.id === nextStory.id ? { ...item, ...nextStory } : item));
+      }
+      return [nextStory, ...prev];
+    });
+  };
+
   const pages = {
     dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
-    pitches: <PitchBoardPage setToast={setToast} />,
-    stories: <StoriesPage stories={stories} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} setToast={setToast} />,
+    pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
+    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
     interviewees: <IntervieweesPage />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
     calendar: <CalendarPage />,
     analytics: <AnalyticsPage articles={articles} selectedArticle={selectedArticle} setSelectedArticleId={setSelectedArticleId} />,
-    admin: <AdminPage setToast={setToast} />,
+    admin: <AdminPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} />,
     settings: <SettingsPage />,
   };
 
@@ -2079,7 +2498,7 @@ function AppShell() {
           <Input value={globalSearch} onChange={setGlobalSearch} placeholder="Search workspace" className="mb-5" />
 
           <nav className="space-y-1">
-            {navItems.map((item) => (
+            {availableNavItems.map((item) => (
               <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition", page === item.id ? "border border-white/[0.08] bg-white/[0.07] text-zinc-50 shadow-lg shadow-black/20" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200")}>
                 <Icon name={item.icon} className="h-4 w-4" />
                 {item.label}
@@ -2096,21 +2515,21 @@ function AppShell() {
                 <span className="font-medium">Falcon</span>
               </div>
               <HeaderBreadcrumb page={page} locationPath={locationPath} navigatePage={navigatePage} />
-              <div className="hidden items-center gap-2 sm:flex">
+              <div className="flex items-center gap-2">
                 <Button variant="ghost" icon="bell" className="hidden sm:inline-flex">
                   Alerts
                 </Button>
                 <Button icon="plus" onClick={() => setQuickCreateOpen(true)} className="h-9 w-9 px-0 sm:h-auto sm:w-auto sm:px-3.5">
                   <span className="sr-only sm:not-sr-only">Create</span>
                 </Button>
-                <div className="ml-1 flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-xs font-semibold">AP</div>
+                <AccountMenu user={account || FALLBACK_ACCOUNT} signingOut={signingOut} onSignOut={handleSignOut} />
               </div>
             </div>
           </header>
 
           <div className="shrink-0 border-b border-white/[0.08] bg-[#08090c]/90 px-4 py-3 lg:hidden">
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {navItems.map((item) => (
+              {availableNavItems.map((item) => (
                 <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs", page === item.id ? "border-white/[0.12] bg-white/[0.08] text-zinc-50" : "border-white/[0.06] text-zinc-500")}>
                   <Icon name={item.icon} className="h-3.5 w-3.5" />
                   {item.label}
@@ -2127,6 +2546,82 @@ function AppShell() {
 
       <AnimatePresence>{quickCreateOpen && <QuickCreateModal onClose={() => setQuickCreateOpen(false)} createDemoArticle={createDemoArticle} openArticleExtractor={openArticleExtractor} />}</AnimatePresence>
       <Toast message={toast} onDismiss={() => setToast("")} />
+    </div>
+  );
+}
+
+function AccountMenu({ user, signingOut, onSignOut }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+  const displayName = accountDisplayName(user);
+  const email = asText(user?.email);
+  const initials = accountInitials(user);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative ml-1">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Open user menu"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-xs font-semibold text-zinc-100 transition hover:border-white/[0.18] hover:bg-white/[0.1] focus:outline-none focus:ring-2 focus:ring-white/20"
+      >
+        {initials}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            aria-label="User account"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.14, ease: "easeOut" }}
+            className="absolute right-0 top-11 z-50 w-64 overflow-hidden rounded-lg border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
+          >
+            <div className="px-3 py-3">
+              <div className="truncate text-sm font-medium text-zinc-100">{displayName}</div>
+              {email && <div className="mt-0.5 truncate text-xs text-zinc-500">{email}</div>}
+              <div className="mt-2 text-xs text-zinc-600">{accountRoleLabel(user?.role)}</div>
+            </div>
+            <div className="h-px bg-white/[0.08]" />
+            <button
+              type="button"
+              role="menuitem"
+              disabled={signingOut}
+              onClick={() => {
+                setOpen(false);
+                onSignOut();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/15 disabled:cursor-not-allowed disabled:text-zinc-600"
+            >
+              <Icon name="logout" className="h-4 w-4" />
+              {signingOut ? "Signing out" : "Sign out"}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -2391,6 +2886,7 @@ function ActivityFeed() {
     "Daniel uploaded robotics build notes",
     "Maya approved the weekly publishing plan",
   ];
+  const feedDate = monthDayYear(new Date());
   return (
     <div className="space-y-3">
       {feed.map((item, index) => (
@@ -2398,7 +2894,7 @@ function ActivityFeed() {
           <div className="mt-1 h-2 w-2 rounded-full bg-zinc-300" />
           <div>
             <p className="text-sm text-zinc-300">{item}</p>
-            <p className="mt-1 text-xs text-zinc-600">{index + 1}h ago</p>
+            <p className="mt-1 text-xs text-zinc-600">{feedDate}</p>
           </div>
         </div>
       ))}
@@ -2418,14 +2914,40 @@ function Insight({ title, body }) {
   );
 }
 
-function PitchBoardPage({ setToast }) {
-  const [pitches, setPitches] = useState(initialPitches);
+function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated = () => {} }) {
+  const [pitches, setPitches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [detailPitchId, setDetailPitchId] = useState(initialPitchDetailId);
   const [query, setQuery] = useState("");
   const [section, setSection] = useState("All sections");
   const [statusFilter, setStatusFilter] = useState("All Active");
   const [expandedWriters, setExpandedWriters] = useState(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
+  const canManagePitches = canManageEditorialWorkflow(currentUser?.role);
+
+  const loadPitches = async (signal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Pitch board is unavailable.");
+      }
+      setPitches(Array.isArray(payload.pitches) ? payload.pitches.map(normalizeDisplayPitch) : []);
+    } catch (loadError) {
+      if (loadError.name === "AbortError") return;
+      setPitches([]);
+      setError(loadError instanceof Error ? loadError.message : "Pitch board is unavailable.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const syncFromPath = () => setDetailPitchId(initialPitchDetailId());
@@ -2435,6 +2957,12 @@ function PitchBoardPage({ setToast }) {
       window.removeEventListener("popstate", syncFromPath);
       window.removeEventListener("falcon-route-change", syncFromPath);
     };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadPitches(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const activePitches = useMemo(
@@ -2459,19 +2987,52 @@ function PitchBoardPage({ setToast }) {
       previous.map((pitch) => {
         if (pitch.id !== id) return pitch;
         const nextPitch = typeof updater === "function" ? updater(pitch) : { ...pitch, ...updater };
-        return { ...nextPitch, updatedAt: "Just now" };
+        return normalizeDisplayPitch({ ...nextPitch, updatedAt: "Just now" });
       })
     );
   };
 
   const nextIdAfter = (id) => nextActivePitchId(activePitches.filter((pitch) => pitch.id !== id), id);
 
-  const moveOutOfActiveBoard = (id, status, message) => {
+  const updatePitchStatus = async (id, status, message) => {
+    if (!canManagePitches) {
+      setToast("Only admins and editors can change pitch status.");
+      return null;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Pitch status update failed.");
+      }
+      const updatedPitch = normalizeDisplayPitch(payload.pitch || { id, status, updatedAt: "Just now" });
+      setPitches((previous) => previous.map((pitch) => (pitch.id === id ? { ...pitch, ...updatedPitch } : pitch)));
+      if (status === "Approved" && payload.story) {
+        onStoryCreated(payload.story);
+      }
+      setToast(message || `Updated pitch to ${status}.`);
+      return { ...payload, pitch: updatedPitch };
+    } catch (statusError) {
+      setToast(statusError instanceof Error ? statusError.message : "Pitch status update failed.");
+      return null;
+    }
+  };
+
+  const moveOutOfActiveBoard = async (id, status, message) => {
     const nextId = nextIdAfter(id);
-    updatePitch(id, (pitch) => withPitchActivity({ ...pitch, status }, `Status changed to ${status}.`));
+    const result = await updatePitchStatus(id, status, message);
+    if (!result) return;
     if (nextId) navigateToPitch(nextId);
     else navigateToBoard();
-    setToast(message);
   };
 
   const deletePitch = (id) => {
@@ -2487,119 +3048,69 @@ function PitchBoardPage({ setToast }) {
     if (nextId) navigateToPitch(nextId);
   };
 
-  const createPitch = (draft) => {
+  const createPitch = async (draft) => {
     const title = draft.title.trim();
     if (!title) return;
-    const nextPitch = {
-      id: `p${Date.now()}`,
-      title,
-      angle: draft.angle.trim() || "Angle to be developed.",
-      status: "New",
-      section: draft.section,
-      owner: draft.owner,
-      submittedAt: "Today",
-      notes: draft.notes.trim(),
-      editorFeedback: "",
-      feedback: [],
-      comments: [],
-      activity: [{ id: `a${Date.now()}`, text: `${draft.owner} created this pitch.`, time: "Just now" }],
-      updatedAt: "Just now",
-    };
-    setPitches((previous) => [nextPitch, ...previous]);
-    setQuery("");
-    setSection("All sections");
-    setStatusFilter("All Active");
-    setExpandedWriters((previous) => new Set([...previous, nextPitch.owner]));
-    setCreateOpen(false);
-    setToast("Created a new pitch.");
-  };
-
-  const markNeedsReview = (id) => {
-    updatePitch(id, (pitch) => withPitchActivity({ ...pitch, status: "Needs Review" }, "Status changed to Needs Review."));
-    setToast("Marked pitch as needs review.");
-  };
-
-  const addFeedback = (id, text) => {
-    updatePitch(id, (pitch) => {
-      const shouldMarkNeedsReview = pitch.status === "New";
-      return withPitchActivity(
-        {
-          ...pitch,
-          status: shouldMarkNeedsReview ? "Needs Review" : pitch.status,
-          feedback: [
-            { id: `f${Date.now()}`, author: "Editor", text, time: "Just now" },
-            ...(pitch.feedback || []),
-          ],
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
-        shouldMarkNeedsReview ? "Editor added feedback and marked the pitch Needs Review." : "Editor added feedback."
-      );
-    });
-    setToast("Added feedback.");
+        credentials: "include",
+        body: JSON.stringify({
+          title,
+          angle: draft.angle.trim() || "Angle to be developed.",
+          section: draft.section,
+          notes: draft.notes.trim(),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not create pitch.");
+      }
+      const nextPitch = normalizeDisplayPitch(payload.pitch);
+      setPitches((previous) => [nextPitch, ...previous]);
+      setQuery("");
+      setSection("All sections");
+      setStatusFilter("All Active");
+      setExpandedWriters((previous) => new Set([...previous, nextPitch.owner]));
+      setCreateOpen(false);
+      setToast("Created a new pitch.");
+    } catch (createError) {
+      setToast(createError instanceof Error ? createError.message : "Could not create pitch.");
+    }
   };
 
-  const editFeedback = (id, feedbackId, text) => {
-    updatePitch(id, (pitch) => {
-      const nextPitch = feedbackId === "editor-feedback"
-        ? { ...pitch, editorFeedback: text }
-        : {
-            ...pitch,
-            feedback: (pitch.feedback || []).map((feedback) =>
-              feedback.id === feedbackId ? { ...feedback, text, time: "Edited just now" } : feedback
-            ),
-          };
-      return withPitchActivity(nextPitch, "Editor edited feedback.");
-    });
-    setToast("Updated feedback.");
-  };
-
-  const deleteFeedback = (id, feedbackId) => {
-    updatePitch(id, (pitch) => {
-      const nextPitch = feedbackId === "editor-feedback"
-        ? { ...pitch, editorFeedback: "" }
-        : { ...pitch, feedback: (pitch.feedback || []).filter((feedback) => feedback.id !== feedbackId) };
-      return withPitchActivity(nextPitch, "Editor deleted feedback.");
-    });
-    setToast("Deleted feedback.");
+  const markNeedsReview = (id, message) => {
+    return updatePitchStatus(id, "Needs Review", message || "Marked pitch as needs review.");
   };
 
   const addComment = (id, text) => {
-    updatePitch(id, (pitch) =>
-      withPitchActivity(
-        {
-          ...pitch,
-          comments: [
-            { id: `c${Date.now()}`, author: "Editor", text, time: "Just now" },
-            ...pitch.comments,
-          ],
-        },
-        "Editor added a comment."
-      )
-    );
+    updatePitch(id, (pitch) => ({
+      ...pitch,
+      comments: [
+        { id: `c${Date.now()}`, author: "Editor", text, time: formatDisplayDate("Just now") },
+        ...pitch.comments,
+      ],
+    }));
     setToast("Added comment.");
   };
 
   const editComment = (id, commentId, text) => {
-    updatePitch(id, (pitch) =>
-      withPitchActivity(
-        {
-          ...pitch,
-          comments: pitch.comments.map((comment) =>
-            comment.id === commentId ? { ...comment, text, time: "Edited just now" } : comment
-          ),
-        },
-        "Editor edited a comment."
-      )
-    );
+    updatePitch(id, (pitch) => ({
+      ...pitch,
+      comments: pitch.comments.map((comment) =>
+        comment.id === commentId ? { ...comment, text, time: formatDisplayDate("Just now") } : comment
+      ),
+    }));
     setToast("Updated comment.");
   };
 
   const deleteComment = (id, commentId) => {
-    updatePitch(id, (pitch) =>
-      withPitchActivity(
-        { ...pitch, comments: pitch.comments.filter((comment) => comment.id !== commentId) },
-        "Editor deleted a comment."
-      )
-    );
+    updatePitch(id, (pitch) => ({ ...pitch, comments: pitch.comments.filter((comment) => comment.id !== commentId) }));
     setToast("Deleted comment.");
   };
 
@@ -2625,17 +3136,17 @@ function PitchBoardPage({ setToast }) {
         pitch={detailPitch}
         activePitches={activePitches}
         onBack={navigateToBoard}
-        onAddFeedback={addFeedback}
-        onEditFeedback={editFeedback}
-        onDeleteFeedback={deleteFeedback}
         onNeedsReview={markNeedsReview}
-        onApprove={(id) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and removed it from the active board.")}
+        onApprove={(id) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.")}
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
         onDelete={deletePitch}
         onNext={selectNextPitch}
         onAddComment={addComment}
         onEditComment={editComment}
         onDeleteComment={deleteComment}
+        canManagePitches={canManagePitches}
+        csrfToken={csrfToken}
+        setToast={setToast}
       />
     );
   }
@@ -2645,6 +3156,11 @@ function PitchBoardPage({ setToast }) {
       title="Pitch Board"
       right={<Button icon="plus" onClick={() => setCreateOpen(true)}>New pitch</Button>}
     >
+      {loading ? (
+        <StateMessage icon="edit" title="Loading pitches" body="Pulling pitch records from MongoDB." />
+      ) : error ? (
+        <StateMessage icon="edit" title="Pitch board unavailable" body={error} />
+      ) : null}
       <Card className="min-w-0 p-5">
         <div className="mb-5 flex flex-col gap-4">
           <div>
@@ -2683,7 +3199,7 @@ function PitchBoardPage({ setToast }) {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
-          {writerGroups.map((group) => (
+          {!loading && !error && writerGroups.map((group) => (
             <PitchWriterRow
               key={group.writer}
               group={group}
@@ -2692,7 +3208,7 @@ function PitchBoardPage({ setToast }) {
               onSelectPitch={navigateToPitch}
             />
           ))}
-          {!writerGroups.length && (
+          {!loading && !error && !writerGroups.length && (
             <div className="p-8 text-center">
               <div className="mx-auto mb-4 h-px w-10 bg-zinc-600" />
               <h3 className="text-sm font-medium text-zinc-200">No active pitches found</h3>
@@ -2705,7 +3221,6 @@ function PitchBoardPage({ setToast }) {
       <AnimatePresence>
         {createOpen && (
           <PitchCreateModal
-            writers={PITCH_WRITERS}
             onClose={() => setCreateOpen(false)}
             onCreate={createPitch}
           />
@@ -2803,14 +3318,14 @@ function PitchDetailPage({
   pitch,
   activePitches,
   onBack,
-  onAddFeedback,
-  onEditFeedback,
-  onDeleteFeedback,
   onNeedsReview,
   onApprove,
   onHold,
   onDelete,
   onNext,
+  canManagePitches = false,
+  csrfToken = "",
+  setToast = () => {},
 }) {
   const [feedbackDraft, setFeedbackDraft] = useState("");
   const [editingFeedbackId, setEditingFeedbackId] = useState(null);
@@ -2845,6 +3360,9 @@ function PitchDetailPage({
     };
   }, [openItemMenu]);
 
+  const pitchActivity = useWorkflowActivity("pitch", pitch?.id || "", pitch?.status || "");
+  const pitchFeedback = useEntityFeedback("pitch", pitch?.id || "", `${pitch?.updatedAt || ""}:${pitch?.status || ""}`);
+
   if (!pitch) {
     return (
       <PageShell
@@ -2862,13 +3380,43 @@ function PitchDetailPage({
     );
   }
 
-  const feedbackItems = pitchFeedbackItems(pitch);
+  const feedbackItems = pitchFeedback.feedback;
+  const { loading: feedbackLoading, error: feedbackError } = pitchFeedback;
+  const { activity: activityItems, loading: activityLoading, error: activityError } = pitchActivity;
 
-  const submitFeedback = () => {
+  const submitFeedback = async () => {
     const text = feedbackDraft.trim();
     if (!text) return;
-    onAddFeedback(pitch.id, text);
-    setFeedbackDraft("");
+    try {
+      const response = await fetch(`${API_BASE}/api/feedback`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          entityType: "pitch",
+          entityId: pitch.id,
+          text,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not add feedback.");
+      }
+      const nextFeedback = normalizeDisplayFeedback(payload.feedback || { id: `feedback-${Date.now()}`, text, author: "Editor", time: "Just now" });
+      pitchFeedback.setFeedback((previous) => [nextFeedback, ...previous]);
+      setFeedbackDraft("");
+      if (pitch.status === "New") {
+        await onNeedsReview(pitch.id, "Added feedback and marked pitch as needs review.");
+      } else {
+        setToast("Added feedback.");
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not add feedback.");
+    }
   };
 
   const startEditingFeedback = (feedback) => {
@@ -2877,23 +3425,56 @@ function PitchDetailPage({
     setOpenItemMenu(null);
   };
 
-  const saveFeedbackEdit = () => {
+  const saveFeedbackEdit = async () => {
     const text = editingFeedbackText.trim();
-    if (!text) return;
-    onEditFeedback(pitch.id, editingFeedbackId, text);
-    setEditingFeedbackId(null);
-    setEditingFeedbackText("");
+    if (!text || !editingFeedbackId) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/feedback/${encodeURIComponent(editingFeedbackId)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ text }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not update feedback.");
+      }
+      const updatedFeedback = normalizeDisplayFeedback(payload.feedback || { id: editingFeedbackId, text, time: "Just now" });
+      pitchFeedback.setFeedback((previous) => previous.map((feedback) => (
+        feedback.id === editingFeedbackId ? { ...feedback, ...updatedFeedback } : feedback
+      )));
+      setEditingFeedbackId(null);
+      setEditingFeedbackText("");
+      setToast("Updated feedback.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not update feedback.");
+    }
   };
 
-  const activityItems = [
-    ...(pitch.activity || []),
-    ...feedbackItems.map((feedback) => ({
-      id: `activity-${feedback.id}`,
-      text: `${feedback.author} left feedback on this pitch.`,
-      time: feedback.time,
-    })),
-    { id: "submitted", text: `${pitch.owner} submitted this pitch.`, time: pitch.submittedAt },
-  ];
+  const deleteFeedbackItem = async (feedbackId) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/feedback/${encodeURIComponent(feedbackId)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not delete feedback.");
+      }
+      pitchFeedback.setFeedback((previous) => previous.filter((feedback) => feedback.id !== feedbackId));
+      setToast("Deleted feedback.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not delete feedback.");
+    }
+  };
 
   return (
     <motion.div
@@ -2945,7 +3526,7 @@ function PitchDetailPage({
                           <button type="button" onClick={saveFeedbackEdit} className="text-xs font-medium text-zinc-300 hover:text-zinc-50">Save</button>
                           <button type="button" onClick={() => setEditingFeedbackId(null)} className="text-xs text-zinc-600 hover:text-zinc-300">Cancel</button>
                         </div>
-                      ) : (
+                      ) : canManagePitches ? (
                         <PitchItemMenu
                           label="Feedback actions"
                           open={openItemMenu === menuId}
@@ -2953,10 +3534,10 @@ function PitchDetailPage({
                           onEdit={() => startEditingFeedback(feedback)}
                           onDelete={() => {
                             setOpenItemMenu(null);
-                            onDeleteFeedback(pitch.id, feedback.id);
+                            deleteFeedbackItem(feedback.id);
                           }}
                         />
-                      )}
+                      ) : null}
                     </div>
                     {editingFeedbackId === feedback.id ? (
                       <textarea
@@ -2971,12 +3552,10 @@ function PitchDetailPage({
                   </div>
                 );
               })}
-              {!feedbackItems.length && (
-                <p className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-sm text-zinc-600">
-                  No feedback yet.
-                </p>
-              )}
+              {feedbackLoading ? <p className="text-sm text-zinc-600">Loading feedback...</p> : null}
+              {feedbackError ? <p className="text-sm text-zinc-600">{feedbackError}</p> : null}
             </div>
+            {canManagePitches ? (
             <div className="mt-6 flex items-end gap-2 rounded-xl border border-white/[0.12] bg-white/[0.025] p-2">
               <textarea
                 value={feedbackDraft}
@@ -2994,12 +3573,17 @@ function PitchDetailPage({
                 <Icon name="plus" className="h-4 w-4" />
               </button>
             </div>
+            ) : null}
           </section>
 
           <section>
             <h3 className="text-lg font-semibold tracking-tight text-zinc-50">Activity</h3>
             <div className="mt-5 space-y-4">
-              {activityItems.map((item) => (
+              {activityLoading ? (
+                <p className="text-sm text-zinc-600">Loading workflow activity...</p>
+              ) : activityError ? (
+                <p className="text-sm text-zinc-600">{activityError}</p>
+              ) : activityItems.length ? activityItems.map((item) => (
                 <div key={item.id} className="flex items-start gap-3">
                   <div className="mt-2 h-1.5 w-1.5 rounded-full bg-zinc-500" />
                   <div>
@@ -3007,12 +3591,15 @@ function PitchDetailPage({
                     <p className="mt-1 text-xs text-zinc-600">{item.time}</p>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <p className="text-sm text-zinc-600">No workflow status changes recorded yet.</p>
+              )}
             </div>
           </section>
         </main>
 
         <aside className="mx-auto w-full max-w-[940px] space-y-3 2xl:sticky 2xl:top-8 2xl:max-w-none">
+          {canManagePitches ? (
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
             <h3 className="text-sm font-medium text-zinc-300">Actions</h3>
             <div className="mt-4 space-y-2">
@@ -3037,6 +3624,7 @@ function PitchDetailPage({
               <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button>
             </div>
           </div>
+          ) : null}
 
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
             <h3 className="text-sm font-medium text-zinc-300">Properties</h3>
@@ -3089,13 +3677,12 @@ function PitchProperty({ label, children }) {
   );
 }
 
-function PitchCreateModal({ writers, onClose, onCreate }) {
+function PitchCreateModal({ onClose, onCreate }) {
   const [draft, setDraft] = useState({
     title: "",
     angle: "",
     notes: "",
     section: "News",
-    owner: writers[0] || "Unassigned",
   });
 
   const updateDraft = (field, value) => {
@@ -3130,32 +3717,18 @@ function PitchCreateModal({ writers, onClose, onCreate }) {
         </div>
 
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Writer</span>
-              <select
-                value={draft.owner}
-                onChange={(event) => updateDraft("owner", event.target.value)}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-              >
-                {writers.map((writer) => (
-                  <option key={writer} value={writer} className="bg-zinc-950">{writer}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
-              <select
-                value={draft.section}
-                onChange={(event) => updateDraft("section", event.target.value)}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-              >
-                {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
-                  <option key={option} value={option} className="bg-zinc-950">{option}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
+            <select
+              value={draft.section}
+              onChange={(event) => updateDraft("section", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+            >
+              {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
+                <option key={option} value={option} className="bg-zinc-950">{option}</option>
+              ))}
+            </select>
+          </label>
 
           <label className="block">
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
@@ -3232,7 +3805,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
       <button type="button" onClick={open} className="w-full text-left">
         <div className="mb-3 flex items-center justify-between">
           <StatusBadge tone={article.priority === "High" ? "amber" : "neutral"}>{article.priority}</StatusBadge>
-          <span className="text-xs text-zinc-600">{article.deadline}</span>
+          <span className="text-xs text-zinc-600">{formatDisplayDate(article.deadline) || article.deadline}</span>
         </div>
         <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{article.title}</h3>
         <p className="mt-2 text-xs text-zinc-500">{article.section} - {article.editor}</p>
@@ -3246,7 +3819,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
   );
 }
 
-function StoriesPage({ stories, updateStoryStatus, updateStoryDocLink, setToast }) {
+function StoriesPage({ stories, loading = false, error = "", currentUser, updateStoryStatus, updateStoryDocLink, setToast }) {
   const [query, setQuery] = useState("");
   const [sectionFilter, setSectionFilter] = useState("All sections");
   const [detailStoryId, setDetailStoryId] = useState(initialStoryDetailId);
@@ -3299,6 +3872,7 @@ function StoriesPage({ stories, updateStoryStatus, updateStoryDocLink, setToast 
       <StoryDetailPage
         story={detailStory}
         onBack={navigateToStories}
+        currentUser={currentUser}
         updateStoryStatus={updateStoryStatus}
         updateStoryDocLink={updateStoryDocLink}
         copyStoryDoc={copyStoryDoc}
@@ -3313,13 +3887,19 @@ function StoriesPage({ stories, updateStoryStatus, updateStoryDocLink, setToast 
       eyebrow="Editorial workflow"
       description="Scan active Google Doc drafts by review state, then open a story for notes, source checks, and approval actions."
     >
-      <section className="mb-5 grid gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
+      <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
         <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="h-10" />
       </section>
 
+      {loading ? (
+        <StateMessage icon="article" title="Loading stories" body="Pulling story assignments from MongoDB." />
+      ) : error ? (
+        <StateMessage icon="article" title="Stories unavailable" body={error} />
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-3" aria-label="Story workflow board">
-        {STORY_WORKFLOW_COLUMNS.map((column) => {
+        {!loading && !error && STORY_WORKFLOW_COLUMNS.map((column) => {
           const columnStories = visibleStories.filter((story) => column.statuses.includes(story.status));
           return (
             <StoryKanbanColumn
@@ -3382,7 +3962,7 @@ function StoryOverviewCard({ story, onOpen }) {
   );
 }
 
-function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink, copyStoryDoc, setToast }) {
+function StoryDetailPage({ story, onBack, currentUser, updateStoryStatus, updateStoryDocLink, copyStoryDoc, setToast }) {
   const [draftDocUrl, setDraftDocUrl] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [showDocTools, setShowDocTools] = useState(false);
@@ -3392,6 +3972,8 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
     setCommentDraft("");
     setShowDocTools(false);
   }, [story?.id]);
+
+  const storyActivity = useWorkflowActivity("story", story?.id || "", story?.status || "");
 
   if (!story) {
     return (
@@ -3408,7 +3990,8 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
 
   const hasDoc = storyDocIsOpenable(story);
   const workflowAction = storyWorkflowAction(story);
-  const activityItems = storyActivityItems(story);
+  const canManageStory = canManageEditorialWorkflow(currentUser?.role);
+  const { activity: activityItems, loading: activityLoading, error: activityError } = storyActivity;
 
   const linkStoryDoc = () => {
     const nextUrl = draftDocUrl.trim();
@@ -3447,7 +4030,11 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
           <section className="py-8">
             <h2 className="text-lg font-semibold tracking-tight text-zinc-50">Activity</h2>
             <div className="mt-5 space-y-4">
-              {activityItems.map((item, index) => (
+              {activityLoading ? (
+                <p className="text-sm text-zinc-600">Loading workflow activity...</p>
+              ) : activityError ? (
+                <p className="text-sm text-zinc-600">{activityError}</p>
+              ) : activityItems.length ? activityItems.map((item, index) => (
                 <div key={item.id} className="flex items-start gap-3">
                   <div className={cx("mt-2 h-1.5 w-1.5 rounded-full", index === 0 ? "bg-zinc-300" : "bg-zinc-600")} />
                   <div className="min-w-0">
@@ -3455,7 +4042,9 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
                     <p className="mt-1 text-xs text-zinc-600">{item.time}</p>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <p className="text-sm text-zinc-600">No workflow status changes recorded yet.</p>
+              )}
             </div>
           </section>
         </main>
@@ -3469,20 +4058,25 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
             {hasDoc ? (
               <StoryAttachment story={story} onCopy={() => copyStoryDoc(story)} compact />
             ) : (
-              <div className="rounded-xl border border-white/[0.14] px-4 py-3 text-sm text-zinc-400">Doc unavailable</div>
+              <div className="rounded-xl border border-white/[0.14] px-4 py-3 text-sm text-zinc-400" aria-label="Doc unavailable">
+                No document attached yet
+              </div>
             )}
 
-            <Button variant="ghost" icon="plus" onClick={() => setShowDocTools((current) => !current)} className="mt-4 w-full rounded-full">
-              Add or create
-            </Button>
+            {canManageStory ? (
+              <Button variant="ghost" icon="plus" onClick={() => setShowDocTools((current) => !current)} className="mt-4 w-full rounded-full">
+                Add or create
+              </Button>
+            ) : null}
 
-            {showDocTools ? (
+            {canManageStory && showDocTools ? (
               <div className="mt-3 space-y-2">
                 <Input value={draftDocUrl} onChange={setDraftDocUrl} placeholder="Paste Google Doc link" />
                 <Button icon="link" onClick={linkStoryDoc} className="w-full">Link doc</Button>
               </div>
             ) : null}
 
+            {canManageStory ? (
             <div className="mt-4 space-y-2">
               {story.status !== "Returned" && story.status !== "Needs Revision" ? (
                 <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
@@ -3491,6 +4085,7 @@ function StoryDetailPage({ story, onBack, updateStoryStatus, updateStoryDocLink,
                 <Button onClick={() => updateStoryStatus(story.id, workflowAction.nextStatus)} className="w-full rounded-full">{workflowAction.label}</Button>
               ) : null}
             </div>
+            ) : null}
           </section>
 
           <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
@@ -3605,7 +4200,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
       });
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) {
-        throw new Error("Article API returned HTML instead of JSON. Make sure the Flask backend is running on port 5000.");
+        throw new Error("Article API returned HTML instead of JSON. Make sure the v3 backend is running on port 5003.");
       }
 
       const payload = await response.json().catch(() => ({}));
@@ -3997,7 +4592,7 @@ function IntervieweesPage() {
       const peopleType = peopleResponse.headers.get("content-type") || "";
       const articleType = articlesResponse.headers.get("content-type") || "";
       if (!peopleType.includes("application/json") || !articleType.includes("application/json")) {
-        throw new Error("Source APIs returned HTML instead of JSON. Make sure the Flask backend is running on port 5000.");
+        throw new Error("Source APIs returned HTML instead of JSON. Make sure the v3 backend is running on port 5003.");
       }
 
       const [peoplePayload, articlesPayload] = await Promise.all([
@@ -4828,7 +5423,7 @@ function TasksPage({ tasks, updateTaskStatus }) {
                 <div key={task.id} className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <StatusBadge tone={task.priority === "High" ? "amber" : "neutral"}>{task.priority}</StatusBadge>
-                    <span className="text-xs text-zinc-600">{task.due}</span>
+                    <span className="text-xs text-zinc-600">{formatDisplayDate(task.due) || task.due}</span>
                   </div>
                   <h3 className="text-sm font-medium leading-5">{task.title}</h3>
                   <p className="mt-2 text-xs text-zinc-500">{task.article}</p>
@@ -4933,11 +5528,42 @@ function AnalyticsPage({ articles, selectedArticle, setSelectedArticleId }) {
   );
 }
 
-function AdminPage({ setToast }) {
-  const [staff, setStaff] = useState(users);
+function AdminPage({ setToast, csrfToken = "", currentUser }) {
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All roles");
   const [collapsedRoles, setCollapsedRoles] = useState({});
+
+  const loadStaff = async (signal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Admin users are unavailable.");
+      }
+      setStaff(Array.isArray(payload.users) ? payload.users.map(normalizeDisplayUser) : []);
+    } catch (loadError) {
+      if (loadError.name === "AbortError") return;
+      setStaff([]);
+      setError(loadError instanceof Error ? loadError.message : "Admin users are unavailable.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadStaff(controller.signal);
+    return () => controller.abort();
+  }, []);
 
   const query = adminSearchQuery(search);
   const isSearching = query.length > 0;
@@ -4947,11 +5573,29 @@ function AdminPage({ setToast }) {
   );
   const groupedStaff = useMemo(() => groupAdminUsersByRole(staff, roleFilter), [staff, roleFilter]);
 
-  const updateUserRole = (userId, nextRole) => {
+  const updateUserRole = async (userId, nextRole) => {
     const user = staff.find((item) => item.id === userId);
-    setStaff((prev) => prev.map((item) => (item.id === userId ? { ...item, role: nextRole } : item)));
-    if (user && user.role !== nextRole) {
-      setToast(`${user.name} moved to ${nextRole}.`);
+    if (!user || user.role === nextRole) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/role`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ role: nextRole }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Role update failed.");
+      }
+      const updatedUser = normalizeDisplayUser(payload.user || { ...user, role: nextRole });
+      setStaff((prev) => prev.map((item) => (item.id === userId ? { ...item, ...updatedUser } : item)));
+      setToast(`${user.name} moved to ${accountRoleLabel(nextRole)}.`);
+    } catch (updateError) {
+      setToast(updateError instanceof Error ? updateError.message : "Role update failed.");
     }
   };
 
@@ -4972,7 +5616,11 @@ function AdminPage({ setToast }) {
           <Select value={roleFilter} onChange={setRoleFilter} options={ADMIN_ROLE_FILTER_OPTIONS} className="w-full md:w-36" />
         </div>
 
-        {isSearching ? (
+        {loading ? (
+          <StateMessage icon="admin" title="Loading users" body="Pulling users and roles from MongoDB." />
+        ) : error ? (
+          <StateMessage icon="admin" title="Admin users unavailable" body={error} />
+        ) : isSearching ? (
           <AdminSearchResults staff={visibleStaff} onRoleChange={updateUserRole} />
         ) : (
           <div className="space-y-6 pb-20">
@@ -5193,7 +5841,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
                 option === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
               )}
             >
-              <span>{option}</span>
+              <span>{accountRoleLabel(option)}</span>
               {option === value && <span className="h-1.5 w-1.5 rounded-full bg-zinc-100" />}
             </button>
           ))}
@@ -5213,7 +5861,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
         onClick={() => setOpen((prev) => !prev)}
         className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-100 transition hover:border-white/[0.16] hover:bg-white/[0.05] focus:outline-none focus:ring-2 focus:ring-white/15"
       >
-        <span className="truncate">{value}</span>
+        <span className="truncate">{accountRoleLabel(value)}</span>
         <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", open && "rotate-180")} />
       </button>
       {menu}

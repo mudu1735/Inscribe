@@ -13,23 +13,66 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
 import {
   Eye,
   EyeOff,
+  Globe,
+  Loader2,
   Lock,
   Mail,
-  ArrowRight,
-  Globe,
   User,
 } from "lucide-react";
 
 type AuthMode = "login" | "signup";
+type NoticeTone = "error" | "success" | "muted";
 
 interface AuthCardProps {
   mode: AuthMode;
   onModeChange?: (mode: AuthMode) => void;
+}
+
+interface AuthResponse {
+  ok?: boolean;
+  error?: string;
+  redirect?: string;
+  authUrl?: string;
+}
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const AUTH_BUFFER_MS = 850;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function safeRedirectTarget(target: string | undefined, fallback = "/dashboard") {
+  const normalized = (target || "").trim();
+  if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
+    return fallback;
+  }
+  if (normalized === "/") return "/dashboard";
+  if (normalized === "/records") return "/interviewees";
+  if (normalized === "/login" || normalized === "/signup") return fallback;
+  return normalized;
+}
+
+async function parseAuthResponse(response: Response): Promise<AuthResponse> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return (await response.json().catch(() => ({}))) as AuthResponse;
+  }
+  return {};
+}
+
+function authErrorForResponse(response: Response, data: AuthResponse) {
+  if (data.error) return data.error;
+  if (response.status === 404) {
+    return "Authentication endpoint unavailable. Restart the v3 backend with the latest code.";
+  }
+  if (response.status >= 500) {
+    return "Authentication server error. Please try again after the backend restarts.";
+  }
+  return "Authentication failed. Please try again.";
 }
 
 function AuthBackground() {
@@ -118,9 +161,9 @@ function AuthBackground() {
         @keyframes shimmer{0%{opacity:0}35%{opacity:.25}100%{opacity:0}}
         .card-animate{opacity:1;transform:translateY(0)}
         @media (prefers-reduced-motion:no-preference){
-          .card-animate{animation:fadeUp .7s cubic-bezier(.22,.61,.36,1) .15s both}
+          .card-animate{animation:fadeUp .55s cubic-bezier(.22,.61,.36,1) .12s both}
         }
-        @keyframes fadeUp{from{opacity:1;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
       `}</style>
 
       <div className="pointer-events-none absolute inset-0 [background:radial-gradient(80%_60%_at_50%_30%,rgba(255,255,255,0.06),transparent_60%)]" />
@@ -152,7 +195,7 @@ function ModeLink({
   const href = mode === "login" ? "/login" : "/signup";
   return (
     <a
-      className="ml-1 text-zinc-200 hover:underline"
+      className="ml-1 text-zinc-200 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900"
       href={href}
       onClick={(event) => {
         if (!onModeChange) return;
@@ -167,62 +210,210 @@ function ModeLink({
 
 function AuthCard({ mode, onModeChange }: AuthCardProps) {
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [remember, setRemember] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<NoticeTone>("muted");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const isSignup = mode === "signup";
+
+  useEffect(() => {
+    setNotice("");
+    setNoticeTone("muted");
+    setShowPassword(false);
+    setPassword("");
+    setConfirmPassword("");
+  }, [mode]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleError = params.get("auth") === "google" ? params.get("error") : "";
+    if (!googleError) return;
+
+    setNotice(googleError);
+    setNoticeTone("error");
+    params.delete("auth");
+    params.delete("error");
+    const nextQuery = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+  }, []);
 
   const title = isSignup ? "Create your account" : "Welcome back";
   const description = isSignup
     ? "Start your Falcon Newsroom workspace"
     : "Sign in to your Falcon Newsroom account";
 
+  const showNotice = (message: string, tone: NoticeTone = "error") => {
+    setNotice(message);
+    setNoticeTone(tone);
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmitting) return;
+
+    const form = event.currentTarget;
+    if (!form.reportValidity()) return;
+
+    if (isSignup && password !== confirmPassword) {
+      showNotice("Passwords do not match.");
+      return;
+    }
+
+    if (isSignup && password.length < 8) {
+      showNotice("Password must be at least 8 characters.");
+      return;
+    }
+
+    const endpoint = isSignup ? "/api/auth/register" : "/api/auth/login";
+    const payload = isSignup
+      ? {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          password,
+          confirmPassword,
+        }
+      : {
+          email: email.trim(),
+          password,
+          remember,
+        };
+
+    setIsSubmitting(true);
+    setNotice("");
+    const startedAt = window.performance.now();
+
+    try {
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      const data = await parseAuthResponse(response);
+      const elapsed = window.performance.now() - startedAt;
+      if (elapsed < AUTH_BUFFER_MS) {
+        await sleep(AUTH_BUFFER_MS - elapsed);
+      }
+
+      if (!response.ok || !data.ok) {
+        showNotice(authErrorForResponse(response, data));
+        return;
+      }
+
+      showNotice(isSignup ? "Account created. Opening the newsroom..." : "Signed in. Opening the newsroom...", "success");
+      window.location.assign(safeRedirectTarget(data.redirect, isSignup ? "/interviewees" : "/dashboard"));
+    } catch {
+      const elapsed = window.performance.now() - startedAt;
+      if (elapsed < AUTH_BUFFER_MS) {
+        await sleep(AUTH_BUFFER_MS - elapsed);
+      }
+      showNotice("Could not reach the authentication server. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (isSubmitting || isGoogleSubmitting) return;
+
+    setIsGoogleSubmitting(true);
+    setNotice("");
+    const next = new URLSearchParams(window.location.search).get("next") || "";
+    const nextQuery = next ? `?next=${encodeURIComponent(next)}` : "";
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/google/start${nextQuery}`, {
+        headers: { "Accept": "application/json" },
+        credentials: "include",
+      });
+      const data = await parseAuthResponse(response);
+      if (!response.ok || !data.ok || !data.authUrl) {
+        showNotice(authErrorForResponse(response, data));
+        return;
+      }
+      window.location.assign(data.authUrl);
+    } catch {
+      showNotice("Could not start Google sign-in. Please try again.");
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
+
+  const noticeClass =
+    noticeTone === "success"
+      ? "text-emerald-200"
+      : noticeTone === "error"
+        ? "text-red-200"
+        : "text-zinc-400";
+
   return (
     <section className="fixed inset-0 overflow-hidden bg-zinc-950 text-zinc-50">
       <AuthBackground />
 
-      <header className="absolute left-0 right-0 top-0 z-10 flex items-center justify-between border-b border-zinc-800/80 px-6 py-4">
+      <header className="absolute left-0 right-0 top-0 z-10 flex items-center border-b border-zinc-800/80 px-6 py-5">
         <span className="text-xs uppercase tracking-[0.14em] text-zinc-400">
           Falcon Newsroom
         </span>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-9 rounded-lg border-zinc-800 bg-zinc-900 text-zinc-50 hover:bg-zinc-900/80"
-        >
-          <span className="mr-2">Contact</span>
-          <ArrowRight className="h-4 w-4" />
-        </Button>
       </header>
 
-      <div className="relative z-10 grid h-full w-full place-items-center px-4 py-20">
-        <Card className="card-animate w-full max-w-sm border-zinc-800 bg-zinc-900/70 backdrop-blur supports-[backdrop-filter]:bg-zinc-900/60">
-          <CardHeader className="space-y-1">
+      <div className="relative z-10 grid h-full w-full place-items-center px-4 py-24">
+        <Card className="card-animate w-full max-w-md border-zinc-800 bg-zinc-900/95 shadow-2xl shadow-black/30">
+          <CardHeader className="space-y-2 p-7 pb-5">
             <CardTitle className="text-2xl">{title}</CardTitle>
             <CardDescription className="text-zinc-400">
               {description}
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="grid gap-5">
-            <form
-              className="grid gap-5"
-              onSubmit={(event) => {
-                event.preventDefault();
-                setNotice("Frontend preview only. Authentication is not connected yet.");
-              }}
-            >
+          <CardContent className="grid gap-5 px-7 pb-6">
+            <form className="grid gap-5" onSubmit={handleSubmit}>
               {isSignup && (
-                <div className="grid gap-2">
-                  <Label htmlFor="name" className="text-zinc-300">
-                    Name
-                  </Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="firstName" className="text-zinc-300">
+                      First name
+                    </Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                      <Input
+                        id="firstName"
+                        type="text"
+                        autoComplete="given-name"
+                        value={firstName}
+                        onChange={(event) => setFirstName(event.target.value)}
+                        required
+                        maxLength={80}
+                        disabled={isSubmitting}
+                        className="h-11 border-zinc-800 bg-zinc-950 pl-10 text-zinc-50 placeholder:text-zinc-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="lastName" className="text-zinc-300">
+                      Last name
+                    </Label>
                     <Input
-                      id="name"
+                      id="lastName"
                       type="text"
-                      autoComplete="name"
-                      placeholder="Your name"
-                      className="border-zinc-800 bg-zinc-950 pl-10 text-zinc-50 placeholder:text-zinc-600"
+                      autoComplete="family-name"
+                      value={lastName}
+                      onChange={(event) => setLastName(event.target.value)}
+                      required
+                      maxLength={80}
+                      disabled={isSubmitting}
+                      className="h-11 border-zinc-800 bg-zinc-950 text-zinc-50 placeholder:text-zinc-600"
                     />
                   </div>
                 </div>
@@ -239,7 +430,12 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                     type="email"
                     autoComplete="email"
                     placeholder="you@example.com"
-                    className="border-zinc-800 bg-zinc-950 pl-10 text-zinc-50 placeholder:text-zinc-600"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                    maxLength={254}
+                    disabled={isSubmitting}
+                    className="h-11 border-zinc-800 bg-zinc-950 pl-10 text-zinc-50 placeholder:text-zinc-600"
                   />
                 </div>
               </div>
@@ -255,13 +451,20 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                     type={showPassword ? "text" : "password"}
                     autoComplete={isSignup ? "new-password" : "current-password"}
                     placeholder="********"
-                    className="border-zinc-800 bg-zinc-950 pl-10 pr-10 text-zinc-50 placeholder:text-zinc-600"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                    minLength={isSignup ? 8 : undefined}
+                    maxLength={256}
+                    disabled={isSubmitting}
+                    className="h-11 border-zinc-800 bg-zinc-950 pl-10 pr-10 text-zinc-50 placeholder:text-zinc-600"
                   />
                   <button
                     type="button"
                     aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-zinc-400 hover:text-zinc-200"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-zinc-400 transition hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
                     onClick={() => setShowPassword((value) => !value)}
+                    disabled={isSubmitting}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -272,59 +475,96 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={isSignup ? "terms" : "remember"}
-                    className="border-zinc-700 data-[state=checked]:bg-zinc-50 data-[state=checked]:text-zinc-900"
-                  />
-                  <Label
-                    htmlFor={isSignup ? "terms" : "remember"}
-                    className="text-zinc-400"
-                  >
-                    {isSignup ? "I agree" : "Remember me"}
+              {isSignup && (
+                <div className="grid gap-2">
+                  <Label htmlFor="confirmPassword" className="text-zinc-300">
+                    Confirm password
                   </Label>
+                  <Input
+                    id="confirmPassword"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    placeholder="********"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    required
+                    minLength={8}
+                    maxLength={256}
+                    disabled={isSubmitting}
+                    className="h-11 border-zinc-800 bg-zinc-950 text-zinc-50 placeholder:text-zinc-600"
+                  />
                 </div>
-                {!isSignup && (
-                  <a href="/login" className="text-sm text-zinc-300 hover:text-zinc-100">
-                    Forgot password?
-                  </a>
-                )}
-              </div>
+              )}
+
+              {!isSignup && (
+                <label className="flex w-fit items-center gap-2 text-sm text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                    disabled={isSubmitting}
+                    className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-zinc-100 accent-zinc-100"
+                  />
+                  Remember me
+                </label>
+              )}
 
               <Button
                 type="submit"
-                className="h-10 w-full rounded-lg bg-zinc-50 text-zinc-900 hover:bg-zinc-200"
+                disabled={isSubmitting || isGoogleSubmitting}
+                aria-busy={isSubmitting}
+                className="h-11 w-full rounded-lg bg-zinc-50 text-zinc-900 hover:bg-zinc-200"
               >
-                {isSignup ? "Create account" : "Continue"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {isSignup ? "Creating account" : "Signing in"}
+                  </>
+                ) : (
+                  isSignup ? "Create account" : "Continue"
+                )}
               </Button>
             </form>
 
             {notice && (
-              <p className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-400">
+              <p
+                className={`text-sm font-medium ${noticeClass}`}
+                role={noticeTone === "error" ? "alert" : "status"}
+                aria-live="polite"
+              >
                 {notice}
               </p>
             )}
 
-            <div className="relative">
-              <Separator className="bg-zinc-800" />
-              <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-zinc-900/70 px-2 text-[11px] uppercase tracking-widest text-zinc-500">
-                or
-              </span>
+            <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-zinc-600">
+              <span className="h-px flex-1 bg-zinc-800" />
+              <span>or</span>
+              <span className="h-px flex-1 bg-zinc-800" />
             </div>
 
             <Button
               type="button"
               variant="outline"
-              className="h-10 w-full rounded-lg border-zinc-800 bg-zinc-950 text-zinc-50 hover:bg-zinc-900/80"
-              onClick={() => setNotice("Google sign-in is a frontend preview only.")}
+              disabled={isSubmitting || isGoogleSubmitting}
+              aria-busy={isGoogleSubmitting}
+              className="h-11 w-full rounded-lg border-zinc-800 bg-zinc-950 text-zinc-50 hover:bg-zinc-900/80"
+              onClick={handleGoogleSignIn}
             >
-              <Globe className="mr-2 h-4 w-4" />
-              Continue with Google
+              {isGoogleSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Opening Google
+                </>
+              ) : (
+                <>
+                  <Globe className="mr-2 h-4 w-4" />
+                  Continue with Google
+                </>
+              )}
             </Button>
           </CardContent>
 
-          <CardFooter className="flex items-center justify-center text-sm text-zinc-400">
+          <CardFooter className="flex items-center justify-center px-7 pb-7 pt-0 text-sm text-zinc-400">
             {isSignup ? "Already have an account?" : "Don't have an account?"}
             <ModeLink
               mode={isSignup ? "login" : "signup"}
