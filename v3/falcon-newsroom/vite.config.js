@@ -9,12 +9,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:5000",
+      "/api": "http://127.0.0.1:5003",
     },
   },
   preview: {
     proxy: {
-      "/api": "http://127.0.0.1:5000",
+      "/api": "http://127.0.0.1:5003",
     },
   },
   build: {
