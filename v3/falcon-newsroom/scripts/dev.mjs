@@ -129,6 +129,6 @@ if (hasRequiredCapabilities(initialHealth)) {
   await waitForAuth();
 }
 
-console.log("[v3 dev] Starting Vite...");
-viteProcess = spawnChild("npx", ["vite", "--host", "127.0.0.1"]);
+console.log("[v3 dev] Starting Vite on 127.0.0.1:5173...");
+viteProcess = spawnChild("npx", ["vite", "--host", "127.0.0.1", "--port", "5173", "--strictPort"]);
 viteProcess.on("exit", (code) => shutdown(code || 0));

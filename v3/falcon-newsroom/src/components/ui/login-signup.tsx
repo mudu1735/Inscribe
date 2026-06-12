@@ -330,10 +330,14 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
     setIsGoogleSubmitting(true);
     setNotice("");
     const next = new URLSearchParams(window.location.search).get("next") || "";
-    const nextQuery = next ? `?next=${encodeURIComponent(next)}` : "";
+    const googleParams = new URLSearchParams({
+      origin: window.location.origin,
+      intent: isSignup ? "signup" : "login",
+    });
+    if (next) googleParams.set("next", next);
 
     try {
-      const response = await fetch(`${API_BASE}/api/auth/google/start${nextQuery}`, {
+      const response = await fetch(`${API_BASE}/api/auth/google/start?${googleParams.toString()}`, {
         headers: { "Accept": "application/json" },
         credentials: "include",
       });
@@ -558,7 +562,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
               ) : (
                 <>
                   <Globe className="mr-2 h-4 w-4" />
-                  Continue with Google
+                  {isSignup ? "Create account with Google" : "Continue with Google"}
                 </>
               )}
             </Button>
