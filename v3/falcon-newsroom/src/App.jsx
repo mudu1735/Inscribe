@@ -212,6 +212,13 @@ const navItems = [
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
+const navSections = [
+  { id: "editorial", label: "Editorial desk", items: ["dashboard", "pitches", "stories"] },
+  { id: "records", label: "Databases", items: ["articles", "interviewees"] },
+  { id: "planning", label: "Planning", items: ["calendar", "analytics"] },
+  { id: "system", label: "Workspace", items: ["admin", "settings"] },
+];
+
 const initialArticles = [
   {
     id: "a1",
@@ -473,16 +480,16 @@ const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Cu
 const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
 const STORY_WORKFLOW_COLUMNS = [
   {
-    id: "ready",
-    title: "Ready for Review",
-    description: "Submitted drafts that need an editor pass.",
-    statuses: ["Submitted", "In Review"],
-  },
-  {
     id: "progress",
     title: "In Progress",
     description: "Assigned, reporting, drafting, or back with the writer.",
     statuses: ["Assigned", "Reporting", "Drafting", "Needs Revision", "Returned"],
+  },
+  {
+    id: "ready",
+    title: "Ready for Review",
+    description: "Submitted drafts that need an editor pass.",
+    statuses: ["Submitted", "In Review"],
   },
   {
     id: "approval",
@@ -1017,10 +1024,80 @@ const ARTICLE_PAGE_SIZE = 10;
 const EXTRACTOR_ADDED_BY = "Editor";
 const EXTRACTOR_GRADE_OPTIONS = ["", "9", "10", "11", "12", "Staff"];
 const EXTRACTOR_HOUSE_OPTIONS = ["", "SMCS", "Global", "Humanities", "ISP"];
+const GOOGLE_PICKER_SCRIPT_SRC = "https://apis.google.com/js/api.js";
+let googlePickerLoadPromise = null;
 
 function asText(value) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function uniqueTextValues(values) {
+  const seen = new Set();
+  const result = [];
+  values.forEach((value) => {
+    const text = asText(value);
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+    result.push(text);
+  });
+  return result;
+}
+
+function navSectionsForItems(items) {
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  return navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.map((id) => itemById.get(id)).filter(Boolean),
+    }))
+    .filter((section) => section.items.length);
+}
+
+function loadExternalScript(src) {
+  const existing = document.querySelector(`script[src="${src}"]`);
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      if (existing.dataset.loaded === "true") resolve();
+      else {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener("error", reject, { once: true });
+      }
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", reject, { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+function loadGooglePickerApi() {
+  if (typeof window === "undefined") return Promise.reject(new Error("Google Picker requires a browser."));
+  if (window.google?.picker) return Promise.resolve();
+  if (!googlePickerLoadPromise) {
+    googlePickerLoadPromise = loadExternalScript(GOOGLE_PICKER_SCRIPT_SRC).then(() => new Promise((resolve, reject) => {
+      if (!window.gapi?.load) {
+        reject(new Error("Google Picker script did not load."));
+        return;
+      }
+      window.gapi.load("picker", {
+        callback: resolve,
+        onerror: () => reject(new Error("Could not load Google Picker.")),
+        ontimeout: () => reject(new Error("Google Picker timed out.")),
+        timeout: 10000,
+      });
+    }));
+  }
+  return googlePickerLoadPromise;
 }
 
 function firstText(...values) {
@@ -1147,6 +1224,48 @@ function canManageEditorialWorkflow(role) {
   return ["admin", "editor"].includes(normalizeAppRole(role));
 }
 
+function storyBelongsToUser(story, user) {
+  if (!story || !user) return false;
+  const storyUserIds = [story.writerUserId, story.ownerUserId, story.writerId, story.ownerId]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const storyEmails = [story.writerEmail, story.ownerEmail]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userIds = [user.id, user._id]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userEmail = asText(user.email).toLowerCase();
+  return userIds.some((value) => storyUserIds.includes(value)) || Boolean(userEmail && storyEmails.includes(userEmail));
+}
+
+function storyVisibleToUser(story, user) {
+  const role = normalizeAppRole(user?.role);
+  if (role === "viewer") return false;
+  if (role === "writer") return storyBelongsToUser(story, user);
+  return true;
+}
+
+function canSubmitOwnStory(user, story) {
+  if (normalizeAppRole(user?.role) !== "writer" || !storyBelongsToUser(story, user)) return false;
+  return !["Submitted", "In Review", "Ready for Publish", "Published"].includes(story.status);
+}
+
+function canUnsubmitOwnStory(user, story) {
+  return normalizeAppRole(user?.role) === "writer"
+    && storyBelongsToUser(story, user)
+    && story?.status === "Submitted";
+}
+
+function canUpdateOwnStorySubmission(user, story) {
+  return canSubmitOwnStory(user, story) || canUnsubmitOwnStory(user, story);
+}
+
+function canEditStoryAttachment(user, story) {
+  if (canManageEditorialWorkflow(user?.role)) return true;
+  return normalizeAppRole(user?.role) === "writer" && storyBelongsToUser(story, user);
+}
+
 function navItemsForRole(role) {
   const currentRole = normalizeAppRole(role);
   return navItems.filter((item) => {
@@ -1222,7 +1341,139 @@ function isValidHttpUrl(value) {
 }
 
 function storyDocIsOpenable(story) {
-  return isValidHttpUrl(story.googleDocUrl);
+  return storyAttachmentItems(story).length > 0;
+}
+
+function normalizeStoryAttachment(story, attachment) {
+  if (!attachment) return null;
+  if (attachment?.type === "drive" && attachment.url) {
+    return {
+      id: attachment.id || attachment.fileId || attachment.url,
+      type: "drive",
+      provider: "google-drive",
+      url: attachment.webViewLink || attachment.url,
+      name: attachment.name || story?.title || "Drive file",
+      detail: attachment.typeLabel || workAttachmentTypeLabel(attachment),
+      permissionStatus: attachment.permissionStatus || "not_shared",
+      shareResults: Array.isArray(attachment.shareResults) ? attachment.shareResults : [],
+      copyable: true,
+    };
+  }
+  if (attachment?.type === "file" && attachment.url) {
+    return {
+      id: attachment.id || attachment.url,
+      type: "file",
+      url: attachment.url,
+      name: workAttachmentTitle(story, attachment),
+      detail: workAttachmentTypeLabel(attachment),
+      copyable: false,
+    };
+  }
+  const url = attachment?.type === "link" ? attachment.url : story?.googleDocUrl;
+  if (!isValidHttpUrl(url)) return null;
+  return {
+    id: attachment?.id || url,
+    type: "link",
+    url,
+    name: workAttachmentTitle(story, attachment),
+    detail: workAttachmentTypeLabel({ ...attachment, type: "link", url }),
+    copyable: true,
+  };
+}
+
+function storyAttachmentItems(story) {
+  const rawAttachments = Array.isArray(story?.attachments) ? story.attachments : [];
+  const attachments = rawAttachments
+    .map((attachment) => normalizeStoryAttachment(story, attachment))
+    .filter(Boolean);
+  if (attachments.length) return attachments;
+  const single = normalizeStoryAttachment(story, story?.attachment || null);
+  return single ? [single] : [];
+}
+
+function storyAttachmentInfo(story) {
+  return storyAttachmentItems(story)[0] || null;
+}
+
+function rawStoryAttachmentItems(story) {
+  if (Array.isArray(story?.attachments)) return story.attachments.filter(Boolean);
+  if (story?.attachment) return [story.attachment];
+  return [];
+}
+
+function storyAttachmentMergeKey(attachment) {
+  const item = attachment || {};
+  const type = asText(item.type).toLowerCase();
+  const fileId = asText(item.fileId);
+  const url = asText(item.webViewLink || item.url);
+  if ((type === "drive" || type === "link") && url) return `url:${url}`;
+  if (type === "file" && fileId) return `${type}:${fileId}`;
+  return asText(item.id || item.attachmentId || url || item.name);
+}
+
+function mergeStoryAttachmentState(previousStory, updatedStory) {
+  const mergedAttachments = [];
+  const seen = new Set();
+  for (const item of [...rawStoryAttachmentItems(previousStory), ...rawStoryAttachmentItems(updatedStory)]) {
+    const key = storyAttachmentMergeKey(item);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    mergedAttachments.push(item);
+  }
+  if (!mergedAttachments.length) return updatedStory;
+  return {
+    ...updatedStory,
+    attachments: mergedAttachments,
+    attachment: mergedAttachments[0],
+  };
+}
+
+function workAttachmentTitle(story, attachment) {
+  const name = asText(attachment?.name);
+  if (name && !["story link", "story doc", "uploaded story file", "story upload"].includes(name.toLowerCase())) {
+    return name;
+  }
+  return story?.title || "Attached work";
+}
+
+function workAttachmentTypeLabel(attachment) {
+  const name = asText(attachment?.name).toLowerCase();
+  const url = asText(attachment?.url).toLowerCase();
+  const contentType = asText(attachment?.contentType).toLowerCase();
+  const source = `${name} ${url} ${contentType}`;
+  const hasExtension = (...extensions) => new RegExp(`\\.(${extensions.join("|")})(?:[\\s?#]|$)`).test(source);
+
+  if (source.includes("docs.google.com/document")) return "Google Doc";
+  if (source.includes("docs.google.com/presentation")) return "Google Slides";
+  if (source.includes("docs.google.com/spreadsheets")) return "Google Sheet";
+  if (source.includes("application/pdf") || hasExtension("pdf")) return "PDF";
+  if (source.includes("wordprocessingml") || hasExtension("docx?", "odt")) return "Document";
+  if (source.includes("presentationml") || hasExtension("pptx?", "odp")) return "Slides";
+  if (source.includes("spreadsheetml") || hasExtension("xlsx?", "ods", "csv")) return "Spreadsheet";
+  if (source.includes("image/") || hasExtension("png", "jpe?g", "webp", "gif", "heic")) return "Image";
+  if (source.includes("text/") || hasExtension("txt", "md", "rtf")) return "Text file";
+  return attachment?.type === "file" ? "Uploaded file" : "Linked document";
+}
+
+function storyAttachmentCopyUrl(story, selectedAttachment = null) {
+  const attachment = selectedAttachment || storyAttachmentInfo(story);
+  if (!attachment?.url) return "";
+  if (attachment.type === "file" && attachment.url.startsWith("/")) {
+    return `${window.location.origin}${attachment.url}`;
+  }
+  return attachment.url;
+}
+
+function drivePermissionText(status) {
+  return "";
+}
+
+function formatFileSize(size) {
+  const bytes = Number(size) || 0;
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
 function storyStatusTextClass(status) {
@@ -1245,7 +1496,7 @@ function storyBadgeTone(status) {
 }
 
 function storyColumnForStatus(status) {
-  return STORY_WORKFLOW_COLUMNS.find((column) => column.statuses.includes(status)) || STORY_WORKFLOW_COLUMNS[1];
+  return STORY_WORKFLOW_COLUMNS.find((column) => column.statuses.includes(status)) || STORY_WORKFLOW_COLUMNS[0];
 }
 
 function storyColumnForStory(story) {
@@ -1285,13 +1536,9 @@ function storyCommentCount(story) {
 
 function storyWorkflowAction(story) {
   if (!story) return null;
-  if (story.status === "Ready for Publish") {
-    return { label: "Mark approved", nextStatus: "Published" };
-  }
-  if (story.status === "Submitted" || story.status === "In Review") {
-    return { label: "Send to teacher", nextStatus: "Ready for Publish" };
-  }
-  return { label: "Mark ready", nextStatus: "Submitted" };
+  if (story.status === "Submitted") return { label: "Unsubmit", nextStatus: "Drafting" };
+  if (["In Review", "Ready for Publish", "Published"].includes(story.status)) return null;
+  return { label: "Submit", nextStatus: "Submitted" };
 }
 
 function storyFeedbackItems(story) {
@@ -1453,7 +1700,7 @@ function normalizeInterviewee(raw = {}) {
 
 function normalizeArticleRecord(raw = {}) {
   const authors = toList(raw.authors).length ? toList(raw.authors) : toList(raw.author);
-  const tags = toList(raw.tags).length ? toList(raw.tags) : toList(raw.categories);
+  const tags = uniqueTextValues(toList(raw.tags).length ? toList(raw.tags) : toList(raw.categories));
   const url = normalizeUrl(firstText(raw.url, raw.articleUrl, raw.article_url));
   const section = firstText(raw.section, raw.category);
   const interviewees = Array.isArray(raw.interviewees) ? raw.interviewees.map(normalizeInterviewee) : [];
@@ -1467,7 +1714,7 @@ function normalizeArticleRecord(raw = {}) {
     publishedAt: normalizePublishedDate(raw.publishedAt, raw.datePublished, raw.date, raw.published),
     section,
     tags,
-    filterGroups: [section, firstText(raw.category), ...tags].filter(Boolean),
+    filterGroups: uniqueTextValues([section, firstText(raw.category), ...tags]),
     interviewees,
   };
 }
@@ -1764,17 +2011,35 @@ function matchesPitchFilters(pitch, query, section, statusFilter = "All Active")
   return true;
 }
 
+function pitchOwnerGroupKey(pitch) {
+  return asText(pitch.ownerUserId) || asText(pitch.ownerEmail).toLowerCase() || asText(pitch.owner).toLowerCase() || "unassigned";
+}
+
 function groupActivePitchesByWriter(pitches) {
   const grouped = new Map();
   pitches.forEach((pitch) => {
     const writer = pitch.owner || "Unassigned";
-    if (!grouped.has(writer)) grouped.set(writer, []);
-    grouped.get(writer).push(pitch);
+    const key = pitchOwnerGroupKey(pitch);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        writer,
+        email: asText(pitch.ownerEmail),
+        pitches: [],
+      });
+    }
+    grouped.get(key).pitches.push(pitch);
   });
-  return Array.from(grouped.entries())
-    .map(([writer, writerPitches]) => ({
-      writer,
-      pitches: writerPitches.slice().sort((a, b) => dateSortValue(b.submittedAt) - dateSortValue(a.submittedAt)),
+  const writerNameCounts = new Map();
+  grouped.forEach((group) => {
+    const nameKey = group.writer.toLowerCase();
+    writerNameCounts.set(nameKey, (writerNameCounts.get(nameKey) || 0) + 1);
+  });
+  return Array.from(grouped.values())
+    .map((group) => ({
+      ...group,
+      hasDuplicateName: writerNameCounts.get(group.writer.toLowerCase()) > 1,
+      pitches: group.pitches.slice().sort((a, b) => dateSortValue(b.submittedAt) - dateSortValue(a.submittedAt)),
     }))
     .sort((a, b) => {
       const countDiff = b.pitches.length - a.pitches.length;
@@ -1812,6 +2077,7 @@ function runArticleMappingTests() {
   console.assert(withStringAuthor.publishedAt === "May 7, 2026", "date fallback should populate published date.");
   console.assert(matchesArticleFilters(withStringAuthor, "thompson", "All sections"), "Search should include interviewee names.");
   console.assert(matchesArticleFilters(withStringAuthor, "sofia", "News"), "Search should include authors and tags.");
+  console.assert(uniqueTextValues(["News", "news", "Features"]).join("|") === "News|Features", "Section and tag pills should be case-insensitively deduped.");
 
   const sparse = normalizeArticleRecord({});
   console.assert(Array.isArray(sparse.authors), "Missing authors should produce an empty array.");
@@ -1876,12 +2142,40 @@ function runPrototypeTests() {
   console.assert(storyMatchesFilters(initialStories[0], "parking", "All statuses", "All sections"), "Stories search should include title text.");
   console.assert(initialStories.every((story) => !storyDocIsOpenable(story)), "Default story records should start without attached Google Docs.");
   console.assert(!storyDocIsOpenable(initialStories.find((story) => story.id === "s5")), "Missing Google Doc links should be treated as unavailable.");
+  const writerUser = { id: "writer-1", email: "ava@example.com", name: "Ava Patel", role: "writer" };
+  const ownedDraft = { ...initialStories[0], writer: "Ava Patel", writerEmail: "ava@example.com", writerUserId: "writer-1", status: "Drafting" };
+  const otherDraft = { ...ownedDraft, writer: "Marcus Lee", writerEmail: "marcus@example.com", writerUserId: "writer-2" };
+  const sameNameDifferentEmail = { ...ownedDraft, writer: "Ava Patel", writerEmail: "ava2@example.com", writerUserId: "writer-2" };
+  console.assert(storyVisibleToUser(ownedDraft, writerUser), "Writers should see their own stories.");
+  console.assert(!storyVisibleToUser(otherDraft, writerUser), "Writers should not see other writers' stories.");
+  console.assert(!storyVisibleToUser(sameNameDifferentEmail, writerUser), "Writers should not inherit ownership from matching display names.");
+  console.assert(canSubmitOwnStory(writerUser, ownedDraft), "Writers should be able to submit their own active drafts.");
+  console.assert(!canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should not use the writer submit action.");
+  console.assert(canEditStoryAttachment({ ...writerUser, role: "editor" }, otherDraft), "Editors should be able to add work to any visible story.");
+  console.assert(storyWorkflowAction(ownedDraft)?.nextStatus === "Submitted", "Story workflow action should submit writer drafts.");
+  console.assert(canUnsubmitOwnStory(writerUser, { ...ownedDraft, status: "Submitted" }), "Writers should be able to unsubmit their own submitted stories.");
+  console.assert(storyWorkflowAction({ ...ownedDraft, status: "Submitted" })?.nextStatus === "Drafting", "Submitted stories should show an unsubmit action.");
+  console.assert(storyAttachmentInfo({ attachment: { type: "file", url: "/api/stories/s1/attachment", name: "draft.pdf", size: 2048 } })?.detail === "PDF", "File attachments should show document type.");
+  console.assert(storyAttachmentItems({
+    attachments: [
+      { id: "drive-1", type: "drive", url: "https://docs.google.com/document/d/1", name: "Draft doc", typeLabel: "Doc" },
+      { id: "file-1", type: "file", url: "/api/stories/s1/attachments/file-1", name: "photo.png", contentType: "image/png" },
+    ],
+  }).length === 2, "Stories should keep multiple attached work items.");
+  console.assert(mergeStoryAttachmentState(
+    { attachments: [{ id: "drive-1", type: "drive", url: "https://docs.google.com/document/d/1", name: "Draft doc", typeLabel: "Doc" }] },
+    { attachments: [{ id: "file-1", type: "file", url: "/api/stories/s1/attachments/file-1", name: "photo.png", contentType: "image/png" }] }
+  ).attachments.length === 2, "Story attachment updates should merge new work with existing work.");
   console.assert(initialArticles.some((a) => a.status === "Published"), "Prototype needs published article data.");
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
   console.assert(PITCH_STATUSES.every((status) => initialPitches.some((pitch) => pitch.status === status)), "Pitch board needs examples for each status.");
   console.assert(matchesPitchFilters(initialPitches[0], "clubs", "All sections"), "Pitch search should include title and angle text.");
   console.assert(!matchesPitchFilters(initialPitches[2], "", "All sections"), "Approved pitches should stay out of the active board.");
   console.assert(groupActivePitchesByWriter(initialPitches.filter(isActivePitch)).every((group) => group.pitches.every(isActivePitch)), "Writer groups should include active pitches only.");
+  console.assert(groupActivePitchesByWriter([
+    { ...initialPitches[0], owner: "Alex Lee", ownerEmail: "alex.one@example.com", ownerUserId: "u1" },
+    { ...initialPitches[1], owner: "Alex Lee", ownerEmail: "alex.two@example.com", ownerUserId: "u2" },
+  ]).length === 2, "Pitch board should separate owners with matching names and different accounts.");
   console.assert(pitchNoteCount({ notes: "", comments: [] }) === 0, "Pitch note count should allow zero.");
   console.assert(sectionData.reduce((sum, s) => sum + s.value, 0) === 100, "Section analytics should total 100 percent.");
 }
@@ -2225,6 +2519,7 @@ function AppShell() {
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
   const availableNavItems = navItemsForRole(accountRole);
+  const availableNavSections = navSectionsForItems(availableNavItems);
 
   useEffect(() => {
     const syncLocationPath = () => setLocationPath(window.location.pathname);
@@ -2341,8 +2636,18 @@ function AppShell() {
   };
 
   const updateStoryStatus = async (id, status) => {
-    if (!canManageEditorialWorkflow(accountRole)) {
-      setToast("Only admins and editors can change story status.");
+    const currentStory = stories.find((story) => story.id === id);
+    if (status === "Submitted" && canSubmitOwnStory(account, currentStory) && !storyAttachmentItems(currentStory).length) {
+      setToast("Attach work before submitting this story.");
+      return;
+    }
+    const canReturnStory = canManageEditorialWorkflow(accountRole) && status === "Returned";
+    const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && status === "Ready for Publish";
+    const canUseWriterWorkflow =
+      (status === "Submitted" && canSubmitOwnStory(account, currentStory)) ||
+      (status === "Drafting" && canUnsubmitOwnStory(account, currentStory));
+    if (!canReturnStory && !canSendToTeacherApproval && !canUseWriterWorkflow) {
+      setToast(canManageEditorialWorkflow(accountRole) ? "Editors can return stories or send them to teacher approval." : "Writers can submit or unsubmit their own stories.");
       return;
     }
     try {
@@ -2358,6 +2663,10 @@ function AppShell() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
+        if (payload?.story) {
+          const failedStory = normalizeDisplayStory(payload.story);
+          setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...failedStory } : story)));
+        }
         throw new Error(payload?.error || "Story status update failed.");
       }
       const updatedStory = normalizeDisplayStory(payload.story || { id, status, lastEdited: "Updated just now" });
@@ -2369,9 +2678,10 @@ function AppShell() {
   };
 
   const updateStoryDocLink = async (id, googleDocUrl) => {
-    if (!canManageEditorialWorkflow(accountRole)) {
-      setToast("Only admins and editors can update story documents.");
-      return;
+    const currentStory = stories.find((story) => story.id === id);
+    if (!canEditStoryAttachment(account, currentStory)) {
+      setToast("You can only update content for stories you can access.");
+      return false;
     }
     try {
       const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}`, {
@@ -2382,19 +2692,126 @@ function AppShell() {
           ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
-        body: JSON.stringify({ googleDocUrl }),
+        body: JSON.stringify({ documentUrl: googleDocUrl }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error || "Could not link Google Doc.");
+        throw new Error(payload?.error || "Could not attach link.");
       }
       const updatedStory = normalizeDisplayStory(payload.story || { id, googleDocUrl, lastEdited: "Updated just now" });
       setStories((prev) => prev.map((story) => (
+        story.id === id ? { ...story, ...mergeStoryAttachmentState(story, updatedStory) } : story
+      )));
+      setToast("Attached link.");
+      return true;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not attach link.");
+      return false;
+    }
+  };
+
+  const clearStoryAttachment = async (id, attachmentId = "") => {
+    const currentStory = stories.find((story) => story.id === id);
+    if (!canEditStoryAttachment(account, currentStory)) {
+      setToast("You can only update content for stories you can access.");
+      return false;
+    }
+    try {
+      const response = await fetch(
+        attachmentId
+          ? `${API_BASE}/api/stories/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`
+          : `${API_BASE}/api/stories/${encodeURIComponent(id)}`,
+        {
+          method: attachmentId ? "DELETE" : "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+          },
+          credentials: "include",
+          body: attachmentId ? undefined : JSON.stringify({ documentUrl: "" }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not remove attachment.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, googleDocUrl: "", attachment: null, lastEdited: "Updated just now" });
+      setStories((prev) => prev.map((story) => (
         story.id === id ? { ...story, ...updatedStory } : story
       )));
-      setToast("Linked Google Doc.");
+      setToast("Removed attachment.");
+      return true;
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Could not link Google Doc.");
+      setToast(error instanceof Error ? error.message : "Could not remove attachment.");
+      return false;
+    }
+  };
+
+  const uploadStoryAttachment = async (id, file) => {
+    const currentStory = stories.find((story) => story.id === id);
+    if (!canEditStoryAttachment(account, currentStory)) {
+      setToast("You can only upload files for stories you can access.");
+      return false;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}/attachment`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not upload file.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, lastEdited: "Updated just now" });
+      setStories((prev) => prev.map((story) => (
+        story.id === id ? { ...story, ...mergeStoryAttachmentState(story, updatedStory) } : story
+      )));
+      setToast("Uploaded file.");
+      return true;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not upload file.");
+      return false;
+    }
+  };
+
+  const attachDriveFileToStory = async (id, file) => {
+    const currentStory = stories.find((story) => story.id === id);
+    if (!canEditStoryAttachment(account, currentStory)) {
+      setToast("You can only attach Drive files for stories you can access.");
+      return false;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}/drive-attachment`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(file),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not attach Google Drive file.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, lastEdited: "Updated just now" });
+      setStories((prev) => prev.map((story) => (
+        story.id === id ? { ...story, ...mergeStoryAttachmentState(story, updatedStory) } : story
+      )));
+      setToast(payload.warning || "Attached Google Drive file.");
+      return true;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not attach Google Drive file.");
+      return false;
     }
   };
 
@@ -2472,10 +2889,10 @@ function AppShell() {
   const pages = {
     dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
     pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
-    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} setToast={setToast} />,
+    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
-    interviewees: <IntervieweesPage />,
+    interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
     calendar: <CalendarPage />,
     analytics: <AnalyticsPage articles={articles} selectedArticle={selectedArticle} setSelectedArticleId={setSelectedArticleId} />,
@@ -2497,18 +2914,25 @@ function AppShell() {
 
           <Input value={globalSearch} onChange={setGlobalSearch} placeholder="Search workspace" className="mb-5" />
 
-          <nav className="space-y-1">
-            {availableNavItems.map((item) => (
-              <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition", page === item.id ? "border border-white/[0.08] bg-white/[0.07] text-zinc-50 shadow-lg shadow-black/20" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200")}>
-                <Icon name={item.icon} className="h-4 w-4" />
-                {item.label}
-              </button>
+          <nav className="space-y-5">
+            {availableNavSections.map((section) => (
+              <div key={section.id}>
+                <div className="mb-2 px-3 text-[0.68rem] uppercase tracking-[0.16em] text-zinc-700">{section.label}</div>
+                <div className="space-y-1">
+                  {section.items.map((item) => (
+                    <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition", page === item.id ? "border border-white/[0.08] bg-white/[0.07] text-zinc-50 shadow-lg shadow-black/20" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200")}>
+                      <Icon name={item.icon} className="h-4 w-4" />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
         </aside>
 
         <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="shrink-0 border-b border-white/[0.08] bg-[#08090c]/75 px-5 py-4 backdrop-blur-2xl md:px-8">
+          <header className="relative z-[100] shrink-0 border-b border-white/[0.08] bg-[#08090c]/75 px-5 py-4 backdrop-blur-2xl md:px-8">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 lg:hidden">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-black">F</div>
@@ -2598,7 +3022,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.14, ease: "easeOut" }}
-            className="absolute right-0 top-11 z-50 w-64 overflow-hidden rounded-lg border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
+            className="absolute right-0 top-11 z-[1000] w-64 overflow-hidden rounded-lg border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
           >
             <div className="px-3 py-3">
               <div className="truncate text-sm font-medium text-zinc-100">{displayName}</div>
@@ -3076,7 +3500,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
       setQuery("");
       setSection("All sections");
       setStatusFilter("All Active");
-      setExpandedWriters((previous) => new Set([...previous, nextPitch.owner]));
+      setExpandedWriters((previous) => new Set([...previous, pitchOwnerGroupKey(nextPitch)]));
       setCreateOpen(false);
       setToast("Created a new pitch.");
     } catch (createError) {
@@ -3127,7 +3551,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     });
   };
 
-  const expandAll = () => setExpandedWriters(new Set(writerGroups.map((group) => group.writer)));
+  const expandAll = () => setExpandedWriters(new Set(writerGroups.map((group) => group.key)));
   const collapseAll = () => setExpandedWriters(new Set());
 
   if (detailPitchId) {
@@ -3201,10 +3625,10 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
           {!loading && !error && writerGroups.map((group) => (
             <PitchWriterRow
-              key={group.writer}
+              key={group.key}
               group={group}
-              expanded={expandedWriters.has(group.writer)}
-              onToggle={() => toggleWriter(group.writer)}
+              expanded={expandedWriters.has(group.key)}
+              onToggle={() => toggleWriter(group.key)}
               onSelectPitch={navigateToPitch}
             />
           ))}
@@ -3244,7 +3668,12 @@ function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
       >
         <div className="flex min-w-0 items-center gap-3">
           <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", expanded && "rotate-180")} />
-          <span className="truncate text-sm font-medium text-zinc-100">{group.writer}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-zinc-100">{group.writer}</span>
+            {group.hasDuplicateName && group.email ? (
+              <span className="block truncate text-xs text-zinc-500">{group.email}</span>
+            ) : null}
+          </span>
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <PitchCountLabel label="Active" count={group.pitches.length} />
@@ -3819,7 +4248,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
   );
 }
 
-function StoriesPage({ stories, loading = false, error = "", currentUser, updateStoryStatus, updateStoryDocLink, setToast }) {
+function StoriesPage({ stories, loading = false, error = "", currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, setToast }) {
   const [query, setQuery] = useState("");
   const [sectionFilter, setSectionFilter] = useState("All sections");
   const [detailStoryId, setDetailStoryId] = useState(initialStoryDetailId);
@@ -3834,7 +4263,8 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, update
     };
   }, []);
 
-  const activeStories = useMemo(() => stories.filter(isActiveStory), [stories]);
+  const scopedStories = useMemo(() => stories.filter((story) => storyVisibleToUser(story, currentUser)), [stories, currentUser]);
+  const activeStories = useMemo(() => scopedStories.filter(isActiveStory), [scopedStories]);
   const visibleStories = useMemo(
     () =>
       activeStories.filter((story) => {
@@ -3842,18 +4272,19 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, update
       }),
     [activeStories, query, sectionFilter]
   );
-  const detailStory = stories.find((story) => story.id === detailStoryId) || null;
+  const detailStory = scopedStories.find((story) => story.id === detailStoryId) || null;
 
-  const copyStoryDoc = async (story) => {
-    if (!storyDocIsOpenable(story)) {
-      setToast("This story does not have an available Google Doc link yet.");
+  const copyStoryDoc = async (story, attachment = null) => {
+    const copyUrl = storyAttachmentCopyUrl(story, attachment);
+    if (!copyUrl) {
+      setToast("This story does not have an attached link or file yet.");
       return;
     }
     try {
-      await navigator.clipboard.writeText(story.googleDocUrl);
-      setToast("Copied Google Doc link.");
+      await navigator.clipboard.writeText(copyUrl);
+      setToast("Copied link.");
     } catch {
-      setToast("Could not copy the Google Doc link from this browser.");
+      setToast("Could not copy the link from this browser.");
     }
   };
 
@@ -3873,8 +4304,12 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, update
         story={detailStory}
         onBack={navigateToStories}
         currentUser={currentUser}
+        csrfToken={csrfToken}
         updateStoryStatus={updateStoryStatus}
         updateStoryDocLink={updateStoryDocLink}
+        clearStoryAttachment={clearStoryAttachment}
+        uploadStoryAttachment={uploadStoryAttachment}
+        attachDriveFileToStory={attachDriveFileToStory}
         copyStoryDoc={copyStoryDoc}
         setToast={setToast}
       />
@@ -3885,7 +4320,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, update
     <PageShell
       title="Stories"
       eyebrow="Editorial workflow"
-      description="Scan active Google Doc drafts by review state, then open a story for notes, source checks, and approval actions."
+      description="Scan active drafts by review state, then open a story for notes, source checks, and approval actions."
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
@@ -3954,7 +4389,7 @@ function StoryOverviewCard({ story, onOpen }) {
         <p className="mt-2 text-xs text-zinc-500">Deadline {story.deadline}</p>
       </div>
       <div className="flex h-full min-h-16 items-center">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition group-hover:border-white/[0.18] group-hover:text-zinc-100">
+        <span className="inline-flex h-8 w-8 items-center justify-center text-zinc-500 transition group-hover:text-zinc-100">
           <Icon name="chevron" className="h-4 w-4 -rotate-90" />
         </span>
       </div>
@@ -3962,18 +4397,37 @@ function StoryOverviewCard({ story, onOpen }) {
   );
 }
 
-function StoryDetailPage({ story, onBack, currentUser, updateStoryStatus, updateStoryDocLink, copyStoryDoc, setToast }) {
+function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, copyStoryDoc, setToast }) {
   const [draftDocUrl, setDraftDocUrl] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
-  const [showDocTools, setShowDocTools] = useState(false);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [attachmentDialog, setAttachmentDialog] = useState(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [openingDrivePicker, setOpeningDrivePicker] = useState(false);
+  const attachmentMenuRef = useRef(null);
 
   useEffect(() => {
     setDraftDocUrl("");
     setCommentDraft("");
-    setShowDocTools(false);
+    setAttachmentMenuOpen(false);
+    setAttachmentDialog(null);
+    setUploadingAttachment(false);
+    setOpeningDrivePicker(false);
   }, [story?.id]);
 
+  useEffect(() => {
+    if (!attachmentMenuOpen) return undefined;
+    const closeOnOutsidePointer = (event) => {
+      if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target)) {
+        setAttachmentMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [attachmentMenuOpen]);
+
   const storyActivity = useWorkflowActivity("story", story?.id || "", story?.status || "");
+  const storyComments = useEntityFeedback("story", story?.id || "", story?.status || "");
 
   if (!story) {
     return (
@@ -3988,29 +4442,172 @@ function StoryDetailPage({ story, onBack, currentUser, updateStoryStatus, update
     );
   }
 
-  const hasDoc = storyDocIsOpenable(story);
+  const attachments = storyAttachmentItems(story);
   const workflowAction = storyWorkflowAction(story);
   const canManageStory = canManageEditorialWorkflow(currentUser?.role);
+  const canAttachContent = canEditStoryAttachment(currentUser, story);
+  const canCommentStory = canAttachContent || canManageStory;
+  const hasSubmissionWork = attachments.length > 0;
+  const canUseWriterSubmission = canUpdateOwnStorySubmission(currentUser, story) && Boolean(workflowAction);
+  const canClickSubmitStory = canUseWriterSubmission && (workflowAction.nextStatus !== "Submitted" || hasSubmissionWork);
+  const canReturnStory = canManageStory && ["Submitted", "In Review", "Ready for Publish"].includes(story.status);
+  const canSendToTeacherApproval = canManageStory && ["Submitted", "In Review"].includes(story.status);
+  const commentItems = [
+    ...storyFeedbackItems(story),
+    ...(Array.isArray(story.comments) ? story.comments : []),
+    ...storyComments.feedback,
+  ];
   const { activity: activityItems, loading: activityLoading, error: activityError } = storyActivity;
+  const { loading: commentsLoading, error: commentsError } = storyComments;
 
-  const linkStoryDoc = () => {
-    const nextUrl = draftDocUrl.trim();
-    if (!isValidHttpUrl(nextUrl)) {
-      setToast("Paste a valid Google Doc link.");
-      return;
-    }
-    updateStoryDocLink(story.id, nextUrl);
-    setDraftDocUrl("");
-    setShowDocTools(false);
+  const openAttachmentDialog = (mode) => {
+    setAttachmentMenuOpen(false);
+    setAttachmentDialog(mode);
+    const linkedAttachment = attachments.find((item) => item.type === "link");
+    setDraftDocUrl(linkedAttachment?.url || "");
   };
 
-  const addComment = () => {
-    if (!commentDraft.trim()) {
+  const linkStoryDoc = async (url) => {
+    const nextUrl = url.trim();
+    if (!isValidHttpUrl(nextUrl)) {
+      setToast("Paste a valid http or https link.");
+      return;
+    }
+    const saved = await updateStoryDocLink(story.id, nextUrl);
+    if (saved) {
+      setDraftDocUrl("");
+      setAttachmentDialog(null);
+    }
+  };
+
+  const uploadStoryFile = async (files) => {
+    const selectedFiles = (
+      Array.isArray(files) || typeof files?.length === "number"
+        ? Array.from(files || [])
+        : files ? [files] : []
+    ).filter(Boolean);
+    if (!selectedFiles.length) {
+      setToast("Choose at least one file before uploading.");
+      return;
+    }
+    setUploadingAttachment(true);
+    let uploadedCount = 0;
+    for (const file of selectedFiles) {
+      const saved = await uploadStoryAttachment(story.id, file);
+      if (!saved) break;
+      uploadedCount += 1;
+    }
+    setUploadingAttachment(false);
+    if (uploadedCount === selectedFiles.length) {
+      setAttachmentDialog(null);
+      if (selectedFiles.length > 1) setToast(`Uploaded ${selectedFiles.length} files.`);
+    }
+  };
+
+  const openDrivePicker = async () => {
+    if (!canAttachContent || openingDrivePicker) return;
+    setAttachmentMenuOpen(false);
+    setOpeningDrivePicker(true);
+    try {
+      const [configResponse, tokenResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/drive/picker-config?next=${encodeURIComponent(window.location.pathname)}`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+        }),
+        fetch(`${API_BASE}/api/drive/picker-token?next=${encodeURIComponent(window.location.pathname)}`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+        }),
+      ]);
+      const config = await configResponse.json().catch(() => ({}));
+      const tokenPayload = await tokenResponse.json().catch(() => ({}));
+      if (!configResponse.ok || !config.enabled) {
+        throw new Error(config.error || "Google Drive picker is not configured.");
+      }
+      if (!tokenResponse.ok || !tokenPayload.ok || !tokenPayload.accessToken) {
+        if (tokenPayload.reauthUrl) {
+          window.location.assign(tokenPayload.reauthUrl);
+          return;
+        }
+        throw new Error(tokenPayload.error || "Sign in with Google again to use Drive attachments.");
+      }
+
+      await loadGooglePickerApi();
+      const pickerApi = window.google?.picker;
+      if (!pickerApi) throw new Error("Google Picker is unavailable.");
+
+      const docsView = new pickerApi.DocsView(pickerApi.ViewId.DOCS)
+        .setIncludeFolders(false)
+        .setSelectFolderEnabled(false);
+      const picker = new pickerApi.PickerBuilder()
+        .setDeveloperKey(config.apiKey)
+        .setAppId(config.appId)
+        .setOAuthToken(tokenPayload.accessToken)
+        .setOrigin(window.location.origin)
+        .enableFeature(pickerApi.Feature.MULTISELECT_ENABLED)
+        .addView(docsView)
+        .setCallback(async (data) => {
+          if (data[pickerApi.Response.ACTION] !== pickerApi.Action.PICKED) return;
+          const pickedDocs = data[pickerApi.Response.DOCUMENTS] || [];
+          if (!pickedDocs.length) return;
+          let attachedCount = 0;
+          for (const picked of pickedDocs) {
+            const saved = await attachDriveFileToStory(story.id, {
+              fileId: picked[pickerApi.Document.ID] || picked.id,
+              name: picked[pickerApi.Document.NAME] || picked.name,
+              mimeType: picked[pickerApi.Document.MIME_TYPE] || picked.mimeType,
+              url: picked[pickerApi.Document.URL] || picked.url,
+            });
+            if (saved) attachedCount += 1;
+          }
+          if (!attachedCount) setToast("Google Drive files were selected, but they could not be attached.");
+          if (attachedCount > 1) setToast(`Attached ${attachedCount} Google Drive files.`);
+        })
+        .build();
+      picker.setVisible(true);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not open Google Drive picker.");
+    } finally {
+      setOpeningDrivePicker(false);
+    }
+  };
+
+  const addComment = async () => {
+    const text = commentDraft.trim();
+    if (!canCommentStory) {
+      setToast("You can only comment on stories you can access.");
+      return;
+    }
+    if (!text) {
       setToast("Write a comment before adding it.");
       return;
     }
-    setCommentDraft("");
-    setToast("Comments are ready for backend wiring.");
+    try {
+      const response = await fetch(`${API_BASE}/api/feedback`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          entityType: "story",
+          entityId: story.id,
+          text,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not add comment.");
+      }
+      const nextComment = normalizeDisplayFeedback(payload.feedback || { id: `story-comment-${Date.now()}`, text, author: accountDisplayName(currentUser), time: "Just now" });
+      storyComments.setFeedback((previous) => [nextComment, ...previous]);
+      setCommentDraft("");
+      setToast("Added comment.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not add comment.");
+    }
   };
 
   return (
@@ -4051,66 +4648,209 @@ function StoryDetailPage({ story, onBack, currentUser, updateStoryStatus, update
 
         <aside className="min-w-0 space-y-4">
           <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
-            <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <h2 className="text-lg font-medium text-zinc-100">Review</h2>
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h2 className="text-lg font-medium text-zinc-100">Your work</h2>
               <span className="text-sm text-zinc-500">{story.status}</span>
             </div>
-            {hasDoc ? (
-              <StoryAttachment story={story} onCopy={() => copyStoryDoc(story)} compact />
+            {attachments.length ? (
+              <div className="space-y-2">
+                {attachments.map((item) => (
+                  <StoryAttachment
+                    key={item.id || item.url}
+                    story={story}
+                    attachment={item}
+                    onCopy={() => copyStoryDoc(story, item)}
+                    onRemove={canAttachContent && item.id ? () => clearStoryAttachment(story.id, item.id) : null}
+                    compact
+                  />
+                ))}
+              </div>
             ) : (
-              <div className="rounded-xl border border-white/[0.14] px-4 py-3 text-sm text-zinc-400" aria-label="Doc unavailable">
-                No document attached yet
+              <div className="rounded-xl border border-white/[0.14] px-4 py-3 text-sm text-zinc-400" aria-label="Content unavailable">
+                No work attached yet
               </div>
             )}
 
-            {canManageStory ? (
-              <Button variant="ghost" icon="plus" onClick={() => setShowDocTools((current) => !current)} className="mt-4 w-full rounded-full">
-                Add or create
-              </Button>
-            ) : null}
-
-            {canManageStory && showDocTools ? (
-              <div className="mt-3 space-y-2">
-                <Input value={draftDocUrl} onChange={setDraftDocUrl} placeholder="Paste Google Doc link" />
-                <Button icon="link" onClick={linkStoryDoc} className="w-full">Link doc</Button>
+            {canAttachContent ? (
+              <div ref={attachmentMenuRef} className="relative mt-4">
+                <Button variant="ghost" icon="plus" onClick={() => setAttachmentMenuOpen((current) => !current)} className="w-full rounded-full">
+                  Add or create
+                </Button>
+                {attachmentMenuOpen ? (
+                  <div className="absolute right-0 top-11 z-20 w-full overflow-hidden rounded-xl border border-white/[0.1] bg-zinc-950/95 p-1 shadow-2xl shadow-black/40 backdrop-blur">
+                    <button type="button" onClick={openDrivePicker} disabled={openingDrivePicker} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-50 disabled:cursor-wait disabled:text-zinc-600">
+                      <Icon name="upload" className="h-4 w-4" />
+                      {openingDrivePicker ? "Opening Drive" : "Google Drive"}
+                    </button>
+                    <button type="button" onClick={() => openAttachmentDialog("link")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-50">
+                      <Icon name="link" className="h-4 w-4" />
+                      Enter link
+                    </button>
+                    <button type="button" onClick={() => openAttachmentDialog("upload")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-50">
+                      <Icon name="upload" className="h-4 w-4" />
+                      File upload
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
-            {canManageStory ? (
             <div className="mt-4 space-y-2">
-              {story.status !== "Returned" && story.status !== "Needs Revision" ? (
-                <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
+              {canReturnStory ? (
+                <Button onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
               ) : null}
-              {workflowAction ? (
-                <Button onClick={() => updateStoryStatus(story.id, workflowAction.nextStatus)} className="w-full rounded-full">{workflowAction.label}</Button>
+              {canSendToTeacherApproval ? (
+                <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Ready for Publish")} className="w-full rounded-full">Send to teacher approval</Button>
+              ) : null}
+              {canUseWriterSubmission ? (
+                <Button
+                  onClick={() => updateStoryStatus(story.id, workflowAction.nextStatus)}
+                  disabled={!canClickSubmitStory}
+                  className="w-full rounded-full"
+                >
+                  {workflowAction.label}
+                </Button>
               ) : null}
             </div>
-            ) : null}
           </section>
 
+          {canCommentStory ? (
           <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
             <h2 className="text-base font-medium text-zinc-100">Private comments</h2>
+            <div className="mt-4 space-y-3">
+              {commentItems.map((comment) => (
+                <div key={comment.id} className="border-b border-white/[0.08] pb-3 last:border-b-0 last:pb-0">
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span className="truncate text-sm font-medium text-zinc-300">{comment.author}</span>
+                    <span className="shrink-0 text-xs text-zinc-600">{comment.time}</span>
+                  </div>
+                  <p className="break-words text-sm leading-6 text-zinc-500">{comment.text}</p>
+                </div>
+              ))}
+              {commentsLoading ? <p className="text-sm text-zinc-600">Loading comments...</p> : null}
+              {commentsError ? <p className="text-sm text-zinc-600">{commentsError}</p> : null}
+              {!commentsLoading && !commentsError && !commentItems.length ? (
+                <p className="text-sm text-zinc-600">No comments yet.</p>
+              ) : null}
+            </div>
             <div className="mt-4 flex gap-2">
               <input
                 value={commentDraft}
                 onChange={(event) => setCommentDraft(event.target.value)}
-                placeholder="Add private comment..."
+                placeholder="Add comment..."
                 className="h-10 min-w-0 flex-1 rounded-full border border-white/[0.14] bg-transparent px-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.28]"
               />
               <button
                 type="button"
                 onClick={addComment}
-                aria-label="Add private comment"
+                aria-label="Add comment"
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/[0.12] text-zinc-400 transition hover:border-white/[0.24] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20"
               >
                 <Icon name="plus" className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-3 text-xs leading-5 text-zinc-500">Visible to editors and advisers.</p>
           </section>
+          ) : null}
         </aside>
       </div>
+      <AnimatePresence>
+        {attachmentDialog ? (
+          <StoryAttachmentDialog
+            mode={attachmentDialog}
+            story={story}
+            value={draftDocUrl}
+            onValueChange={setDraftDocUrl}
+            uploading={uploadingAttachment}
+            onClose={() => setAttachmentDialog(null)}
+            onSubmitLink={linkStoryDoc}
+            onSubmitFile={uploadStoryFile}
+          />
+        ) : null}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function StoryAttachmentDialog({ mode, story, value, onValueChange, uploading, onClose, onSubmitLink, onSubmitFile }) {
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const isLinkMode = mode === "link";
+  const selectedFileSummary = selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files selected`;
+  const selectedFileDetail = selectedFiles.length === 1
+    ? formatFileSize(selectedFiles[0].size)
+    : selectedFiles.map((file) => file.name).join(", ");
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.form
+        initial={{ opacity: 0, y: 10, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.98 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
+        className="w-full max-w-md rounded-xl border border-white/[0.12] bg-[#0d0e12] p-5 shadow-2xl shadow-black"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (isLinkMode) {
+            onSubmitLink(value);
+          } else {
+            onSubmitFile(selectedFiles);
+          }
+        }}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-zinc-50">{isLinkMode ? "Add link" : "Upload file"}</h2>
+            <p className="mt-1 truncate text-sm text-zinc-500">{story.title}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="Close attachment dialog">
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+
+        {isLinkMode ? (
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Link</span>
+            <input
+              autoFocus
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+              placeholder="https://..."
+              className="h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.26]"
+            />
+          </label>
+        ) : (
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.16] bg-black/20 px-4 py-8 text-center transition hover:border-white/[0.28] hover:bg-white/[0.03]">
+            <Icon name="upload" className="mb-3 h-5 w-5 text-zinc-400" />
+            <span className="max-w-full truncate text-sm font-medium text-zinc-200">{selectedFiles.length ? selectedFileSummary : "Choose files"}</span>
+            <span className="mt-1 line-clamp-2 max-w-full break-words text-xs text-zinc-600">{selectedFiles.length ? selectedFileDetail : "PDF, document, image, or text file"}</span>
+            <input
+              type="file"
+              multiple
+              className="sr-only"
+              onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
+            />
+          </label>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={uploading}>Cancel</Button>
+          <button
+            type="submit"
+            disabled={uploading}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 text-sm font-medium text-black transition hover:bg-white disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
+          >
+            <Icon name={isLinkMode ? "link" : "upload"} className="h-4 w-4" />
+            {uploading ? "Uploading..." : isLinkMode ? "Attach link" : "Upload"}
+          </button>
+        </div>
+      </motion.form>
+    </motion.div>
   );
 }
 
@@ -4126,27 +4866,62 @@ function StoryDetailBreadcrumb({ story, column, onBack }) {
   );
 }
 
-function StoryAttachment({ story, onCopy, compact = false }) {
+function StoryAttachment({ story, attachment: providedAttachment = null, onCopy, onRemove = null, compact = false }) {
+  const attachment = providedAttachment || storyAttachmentInfo(story);
+  if (!attachment) return null;
+
+  const showTrailingIcon = !compact || attachment.type === "file";
+  const showRemove = compact && Boolean(onRemove);
+  const compactGridClass = showTrailingIcon ? "min-h-14 grid-cols-[minmax(0,1fr)_54px]" : "min-h-14 grid-cols-1";
+  const compactPaddingClass = showRemove ? (showTrailingIcon ? "pr-9" : "pr-12") : "";
+
   return (
-    <div className={cx("grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
+    <div className={cx("relative grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
       <a
-        href={story.googleDocUrl}
+        href={attachment.url}
         target="_blank"
         rel="noreferrer"
         className={cx(
-          "grid overflow-hidden rounded-xl border border-white/[0.16] text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/20",
-          compact ? "min-h-14 grid-cols-[minmax(0,1fr)_52px]" : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
+          "grid overflow-hidden rounded-xl border border-white/[0.16] bg-black/20 text-left transition hover:border-white/[0.26] hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/20",
+          compact ? cx(compactGridClass, compactPaddingClass) : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
         )}
       >
         <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
-          <div className="truncate text-sm font-medium text-zinc-100">{story.title}</div>
-          <div className="mt-1 text-xs text-zinc-500">Google Docs</div>
+          <div className="truncate text-sm font-medium text-zinc-100">{attachment.name}</div>
+          <div className="mt-1 text-xs text-zinc-500">{attachment.detail}</div>
+          {attachment.type === "drive" && drivePermissionText(attachment.permissionStatus) ? (
+            <div className={cx(
+              "mt-1 text-xs",
+              attachment.permissionStatus === "failed" ? "text-amber-300" : "text-zinc-600"
+            )}>
+              {drivePermissionText(attachment.permissionStatus)}
+            </div>
+          ) : null}
         </div>
-        <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
-          <Icon name="article" className="h-5 w-5" />
-        </div>
+        {showTrailingIcon ? (
+          <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
+            <Icon name={attachment.type === "file" ? "upload" : "link"} className="h-5 w-5" />
+          </div>
+        ) : null}
       </a>
-      {compact ? null : <Button variant="ghost" icon="link" onClick={onCopy} className="self-center">Copy link</Button>}
+      {showRemove ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove();
+          }}
+          aria-label="Remove attached work"
+          className={cx(
+            "absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20",
+            showTrailingIcon ? "right-12" : "right-2"
+          )}
+        >
+          <Icon name="x" className="h-4 w-4" />
+        </button>
+      ) : null}
+      {compact || !attachment.copyable ? null : <Button variant="ghost" icon="link" onClick={onCopy} className="self-center">Copy link</Button>}
     </div>
   );
 }
@@ -4218,7 +4993,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
         setCurrentPage(Number(payload.page));
       }
       if (Array.isArray(payload.sections)) {
-        setSections(["All sections", ...payload.sections.filter((name) => name && name !== "All sections")]);
+        setSections(["All sections", ...uniqueTextValues(payload.sections).filter((name) => name.toLowerCase() !== "all sections")]);
       }
       setSelectedArticle(null);
     } catch (err) {
@@ -4474,6 +5249,7 @@ function ArticleDetailPanel({ article, loading }) {
   }
 
   const canOpen = isValidHttpUrl(article.url);
+  const articleLabelPills = uniqueTextValues([article.section, ...article.tags]);
   return (
     <Card className="p-5">
       <div className="mb-5 flex items-start justify-between gap-3">
@@ -4500,12 +5276,13 @@ function ArticleDetailPanel({ article, loading }) {
         )}
       </div>
 
-      {(article.section || article.tags.length > 0) && (
+      {articleLabelPills.length > 0 && (
         <div className="mt-5">
           <p className="mb-2 text-xs uppercase tracking-[0.18em] text-zinc-600">Section / Tags</p>
           <div className="flex flex-wrap gap-2">
-            {article.section && <StatusBadge tone="blue">{article.section}</StatusBadge>}
-            {article.tags.map((tag) => <StatusBadge key={tag}>{tag}</StatusBadge>)}
+            {articleLabelPills.map((label, index) => (
+              <StatusBadge key={label} tone={index === 0 && label === article.section ? "blue" : "neutral"}>{label}</StatusBadge>
+            ))}
           </div>
         </div>
       )}
@@ -4550,7 +5327,7 @@ function ArticleDetailPanel({ article, loading }) {
   );
 }
 
-function IntervieweesPage() {
+function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) {
   const [query, setQuery] = useState("");
   const [grade, setGrade] = useState("All grades");
   const [house, setHouse] = useState("All houses");
@@ -4561,9 +5338,11 @@ function IntervieweesPage() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const canManageSourceRecords = canManageEditorialWorkflow(currentUser?.role);
 
   const resetInspector = () => {
     setSelectedRecord(null);
@@ -4707,6 +5486,10 @@ function IntervieweesPage() {
 
   const handleSaveRecord = async () => {
     if (!selectedRecord || !draft) return;
+    if (!canManageSourceRecords) {
+      setSaveError("Only editors and admins can edit source records.");
+      return;
+    }
     setSaving(true);
     setSaveError("");
     const nextRecord = updateInterviewRecordRow(selectedRecord, draft);
@@ -4716,6 +5499,7 @@ function IntervieweesPage() {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
         body: JSON.stringify({
@@ -4738,6 +5522,40 @@ function IntervieweesPage() {
       setSaveError(err.message || "Could not save the selected record.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteRecord = async () => {
+    if (!selectedRecord || deleting) return;
+    if (!canManageSourceRecords) {
+      setSaveError("Only editors and admins can delete source records.");
+      return;
+    }
+    const confirmed = window.confirm(`Delete source record for ${selectedRecord.name}? This removes it from the interviewee database.`);
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setSaveError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/interview-records/${encodeURIComponent(selectedRecord.id)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok !== true) {
+        throw new Error(payload.error || `Failed to delete record (${response.status})`);
+      }
+      setRecords((previous) => previous.filter((record) => record.id !== selectedRecord.id));
+      resetInspector();
+      setToast("Deleted source record.");
+    } catch (err) {
+      setSaveError(err.message || "Could not delete the selected record.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -4914,8 +5732,11 @@ function IntervieweesPage() {
           onEdit={handleEditStart}
           onCancel={handleEditCancel}
           onSave={handleSaveRecord}
+          onDelete={handleDeleteRecord}
           saving={saving}
+          deleting={deleting}
           saveError={saveError}
+          canManage={canManageSourceRecords}
         />
       </div>
     </PageShell>
@@ -4924,14 +5745,14 @@ function IntervieweesPage() {
 
 function ReadOnlyField({ label, value }) {
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-3">
       <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</p>
-      <p className="mt-2 truncate text-sm text-zinc-200">{value || "Unknown"}</p>
+      <p className="min-w-0 truncate text-sm text-zinc-200">{value || "Unknown"}</p>
     </div>
   );
 }
 
-function InterviewRecordInspector({ record, loading, editing, draft, setDraft, onEdit, onCancel, onSave, saving, saveError }) {
+function InterviewRecordInspector({ record, loading, editing, draft, setDraft, onEdit, onCancel, onSave, onDelete, saving, deleting, saveError, canManage = false }) {
   if (loading) {
     return (
       <Card className="p-5">
@@ -4968,12 +5789,20 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
           <h2 className="break-words text-xl font-semibold tracking-tight text-zinc-50">{record.name}</h2>
           <p className="mt-2 text-sm text-zinc-500">Grade {record.grade || "Unknown"} - {record.house || "Unknown"}</p>
         </div>
+        {canManage ? (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {!editing && <Button variant="ghost" icon="edit" onClick={onEdit}>Edit record</Button>}
+            <Button variant="danger" icon="trash" onClick={onDelete} disabled={deleting || saving}>
+              {deleting ? "Deleting" : "Delete"}
+            </Button>
+          </div>
+        ) : null}
       </div>
+      {saveError && !editing ? <p className="mb-4 text-sm text-rose-300">{saveError}</p> : null}
 
-      <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+      <div className="border-t border-white/[0.08] pt-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="font-medium text-zinc-50">Source information</h3>
-          {!editing && <Button variant="ghost" icon="edit" className="shrink-0" onClick={onEdit}>Edit record</Button>}
         </div>
         {editing ? (
           <div className="space-y-4">
@@ -5019,7 +5848,7 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
               <button
                 type="button"
                 onClick={onSave}
-                disabled={saving}
+                disabled={saving || deleting}
                 className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? "Saving..." : "Save changes"}
@@ -5027,7 +5856,7 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
             </div>
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
             <ReadOnlyField label="Name" value={record.name} />
             <ReadOnlyField label="Grade" value={record.grade} />
             <ReadOnlyField label="House" value={record.house} />
@@ -5035,7 +5864,7 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
         )}
       </div>
 
-      <div className="mt-5 rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+      <div className="mt-6 border-t border-white/[0.08] pt-5">
         <h3 className="mb-4 font-medium text-zinc-50">Article information</h3>
         <div>
           {isValidHttpUrl(record.article?.url) ? (

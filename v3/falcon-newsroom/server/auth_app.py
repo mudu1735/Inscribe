@@ -1,20 +1,24 @@
 import os
 import re
 import secrets
+from io import BytesIO
 from datetime import timedelta, timezone, datetime
 from functools import wraps
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlencode, urlparse
 
+import gridfs
 import requests
 from bson import ObjectId
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, request, session, url_for
+from flask import Flask, jsonify, redirect, request, send_file, session, url_for
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -42,10 +46,18 @@ ACTIVITY_COLLECTION = os.getenv("ACTIVITY_COLLECTION", "activityRecords")
 FEEDBACK_COLLECTION = os.getenv("FEEDBACK_COLLECTION", "feedbackRecords")
 AUTH_RATE_LIMIT_MAX = int(os.getenv("AUTH_RATE_LIMIT_MAX", "8"))
 AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "900"))
+MAX_STORY_ATTACHMENT_BYTES = int(os.getenv("MAX_STORY_ATTACHMENT_BYTES", str(10 * 1024 * 1024)))
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_AUTH_REDIRECT_URI = os.getenv("GOOGLE_AUTH_REDIRECT_URI", "")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "").rstrip("/")
+DEFAULT_DEV_FRONTEND_ORIGIN = "http://127.0.0.1:5173"
+GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+GOOGLE_OAUTH_SCOPES = ("openid", "email", "profile", GOOGLE_DRIVE_SCOPE)
+GOOGLE_PICKER_API_KEY = os.getenv("GOOGLE_PICKER_API_KEY", "")
+GOOGLE_PICKER_APP_ID = os.getenv("GOOGLE_PICKER_APP_ID", "")
+GOOGLE_PICKER_CLIENT_ID = os.getenv("GOOGLE_PICKER_CLIENT_ID", GOOGLE_CLIENT_ID)
 GOOGLE_ALLOWED_DOMAINS = {
     domain.strip().lower().lstrip("@")
     for domain in os.getenv("GOOGLE_ALLOWED_DOMAINS", "").split(",")
@@ -54,6 +66,10 @@ GOOGLE_ALLOWED_DOMAINS = {
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_DRIVE_FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files"
+GOOGLE_INTENT_LOGIN = "login"
+GOOGLE_INTENT_SIGNUP = "signup"
+GOOGLE_INTENTS = {GOOGLE_INTENT_LOGIN, GOOGLE_INTENT_SIGNUP}
 
 ROLE_VIEWER = "viewer"
 ROLE_WRITER = "writer"
@@ -113,7 +129,9 @@ stories_col = db[STORY_COLLECTION]
 pitches_col = db[PITCH_COLLECTION]
 activity_col = db[ACTIVITY_COLLECTION]
 feedback_col = db[FEEDBACK_COLLECTION]
+story_files = gridfs.GridFS(db, collection="storyAttachments")
 AUTH_FAILURES: dict[str, list[float]] = {}
+GOOGLE_STATE_MAX_AGE_SECONDS = 600
 
 try:
     users_col.create_index([("email", ASCENDING)], unique=True)
@@ -122,6 +140,11 @@ except Exception:
 
 try:
     users_col.create_index([("googleSub", ASCENDING)], unique=True, sparse=True)
+except Exception:
+    pass
+
+try:
+    users_col.create_index([("googleId", ASCENDING)], unique=True, sparse=True)
 except Exception:
     pass
 
@@ -325,11 +348,19 @@ def find_user_by_email(email: str):
     return users_col.find_one({"email": normalize_email(email)})
 
 
-def find_user_by_google_sub(google_sub: str):
-    value = str(google_sub or "").strip()
+def _google_id_from_doc(doc: dict) -> str:
+    return str(doc.get("googleId") or doc.get("googleSub") or "").strip()
+
+
+def find_user_by_google_id(google_id: str):
+    value = str(google_id or "").strip()
     if not value:
         return None
-    return users_col.find_one({"googleSub": value})
+    return users_col.find_one({"$or": [{"googleId": value}, {"googleSub": value}]})
+
+
+def find_user_by_google_sub(google_sub: str):
+    return find_user_by_google_id(google_sub)
 
 
 def _serialize_user(doc: dict) -> dict:
@@ -420,7 +451,7 @@ def _user_display_name(user_doc: dict) -> str:
 
 
 def _owner_match_values(user_doc: dict) -> list:
-    values = [str(user_doc.get("_id")), normalize_email(user_doc.get("email") or ""), _user_display_name(user_doc)]
+    values = [str(user_doc.get("_id")), normalize_email(user_doc.get("email") or "")]
     try:
         values.append(user_doc["_id"])
     except Exception:
@@ -437,9 +468,6 @@ def _owned_story_query(user_doc: dict) -> dict:
         {"ownerId": {"$in": values}},
         {"writerEmail": {"$in": values}},
         {"ownerEmail": {"$in": values}},
-        {"writer": {"$in": values}},
-        {"owner": {"$in": values}},
-        {"authors": {"$in": values}},
     ]}
 
 
@@ -470,8 +498,6 @@ def _pitch_query_for_user(user_doc: dict):
     role = _current_user_role(user_doc)
     if role == ROLE_VIEWER:
         return None
-    if role == ROLE_WRITER:
-        return _owned_pitch_query(user_doc)
     return {}
 
 
@@ -615,17 +641,259 @@ def _bool_field(doc: dict, field: str, default: bool = False) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_valid_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _drive_type_label(mime_type: str = "", name: str = "") -> str:
+    mime = str(mime_type or "").strip().lower()
+    filename = str(name or "").strip().lower()
+    if mime == "application/vnd.google-apps.document":
+        return "Doc"
+    if mime == "application/vnd.google-apps.presentation":
+        return "Slides"
+    if mime == "application/vnd.google-apps.spreadsheet":
+        return "Sheet"
+    if mime == "application/vnd.google-apps.folder":
+        return "Folder"
+    if mime == "application/pdf" or filename.endswith(".pdf"):
+        return "PDF"
+    if "wordprocessingml" in mime or filename.endswith((".doc", ".docx", ".odt")):
+        return "Document"
+    if "presentationml" in mime or filename.endswith((".ppt", ".pptx", ".odp")):
+        return "Slides"
+    if "spreadsheetml" in mime or filename.endswith((".xls", ".xlsx", ".ods", ".csv")):
+        return "Spreadsheet"
+    if mime.startswith("image/"):
+        return "Image"
+    if mime.startswith("video/"):
+        return "Video"
+    if mime.startswith("audio/"):
+        return "Audio"
+    if mime.startswith("text/") or filename.endswith((".txt", ".md", ".rtf")):
+        return "Text"
+    return "Drive file"
+
+
+def _new_attachment_id(prefix: str = "att") -> str:
+    return f"{prefix}_{secrets.token_urlsafe(8)}"
+
+
+def _attachment_added_by(user_doc: dict) -> dict:
+    return {
+        "userId": str(user_doc.get("_id")),
+        "email": normalize_email(user_doc.get("email") or ""),
+        "name": _user_display_name(user_doc),
+    }
+
+
+def _story_attachment_item_to_api(story_id: str, item: dict) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    attachment_type = str(item.get("type") or "").strip().lower()
+    attachment_id = str(item.get("id") or item.get("attachmentId") or "").strip()
+
+    if attachment_type == "drive":
+        drive_file_id = str(item.get("fileId") or "").strip()
+        if not drive_file_id:
+            return None
+        drive_url = item.get("webViewLink") or item.get("url") or ""
+        return {
+            "id": attachment_id or drive_file_id,
+            "type": "drive",
+            "provider": "google-drive",
+            "fileId": drive_file_id,
+            "name": item.get("name") or "Drive file",
+            "mimeType": item.get("mimeType") or "",
+            "typeLabel": item.get("typeLabel") or _drive_type_label(item.get("mimeType"), item.get("name")),
+            "url": drive_url,
+            "webViewLink": drive_url,
+            "iconUrl": item.get("iconLink") or "",
+            "addedBy": item.get("addedBy") or {},
+            "addedAt": _date_for_api(item.get("addedAt")),
+            "permissionStatus": item.get("permissionStatus") or "not_shared",
+            "shareResults": item.get("shareResults") if isinstance(item.get("shareResults"), list) else [],
+            "lastShareAttemptAt": _date_for_api(item.get("lastShareAttemptAt")),
+            "copyable": True,
+        }
+
+    if attachment_type == "file":
+        file_id = str(item.get("fileId") or item.get("attachmentFileId") or "").strip()
+        file_name = str(item.get("name") or item.get("attachmentName") or "").strip()
+        if not file_id or not file_name:
+            return None
+        return {
+            "id": attachment_id or file_id,
+            "type": "file",
+            "name": file_name,
+            "contentType": item.get("contentType") or item.get("attachmentContentType") or "application/octet-stream",
+            "size": int(item.get("size") or item.get("attachmentSize") or 0),
+            "url": f"/api/stories/{story_id}/attachments/{attachment_id}" if attachment_id else f"/api/stories/{story_id}/attachment",
+            "uploadedAt": _date_for_api(item.get("uploadedAt") or item.get("attachmentUploadedAt")),
+            "addedBy": item.get("addedBy") or {},
+            "permissionStatus": "app_access",
+        }
+
+    if attachment_type == "link":
+        link_url = str(item.get("url") or item.get("webViewLink") or "").strip()
+        if not _is_valid_http_url(link_url):
+            return None
+        return {
+            "id": attachment_id or link_url,
+            "type": "link",
+            "provider": "manual-link",
+            "name": item.get("name") or "Story link",
+            "url": link_url,
+            "uploadedAt": _date_for_api(item.get("uploadedAt") or item.get("addedAt")),
+            "addedBy": item.get("addedBy") or {},
+            "permissionStatus": "manual",
+        }
+    return None
+
+
+def _legacy_story_attachment_items(doc: dict) -> list[dict]:
+    items = []
+    drive_attachment = doc.get("driveAttachment") if isinstance(doc.get("driveAttachment"), dict) else {}
+    if drive_attachment.get("fileId"):
+        items.append({
+            **drive_attachment,
+            "id": drive_attachment.get("id") or "legacy-drive",
+            "type": "drive",
+        })
+
+    file_id = str(doc.get("attachmentFileId") or "").strip()
+    file_name = str(doc.get("attachmentName") or "").strip()
+    if file_id and file_name:
+        items.append({
+            "id": "legacy-file",
+            "type": "file",
+            "fileId": file_id,
+            "name": file_name,
+            "contentType": doc.get("attachmentContentType") or "application/octet-stream",
+            "size": _int_field(doc, "attachmentSize"),
+            "uploadedAt": doc.get("attachmentUploadedAt") or doc.get("updatedAt"),
+        })
+
+    link_url = str(doc.get("googleDocUrl") or doc.get("docUrl") or "").strip()
+    if _is_valid_http_url(link_url):
+        items.append({
+            "id": "legacy-link",
+            "type": "link",
+            "provider": "manual-link",
+            "name": doc.get("attachmentName") or "Story link",
+            "url": link_url,
+            "uploadedAt": _date_for_api(doc.get("updatedAt")),
+            "permissionStatus": "manual",
+        })
+    return items
+
+
+def _story_attachments_to_api(doc: dict) -> list[dict]:
+    story_id = _doc_public_id(doc, "storyId")
+    raw_items = []
+    if isinstance(doc.get("attachments"), list):
+        raw_items.extend(item for item in doc.get("attachments") if isinstance(item, dict))
+    raw_items.extend(_legacy_story_attachment_items(doc))
+    attachments = []
+    seen = set()
+    for item in raw_items:
+        api_item = _story_attachment_item_to_api(story_id, item)
+        if not api_item:
+            continue
+        key = _attachment_item_key(api_item)
+        if key in seen:
+            continue
+        seen.add(key)
+        attachments.append(api_item)
+    return attachments
+
+
+def _story_attachment_to_api(doc: dict) -> dict | None:
+    attachments = _story_attachments_to_api(doc)
+    return attachments[0] if attachments else None
+
+
+def _attachment_item_key(item: dict) -> str:
+    item_type = str(item.get("type") or "").strip().lower()
+    url = str(item.get("webViewLink") or item.get("url") or "").strip()
+    if item_type in {"drive", "link"} and url:
+        return f"url:{url}"
+    if item_type == "file":
+        file_id = str(item.get("fileId") or item.get("attachmentFileId") or "").strip()
+        if file_id:
+            return f"{item_type}:{file_id}"
+    return str(item.get("id") or item.get("attachmentId") or item.get("url") or "").strip()
+
+
+def _attachment_identifiers(item: dict) -> set[str]:
+    identifiers = {
+        str(item.get("id") or "").strip(),
+        str(item.get("attachmentId") or "").strip(),
+        str(item.get("fileId") or "").strip(),
+        str(item.get("attachmentFileId") or "").strip(),
+        str(item.get("webViewLink") or "").strip(),
+        str(item.get("url") or "").strip(),
+    }
+    key = _attachment_item_key(item)
+    if key:
+        identifiers.add(key)
+    return {identifier for identifier in identifiers if identifier}
+
+
+def _attachment_pull_condition(attachment_id: str) -> dict:
+    target = str(attachment_id or "").strip()
+    return {
+        "$or": [
+            {"id": target},
+            {"attachmentId": target},
+            {"fileId": target},
+            {"attachmentFileId": target},
+            {"webViewLink": target},
+            {"url": target},
+        ]
+    }
+
+
+def _merged_attachment_items(story: dict, *new_items: dict) -> list[dict]:
+    additions = []
+    if isinstance(story.get("attachments"), list):
+        additions.extend(item for item in story.get("attachments") if isinstance(item, dict))
+    additions.extend(_legacy_story_attachment_items(story))
+    additions.extend(item for item in new_items if isinstance(item, dict))
+
+    deduped = []
+    seen = set()
+    for item in additions:
+        key = _attachment_item_key(item)
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _attachment_push_value(story: dict, *new_items: dict) -> dict:
+    return {"$each": _merged_attachment_items(story, *new_items)}
+
+
 def _story_to_api(doc: dict) -> dict:
     writer = str(doc.get("writer") or doc.get("owner") or doc.get("author") or "").strip()
     authors = _coerce_list_field(doc.get("authors"))
     if not writer and authors:
         writer = authors[0]
+    attachments = _story_attachments_to_api(doc)
     return {
         "id": _doc_public_id(doc, "storyId"),
         "title": doc.get("title") or doc.get("storyTitle") or "Untitled story",
         "section": doc.get("section", "") or "",
         "writer": writer or doc.get("writerEmail", "") or "Unassigned",
         "writerEmail": doc.get("writerEmail") or doc.get("ownerEmail") or "",
+        "writerUserId": str(doc.get("writerUserId") or doc.get("ownerUserId") or ""),
         "editor": doc.get("editor", "") or "",
         "status": doc.get("status") or "Assigned",
         "priority": doc.get("priority") or "Normal",
@@ -641,6 +909,8 @@ def _story_to_api(doc: dict) -> dict:
         "summary": doc.get("summary", "") or "",
         "nextStep": doc.get("nextStep", "") or "",
         "editorNote": doc.get("editorNote", "") or "",
+        "attachments": attachments,
+        "attachment": attachments[0] if attachments else None,
         "feedback": doc.get("feedback") if isinstance(doc.get("feedback"), list) else [],
         "comments": doc.get("comments") if isinstance(doc.get("comments"), list) else [],
         "sources": doc.get("sources") if isinstance(doc.get("sources"), list) else [],
@@ -656,6 +926,7 @@ def _pitch_to_api(doc: dict) -> dict:
         "section": doc.get("section", "") or "",
         "owner": doc.get("owner") or doc.get("writer") or doc.get("ownerEmail") or "Unassigned",
         "ownerEmail": doc.get("ownerEmail") or doc.get("writerEmail") or "",
+        "ownerUserId": str(doc.get("ownerUserId") or doc.get("writerUserId") or ""),
         "submittedAt": _date_for_api(doc.get("submittedAt") or doc.get("createdAt")),
         "notes": doc.get("notes", "") or "",
         "editorFeedback": doc.get("editorFeedback", "") or "",
@@ -733,6 +1004,16 @@ def _record_status_activity(entity_type: str, entity_id: str, from_status: str, 
     })
 
 
+def _delete_story_file(file_id_value):
+    file_id = _object_id_or_none(str(file_id_value or ""))
+    if not file_id:
+        return
+    try:
+        story_files.delete(file_id)
+    except Exception:
+        pass
+
+
 def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict):
     pitch_id = _doc_public_id(pitch_doc, "pitchId")
     existing = stories_col.find_one({"sourcePitchId": pitch_id})
@@ -800,11 +1081,304 @@ def _split_google_name(profile: dict) -> tuple[str, str]:
 
 
 def _google_redirect_uri() -> str:
-    return GOOGLE_AUTH_REDIRECT_URI or url_for("api_google_callback", _external=True)
+    configured_redirect = str(GOOGLE_AUTH_REDIRECT_URI or "").strip()
+    if configured_redirect:
+        return configured_redirect
+    if FRONTEND_ORIGIN:
+        return f"{FRONTEND_ORIGIN}/api/auth/google/callback"
+    if FLASK_ENV != "production":
+        return f"{DEFAULT_DEV_FRONTEND_ORIGIN}/api/auth/google/callback"
+    return url_for("api_google_callback", _external=True)
+
+
+def _google_scope_string() -> str:
+    return " ".join(GOOGLE_OAUTH_SCOPES)
+
+
+def _google_state_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt="falcon-google-oauth-state-v1")
+
+
+def _google_missing_config() -> list[str]:
+    missing = []
+    if not GOOGLE_CLIENT_ID:
+        missing.append("GOOGLE_CLIENT_ID")
+    if not GOOGLE_CLIENT_SECRET:
+        missing.append("GOOGLE_CLIENT_SECRET")
+    return missing
+
+
+def _normalize_google_intent(value: str) -> str:
+    candidate = str(value or "").strip().lower()
+    return candidate if candidate in GOOGLE_INTENTS else GOOGLE_INTENT_LOGIN
 
 
 def _is_google_configured() -> bool:
-    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+    return not _google_missing_config()
+
+
+def _oauth_expires_at(expires_in) -> datetime:
+    seconds = max(60, int(expires_in or 3600) - 60)
+    return datetime.now(timezone.utc) + timedelta(seconds=seconds)
+
+
+def _parse_oauth_expiry(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _store_google_oauth_tokens(user_doc: dict, token_payload: dict):
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        return
+    scopes = str(token_payload.get("scope") or _google_scope_string()).split()
+    update = {
+        "googleOAuth.accessToken": access_token,
+        "googleOAuth.tokenType": token_payload.get("token_type") or "Bearer",
+        "googleOAuth.expiresAt": _oauth_expires_at(token_payload.get("expires_in")),
+        "googleOAuth.scopes": scopes,
+        "googleOAuth.updatedAt": datetime.now(timezone.utc),
+    }
+    refresh_token = str(token_payload.get("refresh_token") or "").strip()
+    if refresh_token:
+        update["googleOAuth.refreshToken"] = refresh_token
+    users_col.update_one({"_id": user_doc["_id"]}, {"$set": update})
+    user_doc.setdefault("googleOAuth", {}).update({
+        "accessToken": access_token,
+        "tokenType": update["googleOAuth.tokenType"],
+        "expiresAt": update["googleOAuth.expiresAt"],
+        "scopes": scopes,
+        "updatedAt": update["googleOAuth.updatedAt"],
+    })
+    if refresh_token:
+        user_doc["googleOAuth"]["refreshToken"] = refresh_token
+
+
+def _google_drive_config_missing() -> list[str]:
+    missing = []
+    if not GOOGLE_PICKER_API_KEY:
+        missing.append("GOOGLE_PICKER_API_KEY")
+    if not GOOGLE_PICKER_APP_ID:
+        missing.append("GOOGLE_PICKER_APP_ID")
+    if not GOOGLE_PICKER_CLIENT_ID:
+        missing.append("GOOGLE_PICKER_CLIENT_ID")
+    return missing
+
+
+def _google_reauth_url(next_url: str = "") -> str:
+    params = {
+        "origin": _sanitize_frontend_origin(FRONTEND_ORIGIN) or DEFAULT_DEV_FRONTEND_ORIGIN,
+        "intent": GOOGLE_INTENT_LOGIN,
+    }
+    if next_url:
+        params["next"] = _sanitize_next_url(next_url)
+    return f"/api/auth/google/start?{urlencode(params)}"
+
+
+def _has_drive_scope(user_doc: dict) -> bool:
+    oauth = user_doc.get("googleOAuth") if isinstance(user_doc.get("googleOAuth"), dict) else {}
+    scopes = oauth.get("scopes") if isinstance(oauth.get("scopes"), list) else str(oauth.get("scope") or "").split()
+    return GOOGLE_DRIVE_SCOPE in set(str(scope) for scope in scopes)
+
+
+def _google_oauth_error(message: str, status: int = 409):
+    return jsonify({
+        "ok": False,
+        "error": message,
+        "reauthUrl": _google_reauth_url(request.args.get("next") or request.path),
+    }), status
+
+
+def _google_access_token_for_user(user_doc: dict) -> tuple[str, str]:
+    oauth = user_doc.get("googleOAuth") if isinstance(user_doc.get("googleOAuth"), dict) else {}
+    if not oauth:
+        return "", "Sign in with Google again to connect Drive."
+    if not _has_drive_scope(user_doc):
+        return "", "Sign in with Google again to grant Drive attachment access."
+
+    access_token = str(oauth.get("accessToken") or "").strip()
+    expires_at = _parse_oauth_expiry(oauth.get("expiresAt"))
+    if access_token and expires_at and expires_at > datetime.now(timezone.utc):
+        return access_token, ""
+
+    refresh_token = str(oauth.get("refreshToken") or "").strip()
+    if not refresh_token:
+        return "", "Sign in with Google again so Falcon can refresh Drive access."
+
+    try:
+        response = requests.post(
+            GOOGLE_TOKEN_ENDPOINT,
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        payload.setdefault("refresh_token", refresh_token)
+        if "scope" not in payload:
+            payload["scope"] = " ".join(oauth.get("scopes") or GOOGLE_OAUTH_SCOPES)
+        _store_google_oauth_tokens(user_doc, payload)
+        return str(payload.get("access_token") or ""), ""
+    except Exception:
+        return "", "Google Drive access expired. Sign in with Google again."
+
+
+def _drive_headers(access_token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+
+def _drive_file_metadata(file_id: str, access_token: str) -> tuple[dict, str]:
+    clean_file_id = str(file_id or "").strip()
+    if not clean_file_id:
+        return {}, "Drive file id is required."
+    try:
+        response = requests.get(
+            f"{GOOGLE_DRIVE_FILES_ENDPOINT}/{clean_file_id}",
+            params={
+                "fields": "id,name,mimeType,webViewLink,iconLink",
+                "supportsAllDrives": "true",
+            },
+            headers=_drive_headers(access_token),
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json(), ""
+    except Exception:
+        return {}, "Could not read the selected Google Drive file. Reconnect Google Drive and try again."
+
+
+def _editor_permission_emails() -> list[str]:
+    emails = set()
+    cursor = users_col.find({"role": {"$in": [ROLE_EDITOR, ROLE_ADMIN]}}, {"email": 1})
+    for doc in cursor:
+        email = normalize_email(doc.get("email") or "")
+        if email:
+            emails.add(email)
+    return sorted(emails)
+
+
+def _share_drive_attachment_with_editors(drive_attachment: dict, actor_doc: dict) -> tuple[bool, list[dict], str]:
+    drive_attachment = drive_attachment if isinstance(drive_attachment, dict) else {}
+    file_id = str(drive_attachment.get("fileId") or "").strip()
+    if not file_id:
+        return True, [], ""
+    access_token, token_error = _google_access_token_for_user(actor_doc)
+    if token_error:
+        return False, [], token_error
+
+    actor_email = normalize_email(actor_doc.get("email") or "")
+    editor_emails = [email for email in _editor_permission_emails() if email and email != actor_email]
+    if not editor_emails:
+        return False, [], "No editor or admin Google accounts are available to share this file with."
+
+    results = []
+    for email in editor_emails:
+        result = {
+            "email": email,
+            "role": "writer",
+            "ok": False,
+            "permissionId": "",
+            "error": "",
+            "attemptedAt": datetime.now(timezone.utc),
+        }
+        try:
+            response = requests.post(
+                f"{GOOGLE_DRIVE_FILES_ENDPOINT}/{file_id}/permissions",
+                params={
+                    "sendNotificationEmail": "false",
+                    "supportsAllDrives": "true",
+                },
+                json={
+                    "type": "user",
+                    "role": "writer",
+                    "emailAddress": email,
+                },
+                headers={
+                    **_drive_headers(access_token),
+                    "Content-Type": "application/json",
+                },
+                timeout=10,
+            )
+            if response.status_code in {200, 201}:
+                payload = response.json()
+                result["ok"] = True
+                result["permissionId"] = str(payload.get("id") or "")
+            elif response.status_code == 409:
+                result["ok"] = True
+                result["error"] = "Permission already exists."
+            else:
+                payload = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                result["error"] = payload.get("error", {}).get("message") or f"Google Drive returned {response.status_code}."
+        except Exception as exc:
+            result["error"] = str(exc) or "Google Drive permission update failed."
+        results.append(result)
+
+    ok = all(item.get("ok") for item in results)
+    message = "" if ok else "Could not share the attached Drive file with every editor/admin."
+    return ok, results, message
+
+
+def _share_drive_file_with_editors(story: dict, actor_doc: dict) -> tuple[bool, list[dict], str]:
+    drive_attachment = story.get("driveAttachment") if isinstance(story.get("driveAttachment"), dict) else {}
+    return _share_drive_attachment_with_editors(drive_attachment, actor_doc)
+
+
+def _sanitize_frontend_origin(origin: str) -> str:
+    candidate = _origin_from_url(origin)
+    if not candidate:
+        return ""
+    trusted = _trusted_request_origins()
+    if candidate.lower().rstrip("/") in trusted:
+        return candidate.rstrip("/")
+    return ""
+
+
+def _origin_from_redirect_uri() -> str:
+    return _sanitize_frontend_origin(_google_redirect_uri())
+
+
+def _frontend_redirect_url(path: str, origin: str = "") -> str:
+    target = _sanitize_next_url(path) or "/dashboard"
+    frontend_origin = _sanitize_frontend_origin(origin) or _sanitize_frontend_origin(FRONTEND_ORIGIN)
+    if frontend_origin:
+        return f"{frontend_origin}{target}"
+    return target
+
+
+def _make_google_state(next_url: str, frontend_origin: str, intent: str = GOOGLE_INTENT_LOGIN) -> str:
+    return _google_state_serializer().dumps({
+        "nonce": secrets.token_urlsafe(16),
+        "next": _sanitize_next_url(next_url),
+        "frontendOrigin": _sanitize_frontend_origin(frontend_origin),
+        "intent": _normalize_google_intent(intent),
+    })
+
+
+def _load_google_state(state: str) -> tuple[dict, str]:
+    try:
+        data = _google_state_serializer().loads(state, max_age=GOOGLE_STATE_MAX_AGE_SECONDS)
+    except SignatureExpired:
+        return {}, "Google sign-in expired. Please try again."
+    except BadSignature:
+        return {}, "Google sign-in could not be verified."
+    if not isinstance(data, dict):
+        return {}, "Google sign-in could not be verified."
+    return data, ""
 
 
 def _google_email_domain_allowed(email: str) -> bool:
@@ -814,21 +1388,26 @@ def _google_email_domain_allowed(email: str) -> bool:
     return domain in GOOGLE_ALLOWED_DOMAINS
 
 
-def _google_error_redirect(message: str):
-    return redirect(f"/login?{urlencode({'auth': 'google', 'error': message})}")
+def _google_error_redirect(message: str, frontend_origin: str = ""):
+    login_path = f"/login?{urlencode({'auth': 'google', 'error': message})}"
+    frontend_origin = _sanitize_frontend_origin(frontend_origin) or _sanitize_frontend_origin(FRONTEND_ORIGIN)
+    if frontend_origin:
+        return redirect(f"{frontend_origin}{login_path}")
+    return redirect(login_path)
 
 
-def upsert_google_user(profile: dict):
+def upsert_google_user(profile: dict, allow_create: bool = True):
     email = normalize_email(profile.get("email") or "")
-    google_sub = str(profile.get("sub") or "").strip()
-    if not email or not google_sub:
+    google_id = str(profile.get("sub") or profile.get("googleId") or profile.get("googleSub") or "").strip()
+    if not email or not google_id:
         raise ValueError("Google profile did not include a verified identity.")
 
     now_iso = _now_iso()
     first_name, last_name = _split_google_name(profile)
     update = {
         "email": email,
-        "googleSub": google_sub,
+        "googleId": google_id,
+        "googleSub": google_id,
         "googleEmailVerified": True,
         "googlePicture": str(profile.get("picture") or "").strip(),
         "lastLoginAt": now_iso,
@@ -838,12 +1417,30 @@ def upsert_google_user(profile: dict):
     if last_name:
         update["lastName"] = last_name
 
-    user_doc = find_user_by_google_sub(google_sub) or find_user_by_email(email)
-    if user_doc:
-        users_col.update_one({"_id": user_doc["_id"]}, {"$set": {**update, "authProviders.google": True}})
-        user_doc.update(update)
-        user_doc["authProviders"] = {**(user_doc.get("authProviders") or {}), "google": True}
-        return user_doc
+    user_by_google = find_user_by_google_id(google_id)
+    if user_by_google:
+        existing_email = normalize_email(user_by_google.get("email") or "")
+        if existing_email and existing_email != email:
+            email_owner = find_user_by_email(email)
+            if email_owner and str(email_owner.get("_id")) != str(user_by_google.get("_id")):
+                raise ValueError("This Google account is already linked to another user.")
+        users_col.update_one({"_id": user_by_google["_id"]}, {"$set": {**update, "authProviders.google": True}})
+        user_by_google.update(update)
+        user_by_google["authProviders"] = {**(user_by_google.get("authProviders") or {}), "google": True}
+        return user_by_google
+
+    user_by_email = find_user_by_email(email)
+    if user_by_email:
+        existing_google_id = _google_id_from_doc(user_by_email)
+        if existing_google_id and existing_google_id != google_id:
+            raise ValueError("This email is already linked to a different Google account.")
+        users_col.update_one({"_id": user_by_email["_id"]}, {"$set": {**update, "authProviders.google": True}})
+        user_by_email.update(update)
+        user_by_email["authProviders"] = {**(user_by_email.get("authProviders") or {}), "google": True}
+        return user_by_email
+
+    if not allow_create:
+        raise ValueError("No Falcon account is registered for this Google email. Create an account first.")
 
     doc = {
         **update,
@@ -925,8 +1522,12 @@ def api_login():
         return jsonify({"ok": False, "error": "Too many failed attempts. Please wait and try again."}), 429
 
     user_doc = find_user_by_email(email)
+    if not user_doc:
+        _record_auth_failure(email)
+        return jsonify({"ok": False, "error": "No account is registered for this email. Create an account first."}), 404
+
     password_hash = user_doc.get("passwordHash", "") if user_doc else ""
-    if not user_doc or not password_hash or not check_password_hash(password_hash, password):
+    if not password_hash or not check_password_hash(password_hash, password):
         _record_auth_failure(email)
         return jsonify({"ok": False, "error": "Invalid email or password."}), 401
 
@@ -955,42 +1556,92 @@ def api_logout():
     return jsonify({"ok": True})
 
 
+@app.get("/api/drive/picker-config")
+@require_auth
+def api_drive_picker_config():
+    missing = _google_drive_config_missing()
+    return jsonify({
+        "ok": not missing,
+        "enabled": not missing,
+        "missing": missing,
+        "apiKey": GOOGLE_PICKER_API_KEY if not missing else "",
+        "appId": GOOGLE_PICKER_APP_ID if not missing else "",
+        "clientId": GOOGLE_PICKER_CLIENT_ID if not missing else "",
+        "scope": GOOGLE_DRIVE_SCOPE,
+        "reauthUrl": _google_reauth_url(request.args.get("next") or request.path),
+        "error": f"Google Drive picker is missing {', '.join(missing)}." if missing else "",
+    })
+
+
+@app.get("/api/drive/picker-token")
+@require_auth
+def api_drive_picker_token():
+    user_doc = _current_user_doc()
+    missing = _google_drive_config_missing()
+    if missing:
+        return jsonify({
+            "ok": False,
+            "error": f"Google Drive picker is missing {', '.join(missing)}.",
+            "missing": missing,
+        }), 503
+    access_token, token_error = _google_access_token_for_user(user_doc)
+    if token_error:
+        return _google_oauth_error(token_error)
+    oauth = user_doc.get("googleOAuth") if isinstance(user_doc.get("googleOAuth"), dict) else {}
+    return jsonify({
+        "ok": True,
+        "accessToken": access_token,
+        "expiresAt": _parse_oauth_expiry(oauth.get("expiresAt")).isoformat() if _parse_oauth_expiry(oauth.get("expiresAt")) else "",
+        "scope": GOOGLE_DRIVE_SCOPE,
+    })
+
+
 @app.get("/api/auth/google/start")
 def api_google_start():
-    if not _is_google_configured():
-        return jsonify({"ok": False, "error": "Google sign-in is not configured."}), 503
+    missing_config = _google_missing_config()
+    if missing_config:
+        return jsonify({
+            "ok": False,
+            "error": f"Google sign-in is missing {', '.join(missing_config)}.",
+            "missing": missing_config,
+        }), 503
 
-    state = secrets.token_urlsafe(32)
-    session["google_oauth_state"] = state
-    session["google_oauth_next"] = _sanitize_next_url(request.args.get("next") or "")
+    redirect_uri = _google_redirect_uri()
+    frontend_origin = _origin_from_redirect_uri() or _sanitize_frontend_origin(request.args.get("origin") or "")
+    intent = _normalize_google_intent(request.args.get("intent") or "")
+    state = _make_google_state(request.args.get("next") or "", frontend_origin, intent)
     params = {
         "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": _google_redirect_uri(),
+        "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": "openid email profile",
+        "scope": _google_scope_string(),
         "state": state,
-        "access_type": "online",
-        "prompt": "select_account",
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "select_account consent",
     }
     return jsonify({"ok": True, "authUrl": f"{GOOGLE_AUTH_ENDPOINT}?{urlencode(params)}"})
 
 
 @app.get("/api/auth/google/callback")
 def api_google_callback():
-    if request.args.get("error"):
-        return _google_error_redirect("Google sign-in was cancelled.")
-
     state = (request.args.get("state") or "").strip()
-    expected_state = session.pop("google_oauth_state", "")
-    next_url = session.pop("google_oauth_next", "")
-    if not state or not expected_state or not secrets.compare_digest(state, expected_state):
-        return _google_error_redirect("Google sign-in could not be verified.")
+    state_data, state_error = _load_google_state(state)
+    frontend_origin = state_data.get("frontendOrigin", "") if state_data else _origin_from_redirect_uri()
+    next_url = state_data.get("next", "") if state_data else ""
+    intent = _normalize_google_intent(state_data.get("intent", "") if state_data else "")
+
+    if request.args.get("error"):
+        return _google_error_redirect("Google sign-in was cancelled.", frontend_origin)
+
+    if state_error:
+        return _google_error_redirect(state_error, frontend_origin)
 
     code = (request.args.get("code") or "").strip()
     if not code:
-        return _google_error_redirect("Google did not return an authorization code.")
+        return _google_error_redirect("Google did not return an authorization code.", frontend_origin)
     if not _is_google_configured():
-        return _google_error_redirect("Google sign-in is not configured.")
+        return _google_error_redirect("Google sign-in is not configured.", frontend_origin)
 
     try:
         token_response = requests.post(
@@ -1008,7 +1659,7 @@ def api_google_callback():
         token_payload = token_response.json()
         access_token = token_payload.get("access_token")
         if not access_token:
-            return _google_error_redirect("Google did not return an access token.")
+            return _google_error_redirect("Google did not return an access token.", frontend_origin)
 
         profile_response = requests.get(
             GOOGLE_USERINFO_ENDPOINT,
@@ -1018,27 +1669,33 @@ def api_google_callback():
         profile_response.raise_for_status()
         profile = profile_response.json()
     except Exception:
-        return _google_error_redirect("Google sign-in failed. Please try again.")
+        return _google_error_redirect("Google sign-in failed. Please try again.", frontend_origin)
 
     email = normalize_email(profile.get("email") or "")
     if not email or not profile.get("email_verified"):
-        return _google_error_redirect("Google account email is not verified.")
+        return _google_error_redirect("Google account email is not verified.", frontend_origin)
     if not _google_email_domain_allowed(email):
-        return _google_error_redirect("This Google account is not allowed for Falcon Newsroom.")
+        return _google_error_redirect("This Google account is not allowed for Falcon Newsroom.", frontend_origin)
 
     try:
-        user_doc = upsert_google_user(profile)
+        user_doc = upsert_google_user(profile, allow_create=intent == GOOGLE_INTENT_SIGNUP)
+    except ValueError as exc:
+        return _google_error_redirect(str(exc) or "Could not link this Google account.", frontend_origin)
     except DuplicateKeyError:
         existing = find_user_by_email(email)
         if not existing:
-            return _google_error_redirect("Could not link this Google account.")
+            return _google_error_redirect("Could not link this Google account.", frontend_origin)
         user_doc = existing
     except Exception:
-        return _google_error_redirect("Could not create a Falcon account from Google.")
+        return _google_error_redirect("Could not create a Falcon account from Google.", frontend_origin)
 
+    _store_google_oauth_tokens(user_doc, token_payload)
     _login_user_doc(user_doc, remember=False)
     _clear_auth_failures(email)
-    return redirect(next_url or FRONTEND_ROLE_LANDING.get(normalize_role(user_doc.get("role")), "/interviewees"))
+    return redirect(_frontend_redirect_url(
+        next_url or "/dashboard",
+        frontend_origin,
+    ))
 
 
 @app.get("/api/admin/users")
@@ -1088,7 +1745,7 @@ def api_stories():
 
 
 @app.patch("/api/stories/<story_id>")
-@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
 def api_update_story(story_id: str):
     user_doc = _current_user_doc()
     story = _find_owned_story_or_404(story_id, user_doc)
@@ -1096,23 +1753,309 @@ def api_update_story(story_id: str):
         return jsonify({"ok": False, "error": "Story not found."}), 404
 
     payload = _request_payload()
+    role = _current_user_role(user_doc)
     update = {"updatedAt": _now_iso()}
+    unset = {}
+    push_attachment = None
     if "status" in payload:
         next_status = str(payload.get("status") or "").strip()
         if not next_status:
             return jsonify({"ok": False, "error": "Status is required."}), 400
+        if role == ROLE_WRITER:
+            writer_can_submit = next_status == "Submitted"
+            writer_can_unsubmit = next_status == "Drafting" and str(story.get("status") or "") == "Submitted"
+            if not writer_can_submit and not writer_can_unsubmit:
+                return jsonify({"ok": False, "error": "Writers can only submit or unsubmit their own stories."}), 403
+        if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status not in {"Returned", "Ready for Publish"}:
+            return jsonify({"ok": False, "error": "Editors and admins can only return stories or send them to teacher approval."}), 403
+        if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status == "Returned" and str(story.get("status") or "") not in {"Submitted", "In Review", "Ready for Publish"}:
+            return jsonify({"ok": False, "error": "Return to writer is only available after a story is submitted."}), 400
+        if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status == "Ready for Publish" and str(story.get("status") or "") not in {"Submitted", "In Review"}:
+            return jsonify({"ok": False, "error": "Teacher approval is only available for submitted stories."}), 400
+        if next_status == "Submitted":
+            attachments = _story_attachments_to_api(story)
+            if not attachments:
+                return jsonify({"ok": False, "error": "Attach work before submitting this story."}), 400
         update["status"] = next_status
-    if "googleDocUrl" in payload:
-        update["googleDocUrl"] = str(payload.get("googleDocUrl") or "").strip()
-    if len(update) == 1:
+        if next_status == "Submitted":
+            update["submittedAt"] = _now_iso()
+        if next_status == "Returned":
+            update["returnedAt"] = _now_iso()
+    if "googleDocUrl" in payload or "documentUrl" in payload:
+        next_url = str((payload.get("documentUrl") if "documentUrl" in payload else payload.get("googleDocUrl")) or "").strip()
+        if next_url and not _is_valid_http_url(next_url):
+            return jsonify({"ok": False, "error": "Enter a valid http or https link."}), 400
+        if next_url:
+            update["googleDocUrl"] = next_url
+            update["attachmentType"] = "multiple"
+            push_attachment = {
+                "id": _new_attachment_id("link"),
+                "type": "link",
+                "provider": "manual-link",
+                "name": "Story link",
+                "url": next_url,
+                "addedBy": _attachment_added_by(user_doc),
+                "addedAt": datetime.now(timezone.utc),
+                "permissionStatus": "manual",
+            }
+        else:
+            update["googleDocUrl"] = ""
+            update["attachmentType"] = ""
+            unset.update({
+                "attachments": "",
+                "attachmentFileId": "",
+                "attachmentName": "",
+                "attachmentContentType": "",
+                "attachmentSize": "",
+                "attachmentUploadedAt": "",
+                "driveAttachment": "",
+            })
+    if len(update) == 1 and not unset and not push_attachment:
         return jsonify({"ok": False, "error": "No editable fields provided."}), 400
 
-    clauses = [{"_id": story["_id"]}]
-    stories_col.update_one({"$or": clauses}, {"$set": update})
+    previous_file_id = story.get("attachmentFileId")
+    operation = {"$set": update}
+    if unset:
+        operation["$unset"] = unset
+    if push_attachment:
+        operation["$set"]["attachments"] = _merged_attachment_items(story, push_attachment)
+    stories_col.update_one({"_id": story["_id"]}, operation)
+    if unset and previous_file_id:
+        _delete_story_file(previous_file_id)
     if "status" in update and update["status"] != story.get("status"):
         _record_status_activity("story", _doc_public_id(story, "storyId"), story.get("status", ""), update["status"], user_doc)
     updated = stories_col.find_one({"_id": story["_id"]}) or {}
     return jsonify({"ok": True, "story": _story_to_api(updated)})
+
+
+@app.post("/api/stories/<story_id>/drive-attachment")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_attach_drive_file(story_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+
+    payload = _request_payload()
+    file_id = str(payload.get("fileId") or payload.get("id") or "").strip()
+    access_token, token_error = _google_access_token_for_user(user_doc)
+    if token_error:
+        return _google_oauth_error(token_error)
+    metadata, metadata_error = _drive_file_metadata(file_id, access_token)
+    if metadata_error:
+        return jsonify({"ok": False, "error": metadata_error}), 400
+
+    now = datetime.now(timezone.utc)
+    drive_attachment = {
+        "id": _new_attachment_id("drive"),
+        "type": "drive",
+        "fileId": metadata.get("id") or file_id,
+        "name": metadata.get("name") or payload.get("name") or "Drive file",
+        "mimeType": metadata.get("mimeType") or payload.get("mimeType") or "",
+        "typeLabel": _drive_type_label(metadata.get("mimeType") or payload.get("mimeType"), metadata.get("name") or payload.get("name")),
+        "webViewLink": metadata.get("webViewLink") or payload.get("url") or payload.get("webViewLink") or "",
+        "iconLink": metadata.get("iconLink") or payload.get("iconUrl") or "",
+        "addedBy": _attachment_added_by(user_doc),
+        "addedAt": now,
+        "permissionStatus": "not_shared",
+        "shareResults": [],
+        "lastShareAttemptAt": None,
+    }
+    update = {
+        "updatedAt": _now_iso(),
+        "attachmentType": "multiple",
+        "attachmentName": drive_attachment["name"],
+        "googleDocUrl": drive_attachment["webViewLink"],
+    }
+    unset = {
+        "attachmentFileId": "",
+        "attachmentContentType": "",
+        "attachmentSize": "",
+        "attachmentUploadedAt": "",
+        "docUrl": "",
+        "driveAttachment": "",
+    }
+    stories_col.update_one(
+        {"_id": story["_id"]},
+        {"$set": {**update, "attachments": _merged_attachment_items(story, drive_attachment)}, "$unset": unset},
+    )
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({
+        "ok": True,
+        "story": _story_to_api(updated),
+        "warning": "",
+        "shareResults": [],
+    })
+
+
+@app.post("/api/stories/<story_id>/attachment")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_upload_story_attachment(story_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"ok": False, "error": "Choose a file to upload."}), 400
+
+    data = uploaded.read(MAX_STORY_ATTACHMENT_BYTES + 1)
+    if len(data) > MAX_STORY_ATTACHMENT_BYTES:
+        return jsonify({"ok": False, "error": "Story files must be 10 MB or smaller."}), 413
+    if not data:
+        return jsonify({"ok": False, "error": "Choose a non-empty file."}), 400
+
+    filename = secure_filename(uploaded.filename) or "story-upload"
+    content_type = uploaded.content_type or "application/octet-stream"
+    now = datetime.now(timezone.utc)
+    attachment_id = _new_attachment_id("file")
+    file_id = story_files.put(
+        data,
+        filename=filename,
+        contentType=content_type,
+        metadata={
+            "storyId": _doc_public_id(story, "storyId"),
+            "attachmentId": attachment_id,
+            "uploadedBy": str(user_doc.get("_id")),
+            "uploadedByEmail": user_doc.get("email", ""),
+        },
+    )
+    attachment = {
+        "id": attachment_id,
+        "type": "file",
+        "fileId": str(file_id),
+        "name": filename,
+        "contentType": content_type,
+        "size": len(data),
+        "uploadedAt": now,
+        "addedBy": _attachment_added_by(user_doc),
+        "permissionStatus": "app_access",
+    }
+    update = {
+        "updatedAt": _now_iso(),
+        "attachmentType": "multiple",
+        "attachmentName": filename,
+        "googleDocUrl": "",
+    }
+    stories_col.update_one(
+        {"_id": story["_id"]},
+        {"$set": {**update, "attachments": _merged_attachment_items(story, attachment)}, "$unset": {"docUrl": "", "driveAttachment": ""}},
+    )
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({"ok": True, "story": _story_to_api(updated)})
+
+
+def _find_attachment_item(story: dict, attachment_id: str) -> dict | None:
+    target = str(attachment_id or "").strip()
+    if not target:
+        return None
+    items = story.get("attachments") if isinstance(story.get("attachments"), list) else []
+    for item in items:
+        if isinstance(item, dict) and target in _attachment_identifiers(item):
+            return item
+    for item in _legacy_story_attachment_items(story):
+        if target in _attachment_identifiers(item):
+            return item
+    return None
+
+
+@app.get("/api/stories/<story_id>/attachments/<attachment_id>")
+@require_auth
+def api_download_story_attachment_by_id(story_id: str, attachment_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+    attachment = _find_attachment_item(story, attachment_id)
+    if not attachment or attachment.get("type") != "file":
+        return jsonify({"ok": False, "error": "Story file not found."}), 404
+    file_id = _object_id_or_none(str(attachment.get("fileId") or attachment.get("attachmentFileId") or ""))
+    if not file_id:
+        return jsonify({"ok": False, "error": "Story file not found."}), 404
+    try:
+        stored = story_files.get(file_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Story file not found."}), 404
+
+    filename = str(attachment.get("name") or getattr(stored, "filename", "") or "story-file").strip()
+    content_type = str(attachment.get("contentType") or getattr(stored, "content_type", "") or "application/octet-stream").strip()
+    return send_file(
+        BytesIO(stored.read()),
+        mimetype=content_type,
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
+@app.delete("/api/stories/<story_id>/attachments/<attachment_id>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_delete_story_attachment(story_id: str, attachment_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+    attachment = _find_attachment_item(story, attachment_id)
+    if not attachment:
+        return jsonify({"ok": False, "error": "Attachment not found."}), 404
+    if attachment.get("type") == "file":
+        _delete_story_file(attachment.get("fileId") or attachment.get("attachmentFileId"))
+    unset = {}
+    set_values = {"updatedAt": _now_iso()}
+    if attachment.get("type") == "file" and attachment_id == "legacy-file":
+        unset.update({
+            "attachmentFileId": "",
+            "attachmentName": "",
+            "attachmentContentType": "",
+            "attachmentSize": "",
+            "attachmentUploadedAt": "",
+        })
+    if attachment.get("type") == "link":
+        set_values["googleDocUrl"] = ""
+        unset["docUrl"] = ""
+    if attachment.get("type") == "drive":
+        attachment_url = str(attachment.get("webViewLink") or attachment.get("url") or "")
+        if str(story.get("googleDocUrl") or "") == attachment_url:
+            set_values["googleDocUrl"] = ""
+        unset["driveAttachment"] = ""
+    operation = {
+        "$pull": {"attachments": _attachment_pull_condition(attachment_id)},
+        "$set": set_values,
+    }
+    if unset:
+        operation["$unset"] = unset
+    stories_col.update_one(
+        {"_id": story["_id"]},
+        operation,
+    )
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({"ok": True, "story": _story_to_api(updated)})
+
+
+@app.get("/api/stories/<story_id>/attachment")
+@require_auth
+def api_download_story_attachment(story_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+
+    file_id = _object_id_or_none(str(story.get("attachmentFileId") or ""))
+    if not file_id:
+        return jsonify({"ok": False, "error": "Story file not found."}), 404
+    try:
+        stored = story_files.get(file_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Story file not found."}), 404
+
+    filename = str(story.get("attachmentName") or getattr(stored, "filename", "") or "story-file").strip()
+    content_type = str(story.get("attachmentContentType") or getattr(stored, "content_type", "") or "application/octet-stream").strip()
+    return send_file(
+        BytesIO(stored.read()),
+        mimetype=content_type,
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @app.get("/api/pitches")
@@ -1202,7 +2145,7 @@ def api_feedback():
 
 
 @app.post("/api/feedback")
-@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
 def api_create_feedback():
     user_doc = _current_user_doc()
     payload = _request_payload()
@@ -1363,14 +2306,19 @@ def api_article_records():
             person = _interview_to_api(person_doc)
             people_by_url.setdefault(_article_join_url_key(person["url"]), []).append(person)
 
-    section_values = set()
+    section_values = {}
+
+    def add_section_value(value):
+        text = str(value or "").strip()
+        if text and text.lower() != "all sections":
+            section_values.setdefault(text.lower(), text)
+
     for doc in articles_col.find({}, {"section": 1, "category": 1, "tags": 1, "categories": 1}):
         for value in [doc.get("section"), doc.get("category")]:
-            text = str(value or "").strip()
-            if text:
-                section_values.add(text)
+            add_section_value(value)
         for field in ["tags", "categories"]:
-            section_values.update(_coerce_list_field(doc.get(field)))
+            for value in _coerce_list_field(doc.get(field)):
+                add_section_value(value)
 
     total_pages = max(1, (total + limit - 1) // limit)
     return jsonify({
@@ -1380,7 +2328,7 @@ def api_article_records():
         "limit": limit,
         "total": total,
         "totalPages": total_pages,
-        "sections": sorted(section_values, key=lambda value: value.lower()),
+        "sections": sorted(section_values.values(), key=lambda value: value.lower()),
     })
 
 
@@ -1415,6 +2363,20 @@ def api_update_interview_record(record_id: str):
 
     doc = interviews_col.find_one({"_id": oid}) or {}
     return jsonify({"ok": True, "record": _interview_to_api(doc)})
+
+
+@app.delete("/api/interview-records/<record_id>")
+@require_role_at_least(ROLE_EDITOR)
+def api_delete_interview_record(record_id: str):
+    try:
+        oid = ObjectId(record_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid record id"}), 400
+
+    result = interviews_col.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        return jsonify({"ok": False, "error": "Record not found"}), 404
+    return jsonify({"ok": True})
 
 
 @app.post("/api/extract")
