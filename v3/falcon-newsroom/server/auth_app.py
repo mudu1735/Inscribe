@@ -154,6 +154,12 @@ except Exception:
     pass
 
 try:
+    stories_col.create_index([("collaborators.email", ASCENDING), ("status", ASCENDING)])
+except Exception:
+    pass
+
+
+try:
     pitches_col.create_index([("ownerEmail", ASCENDING), ("status", ASCENDING)])
 except Exception:
     pass
@@ -471,6 +477,89 @@ def _owned_story_query(user_doc: dict) -> dict:
     ]}
 
 
+def _collaborator_story_query(user_doc: dict) -> dict:
+    values = _owner_match_values(user_doc)
+    return {"$or": [
+        {"collaborators.userId": {"$in": values}},
+        {"collaborators.id": {"$in": values}},
+        {"collaborators.email": {"$in": values}},
+    ]}
+
+
+def _story_primary_owned_by_user(story: dict, user_doc: dict) -> bool:
+    if not story or not user_doc:
+        return False
+    values = {str(value).lower() for value in _owner_match_values(user_doc) if value}
+    fields = [
+        story.get("writerUserId"),
+        story.get("writerId"),
+        story.get("ownerUserId"),
+        story.get("ownerId"),
+        normalize_email(story.get("writerEmail") or ""),
+        normalize_email(story.get("ownerEmail") or ""),
+    ]
+    return any(str(value).lower() in values for value in fields if value)
+
+
+def _story_collaborators(doc: dict) -> list[dict]:
+    raw = doc.get("collaborators") if isinstance(doc.get("collaborators"), list) else []
+    collaborators = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        email = normalize_email(item.get("email") or "")
+        if not email or email in seen:
+            continue
+        seen.add(email)
+        role = str(item.get("role") or "comment").strip().lower()
+        if role not in {"comment", "edit"}:
+            role = "comment"
+        name = str(item.get("name") or email).strip()
+        collaborators.append({
+            "id": str(item.get("userId") or item.get("id") or email),
+            "userId": str(item.get("userId") or item.get("id") or ""),
+            "email": email,
+            "name": name,
+            "role": role,
+            "message": str(item.get("message") or "").strip(),
+            "invitedBy": str(item.get("invitedBy") or "").strip(),
+            "invitedAt": _date_for_api(item.get("invitedAt")),
+        })
+    return collaborators
+
+
+def _story_collaborator_for_user(story: dict, user_doc: dict) -> dict | None:
+    if not story or not user_doc:
+        return None
+    values = {str(value).lower() for value in _owner_match_values(user_doc) if value}
+    for collaborator in _story_collaborators(story):
+        candidate_values = {
+            str(collaborator.get("id") or "").lower(),
+            str(collaborator.get("userId") or "").lower(),
+            normalize_email(collaborator.get("email") or ""),
+        }
+        if values.intersection({value for value in candidate_values if value}):
+            return collaborator
+    return None
+
+
+def _can_manage_story_collaborators(story: dict, user_doc: dict) -> bool:
+    role = _current_user_role(user_doc)
+    return role in {ROLE_ADMIN, ROLE_EDITOR} or (role == ROLE_WRITER and _story_primary_owned_by_user(story, user_doc))
+
+
+def _can_edit_story_content(story: dict, user_doc: dict) -> bool:
+    role = _current_user_role(user_doc)
+    if role in {ROLE_ADMIN, ROLE_EDITOR}:
+        return True
+    if role != ROLE_WRITER:
+        return False
+    if _story_primary_owned_by_user(story, user_doc):
+        return True
+    collaborator = _story_collaborator_for_user(story, user_doc)
+    return collaborator is not None and collaborator.get("role") == "edit"
+
 def _owned_pitch_query(user_doc: dict) -> dict:
     values = _owner_match_values(user_doc)
     return {"$or": [
@@ -490,7 +579,7 @@ def _story_query_for_user(user_doc: dict):
     if role == ROLE_VIEWER:
         return None
     if role == ROLE_WRITER:
-        return _owned_story_query(user_doc)
+        return {"$or": _owned_story_query(user_doc)["$or"] + _collaborator_story_query(user_doc)["$or"]}
     return {}
 
 
@@ -914,6 +1003,7 @@ def _story_to_api(doc: dict) -> dict:
         "feedback": doc.get("feedback") if isinstance(doc.get("feedback"), list) else [],
         "comments": doc.get("comments") if isinstance(doc.get("comments"), list) else [],
         "sources": doc.get("sources") if isinstance(doc.get("sources"), list) else [],
+        "collaborators": _story_collaborators(doc),
     }
 
 
@@ -1762,6 +1852,8 @@ def api_update_story(story_id: str):
         if not next_status:
             return jsonify({"ok": False, "error": "Status is required."}), 400
         if role == ROLE_WRITER:
+            if not _story_primary_owned_by_user(story, user_doc):
+                return jsonify({"ok": False, "error": "Only the assigned writer can submit or unsubmit this story."}), 403
             writer_can_submit = next_status == "Submitted"
             writer_can_unsubmit = next_status == "Drafting" and str(story.get("status") or "") == "Submitted"
             if not writer_can_submit and not writer_can_unsubmit:
@@ -1782,6 +1874,8 @@ def api_update_story(story_id: str):
         if next_status == "Returned":
             update["returnedAt"] = _now_iso()
     if "googleDocUrl" in payload or "documentUrl" in payload:
+        if not _can_edit_story_content(story, user_doc):
+            return jsonify({"ok": False, "error": "You can comment on this story, but cannot edit its attached work."}), 403
         next_url = str((payload.get("documentUrl") if "documentUrl" in payload else payload.get("googleDocUrl")) or "").strip()
         if next_url and not _is_valid_http_url(next_url):
             return jsonify({"ok": False, "error": "Enter a valid http or https link."}), 400
@@ -1828,6 +1922,123 @@ def api_update_story(story_id: str):
     return jsonify({"ok": True, "story": _story_to_api(updated)})
 
 
+VALID_STORY_COLLABORATOR_ROLES = {"comment", "edit"}
+
+
+def _story_collaborator_payload(item: dict, role: str, message: str, actor_doc: dict) -> dict:
+    email = normalize_email(item.get("email") or "")
+    return {
+        "userId": str(item.get("userId") or item.get("id") or ""),
+        "email": email,
+        "name": str(item.get("name") or email).strip(),
+        "role": role,
+        "message": message,
+        "invitedBy": _user_display_name(actor_doc),
+        "invitedByEmail": normalize_email(actor_doc.get("email") or ""),
+        "invitedAt": datetime.now(timezone.utc),
+    }
+
+
+@app.post("/api/stories/<story_id>/collaborators")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_invite_story_collaborators(story_id: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+    if not _can_manage_story_collaborators(story, user_doc):
+        return jsonify({"ok": False, "error": "Only the assigned writer or editors can invite collaborators."}), 403
+
+    payload = _request_payload()
+    raw_emails = payload.get("emails")
+    if isinstance(raw_emails, str):
+        candidates = re.split(r"[,;\s]+", raw_emails)
+    elif isinstance(raw_emails, list):
+        candidates = raw_emails
+    else:
+        candidates = []
+    emails = []
+    for value in candidates:
+        email = normalize_email(str(value or ""))
+        if email and email not in emails:
+            emails.append(email)
+    if not emails:
+        return jsonify({"ok": False, "error": "Enter at least one email address."}), 400
+    invalid = [email for email in emails if not is_valid_email(email)]
+    if invalid:
+        return jsonify({"ok": False, "error": f"Enter valid email addresses: {', '.join(invalid)}."}), 400
+
+    role = str(payload.get("role") or "comment").strip().lower()
+    if role not in VALID_STORY_COLLABORATOR_ROLES:
+        return jsonify({"ok": False, "error": "Collaborator role must be comment or edit."}), 400
+    message = str(payload.get("message") or "").strip()
+    if len(message) > 200:
+        return jsonify({"ok": False, "error": "Invite message must be 200 characters or fewer."}), 400
+
+    actor_email = normalize_email(user_doc.get("email") or "")
+    primary_emails = {normalize_email(story.get("writerEmail") or ""), normalize_email(story.get("ownerEmail") or "")}
+    current_collaborators = _story_collaborators(story)
+    collaborator_by_email = {item["email"]: item for item in current_collaborators}
+    invited = []
+    skipped = []
+    for email in emails:
+        if email == actor_email or email in primary_emails:
+            skipped.append(email)
+            continue
+        invited_user = find_user_by_email(email)
+        if not invited_user:
+            return jsonify({"ok": False, "error": f"No Falcon account is registered for {email}."}), 404
+        invited_role = _current_user_role(invited_user)
+        if invited_role in {ROLE_ADMIN, ROLE_EDITOR}:
+            skipped.append(email)
+            continue
+        if invited_role != ROLE_WRITER:
+            return jsonify({"ok": False, "error": f"{email} must have writer access before they can collaborate on stories."}), 400
+        collaborator = _story_collaborator_payload(_serialize_user(invited_user), role, message, user_doc)
+        collaborator_by_email[email] = collaborator
+        invited.append(collaborator)
+
+    if not invited and skipped:
+        return jsonify({"ok": False, "error": "Those users already have access to this story."}), 400
+    if not invited:
+        return jsonify({"ok": False, "error": "No collaborators were added."}), 400
+
+    next_collaborators = sorted(collaborator_by_email.values(), key=lambda item: item.get("email", ""))
+    stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
+    activity_col.insert_one({
+        "entityType": "story",
+        "entityId": _doc_public_id(story, "storyId"),
+        "eventType": "collaborator_invite",
+        "text": f"Invited {len(invited)} collaborator{'s' if len(invited) != 1 else ''}.",
+        "actorId": str(user_doc.get("_id")),
+        "actorEmail": user_doc.get("email", ""),
+        "actorName": _user_display_name(user_doc),
+        "createdAt": datetime.now(timezone.utc),
+    })
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({"ok": True, "story": _story_to_api(updated), "collaborators": _story_collaborators(updated)})
+
+
+@app.delete("/api/stories/<story_id>/collaborators/<path:email>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_remove_story_collaborator(story_id: str, email: str):
+    user_doc = _current_user_doc()
+    story = _find_owned_story_or_404(story_id, user_doc)
+    if not story:
+        return jsonify({"ok": False, "error": "Story not found."}), 404
+    if not _can_manage_story_collaborators(story, user_doc):
+        return jsonify({"ok": False, "error": "Only the assigned writer or editors can remove collaborators."}), 403
+    target_email = normalize_email(email)
+    if not is_valid_email(target_email):
+        return jsonify({"ok": False, "error": "Choose a valid collaborator email."}), 400
+    current_collaborators = _story_collaborators(story)
+    next_collaborators = [item for item in current_collaborators if item.get("email") != target_email]
+    if len(next_collaborators) == len(current_collaborators):
+        return jsonify({"ok": False, "error": "Collaborator not found."}), 404
+    stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({"ok": True, "story": _story_to_api(updated), "collaborators": _story_collaborators(updated)})
+
 @app.post("/api/stories/<story_id>/drive-attachment")
 @require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
 def api_attach_drive_file(story_id: str):
@@ -1835,6 +2046,9 @@ def api_attach_drive_file(story_id: str):
     story = _find_owned_story_or_404(story_id, user_doc)
     if not story:
         return jsonify({"ok": False, "error": "Story not found."}), 404
+
+    if not _can_edit_story_content(story, user_doc):
+        return jsonify({"ok": False, "error": "You can comment on this story, but cannot edit its attached work."}), 403
 
     payload = _request_payload()
     file_id = str(payload.get("fileId") or payload.get("id") or "").strip()
@@ -1895,6 +2109,8 @@ def api_upload_story_attachment(story_id: str):
     story = _find_owned_story_or_404(story_id, user_doc)
     if not story:
         return jsonify({"ok": False, "error": "Story not found."}), 404
+    if not _can_edit_story_content(story, user_doc):
+        return jsonify({"ok": False, "error": "You can comment on this story, but cannot edit its attached work."}), 403
 
     uploaded = request.files.get("file")
     if not uploaded or not uploaded.filename:
@@ -1995,6 +2211,8 @@ def api_delete_story_attachment(story_id: str, attachment_id: str):
     story = _find_owned_story_or_404(story_id, user_doc)
     if not story:
         return jsonify({"ok": False, "error": "Story not found."}), 404
+    if not _can_edit_story_content(story, user_doc):
+        return jsonify({"ok": False, "error": "You can comment on this story, but cannot edit its attached work."}), 403
     attachment = _find_attachment_item(story, attachment_id)
     if not attachment:
         return jsonify({"ok": False, "error": "Attachment not found."}), 404
