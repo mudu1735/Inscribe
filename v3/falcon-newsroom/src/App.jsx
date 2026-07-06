@@ -219,6 +219,14 @@ const navSections = [
   { id: "system", label: "Workspace", items: ["admin", "settings"] },
 ];
 
+function navItemForPage(page) {
+  return navItems.find((item) => item.id === page) || navItems[0];
+}
+
+function navSectionForPage(page) {
+  return navSections.find((section) => section.items.includes(page)) || navSections[0];
+}
+
 const initialArticles = [
   {
     id: "a1",
@@ -478,6 +486,10 @@ const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Re
 const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
 const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
+const STORY_COLLABORATOR_ROLE_OPTIONS = [
+  { id: "comment", label: "Can comment", description: "Can view and comment on the story." },
+  { id: "edit", label: "Can edit", description: "Can view, comment, and attach work." },
+];
 const STORY_WORKFLOW_COLUMNS = [
   {
     id: "progress",
@@ -1112,7 +1124,7 @@ function accountDisplayName(user) {
   const firstName = asText(user?.firstName);
   const lastName = asText(user?.lastName);
   const fullName = `${firstName} ${lastName}`.trim();
-  return fullName || asText(user?.email) || "Newsroom user";
+  return fullName || asText(user?.name) || asText(user?.email) || "Newsroom user";
 }
 
 function accountInitials(user) {
@@ -1187,6 +1199,27 @@ function normalizeDisplayActivity(item = {}) {
   };
 }
 
+function normalizeStoryCollaborator(item = {}) {
+  const email = asText(item.email).toLowerCase();
+  const role = STORY_COLLABORATOR_ROLE_OPTIONS.some((option) => option.id === item.role) ? item.role : "comment";
+  return {
+    ...item,
+    id: asText(item.id || item.userId || email),
+    userId: asText(item.userId || item.id),
+    email,
+    name: asText(item.name) || email || "Collaborator",
+    role,
+    invitedAt: formatDisplayDate(item.invitedAt),
+  };
+}
+
+function storyCollaboratorRoleLabel(role) {
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Can comment";
+}
+
+function storyCollaboratorRoleDescription(role) {
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || STORY_COLLABORATOR_ROLE_OPTIONS[0].description;
+}
 function normalizeDisplayStory(story = {}) {
   return {
     ...story,
@@ -1195,6 +1228,7 @@ function normalizeDisplayStory(story = {}) {
     deadline: formatDisplayDate(story.deadline) || story.deadline,
     feedback: Array.isArray(story.feedback) ? story.feedback.map(normalizeDisplayFeedback) : story.feedback,
     comments: Array.isArray(story.comments) ? story.comments.map(normalizeDisplayFeedback) : story.comments,
+    collaborators: Array.isArray(story.collaborators) ? story.collaborators.map(normalizeStoryCollaborator) : [],
   };
 }
 
@@ -1239,10 +1273,25 @@ function storyBelongsToUser(story, user) {
   return userIds.some((value) => storyUserIds.includes(value)) || Boolean(userEmail && storyEmails.includes(userEmail));
 }
 
+function storyCollaboratorForUser(story, user) {
+  if (!story || !user || !Array.isArray(story.collaborators)) return null;
+  const userIds = [user.id, user._id]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userEmail = asText(user.email).toLowerCase();
+  return story.collaborators.find((collaborator) => {
+    const collaboratorIds = [collaborator.id, collaborator.userId]
+      .map((value) => asText(value).toLowerCase())
+      .filter(Boolean);
+    const collaboratorEmail = asText(collaborator.email).toLowerCase();
+    return userIds.some((value) => collaboratorIds.includes(value)) || Boolean(userEmail && collaboratorEmail === userEmail);
+  }) || null;
+}
+
 function storyVisibleToUser(story, user) {
   const role = normalizeAppRole(user?.role);
   if (role === "viewer") return false;
-  if (role === "writer") return storyBelongsToUser(story, user);
+  if (role === "writer") return storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user));
   return true;
 }
 
@@ -1261,9 +1310,21 @@ function canUpdateOwnStorySubmission(user, story) {
   return canSubmitOwnStory(user, story) || canUnsubmitOwnStory(user, story);
 }
 
+function canManageStoryCollaborators(user, story) {
+  const role = normalizeAppRole(user?.role);
+  return ["admin", "editor"].includes(role) || (role === "writer" && storyBelongsToUser(story, user));
+}
+
 function canEditStoryAttachment(user, story) {
   if (canManageEditorialWorkflow(user?.role)) return true;
-  return normalizeAppRole(user?.role) === "writer" && storyBelongsToUser(story, user);
+  if (normalizeAppRole(user?.role) !== "writer") return false;
+  if (storyBelongsToUser(story, user)) return true;
+  return storyCollaboratorForUser(story, user)?.role === "edit";
+}
+
+function canCommentOnStory(user, story) {
+  if (canManageEditorialWorkflow(user?.role)) return true;
+  return normalizeAppRole(user?.role) === "writer" && (storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user)));
 }
 
 function navItemsForRole(role) {
@@ -2121,6 +2182,7 @@ function groupAdminUsersByRole(staff, roleFilter = "All roles") {
     }));
 }
 
+
 function runAdminPageTests() {
   const groupedRoles = groupAdminUsersByRole(users);
   console.assert(groupedRoles.length === 4, "Admin page should return to four role groups when search is clear.");
@@ -2217,15 +2279,13 @@ function Card({ children, className = "" }) {
   return <div className={cx("rounded-2xl border border-white/[0.08] bg-white/[0.035] shadow-2xl shadow-black/20 backdrop-blur", className)}>{children}</div>;
 }
 
-function PageShell({ title, eyebrow, description, breadcrumb, children, right, titleAction, className = "" }) {
+function PageShell({ title, description, children, right, titleAction, className = "" }) {
   return (
     <div
       className={cx("mx-auto px-5 py-6 md:px-8", className || "max-w-[1640px]")}
     >
-      {breadcrumb ? <div className="mb-4">{breadcrumb}</div> : null}
       <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="relative">
-          {eyebrow ? <div className="mb-2 text-xs text-zinc-500">{eyebrow}</div> : null}
           {titleAction ? <div className="mb-2 md:absolute md:-left-12 md:top-1 md:mb-0">{titleAction}</div> : null}
           <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{title}</h1>
           {description ? <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">{description}</p> : null}
@@ -2507,8 +2567,6 @@ function AppShell() {
   const [storiesLoading, setStoriesLoading] = useState(true);
   const [storiesError, setStoriesError] = useState("");
   const [tasks, setTasks] = useState(initialTasks);
-  const [globalSearch, setGlobalSearch] = useState("");
-  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [articleExtractorOpen, setArticleExtractorOpen] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState("a1");
   const [toast, setToast] = useState("");
@@ -2624,11 +2682,6 @@ function AppShell() {
     pushAppPath(pagePath(nextPage));
   };
 
-  const openArticleExtractor = () => {
-    setQuickCreateOpen(false);
-    navigatePage("articles");
-    setArticleExtractorOpen(true);
-  };
 
   const updateArticleStatus = (id, status) => {
     setArticles((prev) => prev.map((article) => (article.id === id ? { ...article, status } : article)));
@@ -2815,33 +2868,58 @@ function AppShell() {
     }
   };
 
+  const inviteStoryCollaborators = async (id, invite) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}/collaborators`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(invite),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not invite collaborators.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, collaborators: payload.collaborators || [] });
+      setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...updatedStory } : story)));
+      setToast("Invite sent.");
+      return updatedStory;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not invite collaborators.");
+      return null;
+    }
+  };
+
+  const removeStoryCollaborator = async (id, email) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}/collaborators/${encodeURIComponent(email)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not remove collaborator.");
+      }
+      const updatedStory = normalizeDisplayStory(payload.story || { id, collaborators: payload.collaborators || [] });
+      setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...updatedStory } : story)));
+      setToast("Removed collaborator.");
+      return updatedStory;
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Could not remove collaborator.");
+      return null;
+    }
+  };
   const updateTaskStatus = (id, status) => {
     setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, status } : task)));
     setToast(`Updated task to ${status}.`);
-  };
-
-  const createDemoArticle = () => {
-    const next = {
-      id: `a${Date.now()}`,
-      title: "New Article Idea from Quick Create",
-      section: "News",
-      authors: ["Unassigned"],
-      status: "Idea",
-      priority: "Normal",
-      deadline: "May 25",
-      published: "Idea",
-      views: 0,
-      visitors: 0,
-      interviews: 0,
-      tags: ["Pitch"],
-      editor: "Ava Patel",
-      summary: "A newly created mock story pitch ready to assign.",
-    };
-    setArticles((prev) => [next, ...prev]);
-    setSelectedArticleId(next.id);
-    setPage("articles");
-    setQuickCreateOpen(false);
-    setToast("Created a new article idea.");
   };
 
   const handleSignOut = async () => {
@@ -2886,10 +2964,22 @@ function AppShell() {
     });
   };
 
+  const breadcrumbDetail = useMemo(() => {
+    const normalizedPath = locationPath.toLowerCase();
+    if (page === "stories" && normalizedPath.startsWith("/stories/")) {
+      const id = initialStoryDetailId();
+      return stories.find((story) => story.id === id)?.title || "Story review";
+    }
+    if (page === "pitches" && normalizedPath.startsWith("/pitches/")) {
+      return "Pitch review";
+    }
+    return "";
+  }, [locationPath, page, stories]);
+
   const pages = {
     dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
     pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
-    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} setToast={setToast} />,
+    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
     interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
@@ -2903,32 +2993,33 @@ function AppShell() {
   return (
     <div className="h-screen overflow-hidden bg-[#08090c] text-zinc-100">
       <div className="relative flex h-screen overflow-hidden">
-        <aside className="hidden h-screen w-72 shrink-0 overflow-hidden border-r border-white/[0.08] bg-[#08090c]/80 p-4 backdrop-blur-xl lg:block">
-          <button onClick={() => navigatePage("dashboard")} className="mb-7 flex w-full items-center gap-3 rounded-xl px-2 py-1 text-left hover:bg-white/[0.035]">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-500 text-sm font-bold text-black">F</div>
-            <div>
-              <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
-              <div className="text-xs text-zinc-500">Poolesville Pulse</div>
-            </div>
-          </button>
-
-          <Input value={globalSearch} onChange={setGlobalSearch} placeholder="Search workspace" className="mb-5" />
-
-          <nav className="space-y-5">
-            {availableNavSections.map((section) => (
-              <div key={section.id}>
-                <div className="mb-2 px-3 text-[0.68rem] uppercase tracking-[0.16em] text-zinc-700">{section.label}</div>
-                <div className="space-y-1">
-                  {section.items.map((item) => (
-                    <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition", page === item.id ? "border border-white/[0.08] bg-white/[0.07] text-zinc-50 shadow-lg shadow-black/20" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200")}>
-                      <Icon name={item.icon} className="h-4 w-4" />
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
+        <aside className="hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-white/[0.08] bg-[#08090c]/80 p-4 backdrop-blur-xl lg:flex">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <button onClick={() => navigatePage("dashboard")} className="mb-7 flex w-full items-center gap-3 rounded-xl px-2 py-1 text-left hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-500 text-sm font-bold text-black">F</div>
+              <div>
+                <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
+                <div className="text-xs text-zinc-500">Poolesville Pulse</div>
               </div>
-            ))}
-          </nav>
+            </button>
+
+            <nav className="space-y-5" aria-label="Primary navigation">
+              {availableNavSections.map((section) => (
+                <div key={section.id}>
+                  <div className="mb-2 px-3 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-zinc-400">{section.label}</div>
+                  <div className="space-y-1">
+                    {section.items.map((item) => (
+                      <button key={item.id} onClick={() => navigatePage(item.id)} className={cx("flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-white/15", page === item.id ? "border border-white/[0.08] bg-white/[0.07] text-zinc-50 shadow-lg shadow-black/20" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200")}>
+                        <Icon name={item.icon} className="h-4 w-4" />
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </nav>
+          </div>
+          <AccountMenu user={account || FALLBACK_ACCOUNT} signingOut={signingOut} onSignOut={handleSignOut} />
         </aside>
 
         <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
@@ -2938,16 +3029,7 @@ function AppShell() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-black">F</div>
                 <span className="font-medium">Falcon</span>
               </div>
-              <HeaderBreadcrumb page={page} locationPath={locationPath} navigatePage={navigatePage} />
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" icon="bell" className="hidden sm:inline-flex">
-                  Alerts
-                </Button>
-                <Button icon="plus" onClick={() => setQuickCreateOpen(true)} className="h-9 w-9 px-0 sm:h-auto sm:w-auto sm:px-3.5">
-                  <span className="sr-only sm:not-sr-only">Create</span>
-                </Button>
-                <AccountMenu user={account || FALLBACK_ACCOUNT} signingOut={signingOut} onSignOut={handleSignOut} />
-              </div>
+              <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
             </div>
           </header>
 
@@ -2960,6 +3042,9 @@ function AppShell() {
                 </button>
               ))}
             </div>
+            <div className="mt-3 max-w-sm">
+              <AccountMenu user={account || FALLBACK_ACCOUNT} signingOut={signingOut} onSignOut={handleSignOut} />
+            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
@@ -2967,8 +3052,6 @@ function AppShell() {
           </div>
         </main>
       </div>
-
-      <AnimatePresence>{quickCreateOpen && <QuickCreateModal onClose={() => setQuickCreateOpen(false)} createDemoArticle={createDemoArticle} openArticleExtractor={openArticleExtractor} />}</AnimatePresence>
       <Toast message={toast} onDismiss={() => setToast("")} />
     </div>
   );
@@ -2980,6 +3063,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   const displayName = accountDisplayName(user);
   const email = asText(user?.email);
   const initials = accountInitials(user);
+  const roleLabel = accountRoleLabel(user?.role);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -3002,33 +3086,35 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   }, [open]);
 
   return (
-    <div ref={menuRef} className="relative ml-1">
+    <div ref={menuRef} className="relative border-t border-white/[0.08] pt-3">
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Open user menu"
         onClick={() => setOpen((current) => !current)}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-xs font-semibold text-zinc-100 transition hover:border-white/[0.18] hover:bg-white/[0.1] focus:outline-none focus:ring-2 focus:ring-white/20"
+        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15"
       >
-        {initials}
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-xs font-semibold text-zinc-100">
+          {initials}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-zinc-100">{displayName}</span>
+          <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span>
+        </span>
       </button>
       <AnimatePresence>
         {open && (
           <motion.div
             role="menu"
             aria-label="User account"
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
             transition={{ duration: 0.14, ease: "easeOut" }}
-            className="absolute right-0 top-11 z-[1000] w-64 overflow-hidden rounded-lg border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
+            className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[1000] w-full min-w-64 overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
           >
-            <div className="px-3 py-3">
-              <div className="truncate text-sm font-medium text-zinc-100">{displayName}</div>
-              {email && <div className="mt-0.5 truncate text-xs text-zinc-500">{email}</div>}
-              <div className="mt-2 text-xs text-zinc-600">{accountRoleLabel(user?.role)}</div>
-            </div>
+            {email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
             <div className="h-px bg-white/[0.08]" />
             <button
               type="button"
@@ -3050,35 +3136,27 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   );
 }
 
-function HeaderBreadcrumb({ page, locationPath, navigatePage }) {
-  const pageLabel = navItems.find((item) => item.id === page)?.label || "Dashboard";
-  const isPitchDetail = page === "pitches" && locationPath.toLowerCase().startsWith("/pitches/");
-  const isStoryDetail = page === "stories" && locationPath.toLowerCase().startsWith("/stories/");
+function HeaderBreadcrumb({ page, detailLabel, navigatePage }) {
+  const currentItem = navItemForPage(page);
+  const currentSection = navSectionForPage(page);
+  const hasDetail = Boolean(asText(detailLabel));
 
   return (
-    <div className="hidden min-w-0 flex-1 items-center gap-3 lg:flex">
-      <span className="text-sm text-zinc-500">Workspace</span>
+    <nav className="hidden min-w-0 flex-1 items-center gap-3 lg:flex" aria-label="Page breadcrumb">
+      <span className="text-sm text-zinc-500">{currentSection.label}</span>
       <span className="text-zinc-700">/</span>
-      {isPitchDetail ? (
+      {hasDetail ? (
         <>
-          <button type="button" onClick={() => navigatePage("pitches")} className="text-sm text-zinc-400 transition hover:text-zinc-100">
-            Pitch Board
+          <button type="button" onClick={() => navigatePage(currentItem.id)} className="text-sm text-zinc-400 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/15">
+            {currentItem.label}
           </button>
           <span className="text-zinc-700">/</span>
-          <span className="truncate text-sm font-medium text-zinc-50">Pitch review</span>
-        </>
-      ) : isStoryDetail ? (
-        <>
-          <button type="button" onClick={() => navigatePage("stories")} className="text-sm text-zinc-400 transition hover:text-zinc-100">
-            Stories
-          </button>
-          <span className="text-zinc-700">/</span>
-          <span className="truncate text-sm font-medium text-zinc-50">Story review</span>
+          <span className="truncate text-sm font-medium text-zinc-50">{detailLabel}</span>
         </>
       ) : (
-        <span className="truncate text-sm font-medium text-zinc-50">{pageLabel}</span>
+        <span className="truncate text-sm font-medium text-zinc-50">{currentItem.label}</span>
       )}
-    </div>
+    </nav>
   );
 }
 
@@ -3098,40 +3176,8 @@ function Toast({ message, onDismiss }) {
   );
 }
 
-function QuickCreateModal({ onClose, createDemoArticle, openArticleExtractor }) {
-  const actions = [
-    { icon: "article", label: "Article idea", helper: "Create a local story card", action: createDemoArticle },
-    { icon: "task", label: "Assignment", helper: "Start a mock assignment", action: onClose },
-    { icon: "people", label: "Interviewee", helper: "Open a mock source flow", action: onClose },
-    { icon: "calendar", label: "Calendar event", helper: "Plan a mock deadline", action: onClose },
-    { icon: "article", label: "Extract from URL", helper: "Open the live extractor", action: openArticleExtractor },
-    { icon: "upload", label: "Import CSV", helper: "Start a mock import", action: onClose },
-  ];
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <motion.div initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }} className="w-full max-w-xl rounded-3xl border border-white/[0.1] bg-[#0b0c10] p-5 shadow-2xl shadow-black" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-50">Create something new</h2>
-            <p className="mt-1 text-sm text-zinc-500">Prototype actions use local state only.</p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200">
-            x
-          </button>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {actions.map((item) => (
-            <button key={item.label} type="button" onClick={item.action} className="group rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4 text-left transition hover:bg-white/[0.07]">
-              <Icon name={item.icon} className="mb-4 h-5 w-5 text-zinc-400 group-hover:text-zinc-100" />
-              <p className="font-medium text-zinc-100">{item.label}</p>
-              <p className="mt-1 text-xs text-zinc-500">{item.helper}</p>
-            </button>
-          ))}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
+function QuickCreateModal() {
+  return null;
 }
 
 function DashboardPage({ articles, tasks, setPage, setSelectedArticleId }) {
@@ -4248,7 +4294,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
   );
 }
 
-function StoriesPage({ stories, loading = false, error = "", currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, setToast }) {
+function StoriesPage({ stories, loading = false, error = "", currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, inviteStoryCollaborators, removeStoryCollaborator, setToast }) {
   const [query, setQuery] = useState("");
   const [sectionFilter, setSectionFilter] = useState("All sections");
   const [detailStoryId, setDetailStoryId] = useState(initialStoryDetailId);
@@ -4310,6 +4356,8 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
         clearStoryAttachment={clearStoryAttachment}
         uploadStoryAttachment={uploadStoryAttachment}
         attachDriveFileToStory={attachDriveFileToStory}
+        inviteStoryCollaborators={inviteStoryCollaborators}
+        removeStoryCollaborator={removeStoryCollaborator}
         copyStoryDoc={copyStoryDoc}
         setToast={setToast}
       />
@@ -4397,13 +4445,14 @@ function StoryOverviewCard({ story, onOpen }) {
   );
 }
 
-function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, copyStoryDoc, setToast }) {
+function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, inviteStoryCollaborators, removeStoryCollaborator, copyStoryDoc, setToast }) {
   const [draftDocUrl, setDraftDocUrl] = useState("");
   const [commentDraft, setCommentDraft] = useState("");
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [attachmentDialog, setAttachmentDialog] = useState(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [openingDrivePicker, setOpeningDrivePicker] = useState(false);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const attachmentMenuRef = useRef(null);
 
   useEffect(() => {
@@ -4413,6 +4462,7 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     setAttachmentDialog(null);
     setUploadingAttachment(false);
     setOpeningDrivePicker(false);
+    setInviteDialogOpen(false);
   }, [story?.id]);
 
   useEffect(() => {
@@ -4446,7 +4496,8 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   const workflowAction = storyWorkflowAction(story);
   const canManageStory = canManageEditorialWorkflow(currentUser?.role);
   const canAttachContent = canEditStoryAttachment(currentUser, story);
-  const canCommentStory = canAttachContent || canManageStory;
+  const canCommentStory = canCommentOnStory(currentUser, story);
+  const canManageCollaborators = canManageStoryCollaborators(currentUser, story);
   const hasSubmissionWork = attachments.length > 0;
   const canUseWriterSubmission = canUpdateOwnStorySubmission(currentUser, story) && Boolean(workflowAction);
   const canClickSubmitStory = canUseWriterSubmission && (workflowAction.nextStatus !== "Submitted" || hasSubmissionWork);
@@ -4615,8 +4666,17 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <main className="min-w-0">
           <header className="border-b border-white/[0.14] pb-8">
-            <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
-            <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
+                <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+              </div>
+              {canManageCollaborators ? (
+                <Button variant="ghost" onClick={() => setInviteDialogOpen(true)} className="shrink-0">
+                  Invite users
+                </Button>
+              ) : null}
+            </div>
           </header>
 
           <section className="border-b border-white/[0.12] py-8">
@@ -4754,6 +4814,15 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
         </aside>
       </div>
       <AnimatePresence>
+        {inviteDialogOpen ? (
+          <StoryInviteDialog
+            story={story}
+            collaborators={story.collaborators || []}
+            onClose={() => setInviteDialogOpen(false)}
+            onInvite={(invite) => inviteStoryCollaborators?.(story.id, invite)}
+            onRemove={(email) => removeStoryCollaborator?.(story.id, email)}
+          />
+        ) : null}
         {attachmentDialog ? (
           <StoryAttachmentDialog
             mode={attachmentDialog}
@@ -4771,6 +4840,159 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   );
 }
 
+function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRemove }) {
+  const [emails, setEmails] = useState("");
+  const [role, setRole] = useState("comment");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [removingEmail, setRemovingEmail] = useState("");
+  const [error, setError] = useState("");
+  const selectedRole = STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role) || STORY_COLLABORATOR_ROLE_OPTIONS[0];
+  const inviteCount = Array.isArray(collaborators) ? collaborators.length : 0;
+
+  const submitInvite = async (event) => {
+    event.preventDefault();
+    const nextEmails = emails.trim();
+    if (!nextEmails) {
+      setError("Enter at least one email address.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const updated = await onInvite?.({ emails: nextEmails, role, message: message.trim() });
+    setSaving(false);
+    if (updated) {
+      setEmails("");
+      setMessage("");
+    } else {
+      setError("Invite could not be sent.");
+    }
+  };
+
+  const removeCollaborator = async (email) => {
+    if (!email || removingEmail) return;
+    setRemovingEmail(email);
+    setError("");
+    const updated = await onRemove?.(email);
+    if (!updated) setError("Collaborator could not be removed.");
+    setRemovingEmail("");
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.form
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={submitInvite}
+        className="w-full max-w-xl rounded-xl border border-white/[0.13] bg-[#0d0e12] p-5 shadow-2xl shadow-black"
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold tracking-tight text-zinc-50">Invite collaborators</h2>
+            <p className="mt-1 truncate text-sm text-zinc-600">{story.title}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200" aria-label="Close invite dialog">
+            <Icon name="x" className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-zinc-300">Email addresses</span>
+            <input
+              autoFocus
+              value={emails}
+              onChange={(event) => setEmails(event.target.value)}
+              placeholder="Enter email addresses"
+              className="h-12 w-full rounded-xl border border-white/[0.14] bg-black/20 px-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.28]"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-zinc-300">Role</span>
+            <div className="relative">
+              <select
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+                className="h-12 w-full appearance-none rounded-xl border border-white/[0.14] bg-black/20 px-4 pr-10 text-sm font-medium text-zinc-100 outline-none focus:border-white/[0.28]"
+              >
+                {STORY_COLLABORATOR_ROLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id} className="bg-zinc-950">{option.label}</option>
+                ))}
+              </select>
+              <Icon name="chevron" className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">{selectedRole.description}</p>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-zinc-300">Message (optional)</span>
+            <div className="relative">
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value.slice(0, 200))}
+                placeholder="Add a message..."
+                rows={4}
+                className="w-full resize-none rounded-xl border border-white/[0.14] bg-black/20 px-4 py-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.28]"
+              />
+              <span className="absolute bottom-3 right-4 text-xs text-zinc-600">{message.length}/200</span>
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-6">
+          <h3 className="text-sm font-medium text-zinc-300">Currently invited ({inviteCount})</h3>
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.12]">
+            {inviteCount ? collaborators.map((collaborator) => (
+              <div key={collaborator.email || collaborator.id} className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3 last:border-b-0">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/[0.08] text-xs font-semibold text-zinc-100">
+                  {accountInitials(collaborator)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-zinc-100">{collaborator.email}</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">{storyCollaboratorRoleLabel(collaborator.role)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeCollaborator(collaborator.email)}
+                  disabled={removingEmail === collaborator.email}
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-wait disabled:opacity-50"
+                  aria-label={`Remove ${collaborator.email}`}
+                >
+                  <Icon name="x" className="h-4 w-4" />
+                </button>
+              </div>
+            )) : (
+              <p className="px-4 py-5 text-sm text-zinc-600">No collaborators invited yet.</p>
+            )}
+          </div>
+        </div>
+
+        {error ? <p className="mt-4 text-sm text-rose-300">{error}</p> : null}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose} disabled={saving || Boolean(removingEmail)}>Cancel</Button>
+          <button
+            type="submit"
+            disabled={saving || Boolean(removingEmail)}
+            className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-5 py-2 text-sm font-semibold text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Sending" : "Send invite"}
+          </button>
+        </div>
+      </motion.form>
+    </motion.div>
+  );
+}
 function StoryAttachmentDialog({ mode, story, value, onValueChange, uploading, onClose, onSubmitLink, onSubmitFile }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const isLinkMode = mode === "link";
@@ -4851,18 +5073,6 @@ function StoryAttachmentDialog({ mode, story, value, onValueChange, uploading, o
         </div>
       </motion.form>
     </motion.div>
-  );
-}
-
-function StoryDetailBreadcrumb({ story, column, onBack }) {
-  return (
-    <nav className="flex min-w-0 flex-wrap items-center gap-2 text-sm" aria-label="Story breadcrumb">
-      <button type="button" onClick={onBack} className="text-zinc-400 transition hover:text-zinc-100">Stories</button>
-      <span className="text-zinc-700">/</span>
-      <span className="text-zinc-500">{column.title}</span>
-      <span className="hidden text-zinc-700 sm:inline">/</span>
-      <span className="hidden min-w-0 truncate font-medium text-zinc-100 sm:inline">{story.title}</span>
-    </nav>
   );
 }
 
@@ -5063,15 +5273,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
       }
     >
       <div className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
-        <Card className="p-5">
-          <div className="mb-4">
-            <div>
-              <h2 className="font-medium text-zinc-50">Articles database</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Loaded 10 at a time from the existing backend article records API.
-              </p>
-            </div>
-          </div>
+        <div>
           <div className="mb-4 flex flex-col gap-3 md:flex-row">
             <Input value={query} onChange={handleSearchChange} placeholder="Search title, author, section, tag, or interviewee" className="flex-1" />
             <AnimatedDropdown
@@ -5191,7 +5393,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
               </div>
             </div>
           )}
-        </Card>
+        </div>
         <ArticleDetailPanel article={selectedArticle} loading={loading} />
       </div>
       <AnimatePresence>
@@ -5281,7 +5483,7 @@ function ArticleDetailPanel({ article, loading }) {
           <p className="mb-2 text-xs uppercase tracking-[0.18em] text-zinc-600">Section / Tags</p>
           <div className="flex flex-wrap gap-2">
             {articleLabelPills.map((label, index) => (
-              <StatusBadge key={label} tone={index === 0 && label === article.section ? "blue" : "neutral"}>{label}</StatusBadge>
+              <StatusBadge key={label} tone="neutral">{label}</StatusBadge>
             ))}
           </div>
         </div>
@@ -5562,16 +5764,7 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
   return (
     <PageShell title="Interviewees & source database" eyebrow="Sources / People">
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card className="p-5">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-medium text-zinc-50">Source database</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                One row per interviewee record linked to one article.
-              </p>
-            </div>
-          </div>
-
+        <div>
           <div className="mb-4 grid gap-3 xl:grid-cols-[1fr_10rem_11rem]">
             <Input value={query} onChange={handleSearchChange} placeholder="Search name, grade, house, or article" />
             <AnimatedDropdown
@@ -5722,7 +5915,7 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
               </div>
             </div>
           )}
-        </Card>
+        </div>
         <InterviewRecordInspector
           record={selectedRecord}
           loading={loading}
@@ -5745,7 +5938,7 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
 
 function ReadOnlyField({ label, value }) {
   return (
-    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-3">
+    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-5">
       <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</p>
       <p className="min-w-0 truncate text-sm text-zinc-200">{value || "Unknown"}</p>
     </div>
@@ -5782,69 +5975,84 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
   }
 
   return (
-    <Card className="p-5">
-      <div className="mb-6 flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
-        <div className="min-w-0">
-          <p className="mb-2 text-xs uppercase tracking-[0.16em] text-zinc-600">Selected record</p>
-          <h2 className="break-words text-xl font-semibold tracking-tight text-zinc-50">{record.name}</h2>
-          <p className="mt-2 text-sm text-zinc-500">Grade {record.grade || "Unknown"} - {record.house || "Unknown"}</p>
-        </div>
-        {canManage ? (
-          <div className="flex shrink-0 flex-wrap gap-2">
-            {!editing && <Button variant="ghost" icon="edit" onClick={onEdit}>Edit record</Button>}
-            <Button variant="danger" icon="trash" onClick={onDelete} disabled={deleting || saving}>
-              {deleting ? "Deleting" : "Delete"}
-            </Button>
-          </div>
-        ) : null}
+    <Card className="flex min-h-[560px] flex-col p-5">
+      <div>
+        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Selected record</p>
+        <h2 className="break-words text-2xl font-semibold tracking-tight text-zinc-50">{record.name}</h2>
       </div>
-      {saveError && !editing ? <p className="mb-4 text-sm text-rose-300">{saveError}</p> : null}
 
-      <div className="border-t border-white/[0.08] pt-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="font-medium text-zinc-50">Source information</h3>
+      {saveError ? <p className="mt-4 text-sm text-rose-300">{saveError}</p> : null}
+
+      {editing ? (
+        <div className="mt-8 space-y-5 border-t border-white/[0.08] pt-5">
+          <div className="grid gap-3 2xl:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">First name</span>
+              <input
+                value={draft?.firstName || ""}
+                onChange={(event) => setDraft((previous) => ({ ...(previous || {}), firstName: event.target.value }))}
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Last name</span>
+              <input
+                value={draft?.lastName || ""}
+                onChange={(event) => setDraft((previous) => ({ ...(previous || {}), lastName: event.target.value }))}
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+              />
+            </label>
+          </div>
+          <div className="grid gap-3 2xl:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Grade</span>
+              <AnimatedDropdown
+                text={draft?.grade || "Unknown"}
+                items={sourceEditGradeOptions(draft?.grade).map((name) => ({ name, link: "#" }))}
+                onSelect={(item) => setDraft((previous) => ({ ...(previous || {}), grade: item.name }))}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">House</span>
+              <AnimatedDropdown
+                text={draft?.house || "Unknown"}
+                items={sourceEditHouseOptions(draft?.house).map((name) => ({ name, link: "#" }))}
+                onSelect={(item) => setDraft((previous) => ({ ...(previous || {}), house: item.name }))}
+              />
+            </label>
+          </div>
         </div>
-        {editing ? (
-          <div className="space-y-4">
-            <div className="grid gap-3 2xl:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">First name</span>
-                <input
-                  value={draft?.firstName || ""}
-                  onChange={(event) => setDraft((previous) => ({ ...(previous || {}), firstName: event.target.value }))}
-                  className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Last name</span>
-                <input
-                  value={draft?.lastName || ""}
-                  onChange={(event) => setDraft((previous) => ({ ...(previous || {}), lastName: event.target.value }))}
-                  className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-                />
-              </label>
-            </div>
-            <div className="grid gap-3 2xl:grid-cols-2">
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Grade</span>
-                <AnimatedDropdown
-                  text={draft?.grade || "Unknown"}
-                  items={sourceEditGradeOptions(draft?.grade).map((name) => ({ name, link: "#" }))}
-                  onSelect={(item) => setDraft((previous) => ({ ...(previous || {}), grade: item.name }))}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">House</span>
-                <AnimatedDropdown
-                  text={draft?.house || "Unknown"}
-                  items={sourceEditHouseOptions(draft?.house).map((name) => ({ name, link: "#" }))}
-                  onSelect={(item) => setDraft((previous) => ({ ...(previous || {}), house: item.name }))}
-                />
-              </label>
-            </div>
-            {saveError && <p className="text-sm text-rose-300">{saveError}</p>}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+      ) : (
+        <div className="mt-8 divide-y divide-white/[0.06] border-y border-white/[0.08]">
+          <ReadOnlyField label="Grade" value={record.grade} />
+          <ReadOnlyField label="House" value={record.house} />
+        </div>
+      )}
+
+      <div className="mt-8 border-t border-white/[0.08] pt-7">
+        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Article</p>
+        {isValidHttpUrl(record.article?.url) ? (
+          <a
+            href={record.article.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block break-words text-base font-semibold leading-7 text-zinc-100 transition hover:text-white"
+          >
+            {record.article?.title || "Article title unavailable"}
+          </a>
+        ) : (
+          <p className="break-words text-base font-semibold leading-7 text-zinc-100">
+            {record.article?.title || "Article title unavailable"}
+          </p>
+        )}
+        <p className="mt-3 text-sm text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
+      </div>
+
+      {canManage ? (
+        <div className="mt-auto flex justify-end gap-2 pt-10">
+          {editing ? (
+            <>
+              <Button variant="ghost" onClick={onCancel} disabled={saving || deleting}>Cancel</Button>
               <button
                 type="button"
                 onClick={onSave}
@@ -5853,37 +6061,17 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
               >
                 {saving ? "Saving..." : "Save changes"}
               </button>
-            </div>
-          </div>
-        ) : (
-          <div className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
-            <ReadOnlyField label="Name" value={record.name} />
-            <ReadOnlyField label="Grade" value={record.grade} />
-            <ReadOnlyField label="House" value={record.house} />
-          </div>
-        )}
-      </div>
-
-      <div className="mt-6 border-t border-white/[0.08] pt-5">
-        <h3 className="mb-4 font-medium text-zinc-50">Article information</h3>
-        <div>
-          {isValidHttpUrl(record.article?.url) ? (
-            <a
-              href={record.article.url}
-              target="_blank"
-              rel="noreferrer"
-              className="block break-words text-sm font-medium leading-6 text-zinc-100 transition hover:text-white"
-            >
-              {record.article?.title || "Article title unavailable"}
-            </a>
+            </>
           ) : (
-            <p className="break-words text-sm font-medium leading-6 text-zinc-100">
-              {record.article?.title || "Article title unavailable"}
-            </p>
+            <>
+              <Button variant="ghost" onClick={onEdit}>Edit</Button>
+              <Button variant="danger" onClick={onDelete} disabled={deleting || saving}>
+                {deleting ? "Deleting" : "Delete"}
+              </Button>
+            </>
           )}
-          <p className="mt-1 text-sm text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
         </div>
-      </div>
+      ) : null}
     </Card>
   );
 }
@@ -6362,7 +6550,6 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("All roles");
   const [collapsedRoles, setCollapsedRoles] = useState({});
 
   const loadStaff = async (signal) => {
@@ -6395,12 +6582,12 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
   }, []);
 
   const query = adminSearchQuery(search);
-  const isSearching = query.length > 0;
   const visibleStaff = useMemo(
-    () => staff.filter((user) => adminUserMatches(user, query, roleFilter)),
-    [staff, query, roleFilter]
+    () => staff.filter((user) => adminUserMatches(user, query, "All roles")),
+    [staff, query]
   );
-  const groupedStaff = useMemo(() => groupAdminUsersByRole(staff, roleFilter), [staff, roleFilter]);
+  const visibleGroups = useMemo(() => groupAdminUsersByRole(visibleStaff), [visibleStaff]);
+  const visibleCount = visibleGroups.reduce((total, group) => total + group.users.length, 0);
 
   const updateUserRole = async (userId, nextRole) => {
     const user = staff.find((item) => item.id === userId);
@@ -6429,32 +6616,29 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
   };
 
   const toggleRole = (roleId) => {
-    setCollapsedRoles((prev) => ({ ...prev, [roleId]: !prev[roleId] }));
+    setCollapsedRoles((previous) => ({ ...previous, [roleId]: !previous[roleId] }));
   };
 
   return (
     <PageShell
-      title="Admin dashboard"
-      eyebrow="Workspace / Permissions"
-      className="max-w-6xl"
+      title="Admin"
+      description="Manage staff access and roles for the newsroom."
+      className="max-w-7xl"
       right={<Button icon="mail" onClick={() => setToast("Invite staff is ready for backend wiring.")}>Invite staff</Button>}
     >
-      <section className="space-y-6">
-        <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-5 md:flex-row md:items-center md:justify-between">
-          <Input value={search} onChange={setSearch} placeholder="Search staff..." className="h-12 md:w-[560px]" />
-          <Select value={roleFilter} onChange={setRoleFilter} options={ADMIN_ROLE_FILTER_OPTIONS} className="w-full md:w-36" />
-        </div>
+      <section className="space-y-5">
+        <Input value={search} onChange={setSearch} placeholder="Search staff" className="h-11 max-w-xl" />
 
         {loading ? (
-          <StateMessage icon="admin" title="Loading users" body="Pulling users and roles from MongoDB." />
+          <AdminSurfaceMessage icon="admin" title="Loading users" body="Pulling users and roles from MongoDB." />
         ) : error ? (
-          <StateMessage icon="admin" title="Admin users unavailable" body={error} />
-        ) : isSearching ? (
-          <AdminSearchResults staff={visibleStaff} onRoleChange={updateUserRole} />
+          <AdminSurfaceMessage icon="admin" title="Admin users unavailable" body={error} />
+        ) : visibleCount === 0 ? (
+          <AdminSurfaceMessage icon="search" title="No matching staff" body="Try a different staff name." />
         ) : (
-          <div className="space-y-6 pb-20">
-            {groupedStaff.map((group) => (
-              <AdminRoleGroup
+          <div className="space-y-3 pb-20">
+            {visibleGroups.map((group) => (
+              <AdminRoleSection
                 key={group.id}
                 group={group}
                 collapsed={Boolean(collapsedRoles[group.id])}
@@ -6469,29 +6653,44 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
   );
 }
 
-function AdminRoleGroup({ group, collapsed, onToggle, onRoleChange }) {
+function AdminSurfaceMessage({ icon, title, body }) {
   return (
-    <section className="relative">
-      <RoleGroupHeader role={group.label} description={group.description} isCollapsed={collapsed} onToggle={onToggle} />
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025]">
+      <StateMessage icon={icon} title={title} body={body} />
+    </div>
+  );
+}
 
+function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/15"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", collapsed ? "-rotate-90" : "rotate-0")} />
+          <span className="min-w-0">
+            <span className="text-sm font-semibold text-zinc-100">{group.label}</span>{" "}
+            <span className="ml-3 text-sm text-zinc-500">{group.description}</span>
+          </span>
+        </span>
+      </button>
       <AnimatePresence initial={false}>
         {!collapsed && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="overflow-hidden"
+            transition={{ duration: 0.16, ease: "easeOut" }}
+            className="overflow-hidden border-t border-white/[0.08]"
           >
-            <AdminColumnHeader />
             {group.users.length ? (
-              <div>
-                {group.users.map((user) => (
-                  <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} />
-                ))}
-              </div>
+              <AdminStaffTable staff={group.users} onRoleChange={onRoleChange} />
             ) : (
-              <div className="border-t border-white/[0.06] px-4 py-6 text-sm text-zinc-600 sm:px-3">No staff in this role.</div>
+              <div className="px-4 py-6 text-sm text-zinc-600">No staff in this role.</div>
             )}
           </motion.div>
         )}
@@ -6500,93 +6699,46 @@ function AdminRoleGroup({ group, collapsed, onToggle, onRoleChange }) {
   );
 }
 
-function RoleGroupHeader({ role, description, isCollapsed, onToggle }) {
+function AdminStaffTable({ staff, onRoleChange }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={!isCollapsed}
-      className="
-        relative
-        flex w-full items-center justify-between
-        overflow-hidden
-        rounded-xl
-        border border-zinc-900/50
-        bg-zinc-950/70
-        px-4 py-3
-        text-left
-        transition
-        before:absolute
-        before:left-0
-        before:top-3
-        before:h-[calc(100%-1.5rem)]
-        before:w-[2px]
-        before:rounded-full
-        before:bg-gradient-to-b
-        before:from-zinc-500/70
-        before:via-zinc-500/40
-        before:to-transparent
-        hover:border-zinc-800/80
-        hover:bg-zinc-950
-        hover:before:from-zinc-400/80
-        hover:before:via-zinc-400/50
-      "
-    >
-      <div className="min-w-0">
-        <div className="flex items-center gap-5">
-          <Icon name="chevron" className={cx("h-4 w-4 text-zinc-500 transition-transform duration-200", isCollapsed ? "-rotate-90" : "rotate-0")} />
-          <h2 className="text-sm font-semibold text-zinc-50">{role}</h2>
-        </div>
-
-        <p className="mt-2 truncate pl-9 text-sm text-zinc-500">{description}</p>
-      </div>
-    </button>
-  );
-}
-
-function AdminSearchResults({ staff, onRoleChange }) {
-  return (
-    <section className="pb-20">
-      <AdminColumnHeader />
-      {staff.length ? (
-        <div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[680px] text-left text-sm">
+        <thead className="text-xs uppercase tracking-[0.14em] text-zinc-600">
+          <tr>
+            <th className="px-4 py-3 font-medium">Staff member</th>
+            <th className="w-44 px-4 py-3 font-medium">Role</th>
+            <th className="w-44 px-4 py-3 font-medium">Last seen</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.06]">
           {staff.map((user) => (
             <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} />
           ))}
-        </div>
-      ) : (
-        <div className="border-t border-white/[0.06] px-4 py-8 text-sm text-zinc-600 sm:px-3">No staff match that name.</div>
-      )}
-    </section>
-  );
-}
-
-function AdminColumnHeader() {
-  return (
-    <div className="mt-3 hidden grid-cols-[minmax(16rem,1fr)_12rem_10rem] px-4 pb-3 text-sm font-medium text-zinc-500 sm:grid sm:px-3">
-      <div>User</div>
-      <div>Role</div>
-      <div>Last seen</div>
+        </tbody>
+      </table>
     </div>
   );
 }
 
 function AdminUserRow({ user, onRoleChange }) {
   return (
-    <div className="relative grid gap-4 border-t border-white/[0.045] px-4 py-4 sm:grid-cols-[minmax(16rem,1fr)_12rem_10rem] sm:items-center sm:px-3">
-      <div className="min-w-0">
-        <div className="truncate text-base font-semibold text-zinc-50">{user.name}</div>
-        <div className="mt-1 truncate text-sm text-zinc-600">{user.email}</div>
-      </div>
-      <div>
-        <div className="mb-2 text-sm font-medium text-zinc-600 sm:hidden">Role</div>
+    <tr className="transition hover:bg-white/[0.025]">
+      <td className="px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-xs font-semibold text-zinc-200">
+            {accountInitials(user)}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate font-medium text-zinc-100">{user.name}</div>
+            <div className="mt-0.5 truncate text-xs text-zinc-500">{user.email || "Email unavailable"}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3">
         <AdminRoleDropdown value={user.role} onChange={(nextRole) => onRoleChange(user.id, nextRole)} label={`${user.name} role`} />
-      </div>
-      <div className="text-sm text-zinc-500">
-        <div className="mb-2 text-sm font-medium text-zinc-600 sm:hidden">Last seen</div>
-        {user.lastSeen}
-      </div>
-    </div>
+      </td>
+      <td className="px-4 py-3 text-zinc-500">{user.lastSeen || "Not recorded"}</td>
+    </tr>
   );
 }
 
@@ -6653,7 +6805,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
           exit={{ opacity: 0, scale: 0.96, y: -4 }}
           transition={{ duration: 0.14, ease: "easeOut" }}
           style={menuStyle}
-          className="fixed z-[100] overflow-hidden rounded-xl border border-white/[0.12] bg-zinc-950 p-1 shadow-2xl shadow-black/60 ring-1 ring-black/40"
+          className="fixed z-[100] overflow-hidden rounded-xl border border-white/[0.12] bg-zinc-950 p-1 shadow-2xl shadow-black/60"
         >
           {ADMIN_ROLE_OPTIONS.map((option) => (
             <button
@@ -6666,7 +6818,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
                 setOpen(false);
               }}
               className={cx(
-                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition",
+                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:outline-none",
                 option === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
               )}
             >
@@ -6688,7 +6840,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
         aria-expanded={open}
         aria-label={label}
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-100 transition hover:border-white/[0.16] hover:bg-white/[0.05] focus:outline-none focus:ring-2 focus:ring-white/15"
+        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-100 transition hover:border-white/[0.08] hover:bg-white/[0.05] focus:border-white/[0.08] focus:outline-none focus-visible:border-white/[0.08] focus-visible:outline-none active:border-white/[0.08] active:outline-none"
       >
         <span className="truncate">{accountRoleLabel(value)}</span>
         <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", open && "rotate-180")} />
@@ -6700,7 +6852,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
 
 function SettingsPage() {
   return (
-    <PageShell title="Workspace settings" eyebrow="Configuration / School setup" right={<Button>Save changes</Button>}>
+    <PageShell title="Workspace settings" right={<Button>Save changes</Button>}>
       <div className="grid gap-5 xl:grid-cols-2">
         <Card className="p-5">
           <h2 className="font-medium">Publication settings</h2>
@@ -6713,16 +6865,6 @@ function SettingsPage() {
           </div>
         </Card>
         <Card className="p-5">
-          <h2 className="font-medium">Integrations</h2>
-          <p className="mt-1 text-sm text-zinc-500">Mock setup state for future backend connections.</p>
-          <div className="mt-5 space-y-3">
-            <Integration name="SNO / WordPress Import" status="Detected" />
-            <Integration name="Google Analytics API" status="Not connected" />
-            <Integration name="Google Calendar" status="Not connected" />
-            <Integration name="Email notifications" status="Draft mode" />
-          </div>
-        </Card>
-        <Card className="p-5 xl:col-span-2">
           <h2 className="font-medium">Multi-school readiness</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">The future version should add workspace IDs to every article, source, task, analytics snapshot, and user record so another school can connect its own newspaper site without sharing data with Poolesville Pulse.</p>
         </Card>
@@ -6740,14 +6882,6 @@ function Field({ label, value }) {
   );
 }
 
-function Integration({ name, status }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
-      <span className="text-sm text-zinc-300">{name}</span>
-      <StatusBadge tone={status === "Detected" ? "green" : status === "Draft mode" ? "blue" : "neutral"}>{status}</StatusBadge>
-    </div>
-  );
-}
 
 export default function FalconNewsroomFullInteractiveUI() {
   return isLandingRoute() ? <LandingPage /> : <AppShell />;
