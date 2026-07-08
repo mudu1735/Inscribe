@@ -970,12 +970,33 @@ def _attachment_push_value(story: dict, *new_items: dict) -> dict:
     return {"$each": _merged_attachment_items(story, *new_items)}
 
 
+DUE_DATE_FIELDS = ("deadline", "dueDate", "approvalDueDate", "due", "dateDue", "deadlineDate", "due_date", "deadline_date", "approval_due_date")
+
+
+def _first_text_value(*values) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _due_date_from_doc(doc: dict) -> str:
+    return _first_text_value(*(doc.get(field) for field in DUE_DATE_FIELDS))
+
+
+def _story_deadline(doc: dict) -> str:
+    raw_deadline = _due_date_from_doc(doc)
+    return _date_for_api(raw_deadline) or raw_deadline
+
+
 def _story_to_api(doc: dict) -> dict:
     writer = str(doc.get("writer") or doc.get("owner") or doc.get("author") or "").strip()
     authors = _coerce_list_field(doc.get("authors"))
     if not writer and authors:
         writer = authors[0]
     attachments = _story_attachments_to_api(doc)
+    deadline = _story_deadline(doc)
     return {
         "id": _doc_public_id(doc, "storyId"),
         "title": doc.get("title") or doc.get("storyTitle") or "Untitled story",
@@ -986,7 +1007,8 @@ def _story_to_api(doc: dict) -> dict:
         "editor": doc.get("editor", "") or "",
         "status": doc.get("status") or "Assigned",
         "priority": doc.get("priority") or "Normal",
-        "deadline": doc.get("deadline") or doc.get("dueDate") or "",
+        "deadline": deadline,
+        "dueDate": deadline,
         "dueSoon": _bool_field(doc, "dueSoon"),
         "submittedAt": _date_for_api(doc.get("submittedAt") or doc.get("createdAt")),
         "lastEdited": _date_for_api(doc.get("lastEdited") or doc.get("updatedAt")),
@@ -1008,6 +1030,7 @@ def _story_to_api(doc: dict) -> dict:
 
 
 def _pitch_to_api(doc: dict) -> dict:
+    deadline = _story_deadline(doc)
     return {
         "id": _doc_public_id(doc, "pitchId"),
         "title": doc.get("title") or "Untitled pitch",
@@ -1019,6 +1042,8 @@ def _pitch_to_api(doc: dict) -> dict:
         "ownerUserId": str(doc.get("ownerUserId") or doc.get("writerUserId") or ""),
         "submittedAt": _date_for_api(doc.get("submittedAt") or doc.get("createdAt")),
         "notes": doc.get("notes", "") or "",
+        "deadline": deadline,
+        "dueDate": deadline,
         "editorFeedback": doc.get("editorFeedback", "") or "",
         "feedback": doc.get("feedback") if isinstance(doc.get("feedback"), list) else [],
         "comments": doc.get("comments") if isinstance(doc.get("comments"), list) else [],
@@ -1104,13 +1129,24 @@ def _delete_story_file(file_id_value):
         pass
 
 
-def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict):
+def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict, deadline: str = "", editor_note: str = ""):
     pitch_id = _doc_public_id(pitch_doc, "pitchId")
+    now_iso = _now_iso()
+    story_deadline = _first_text_value(deadline, _due_date_from_doc(pitch_doc))
     existing = stories_col.find_one({"sourcePitchId": pitch_id})
     if existing:
+        existing_update = {"updatedAt": now_iso}
+        if story_deadline:
+            existing_update["deadline"] = story_deadline
+            existing_update["dueDate"] = story_deadline
+        if editor_note:
+            existing_update["editorNote"] = editor_note
+            existing_update["nextStep"] = editor_note
+        if len(existing_update) > 1:
+            stories_col.update_one({"_id": existing["_id"]}, {"$set": existing_update})
+            existing = stories_col.find_one({"_id": existing["_id"]}) or existing
         return existing
 
-    now_iso = _now_iso()
     doc = {
         "title": pitch_doc.get("title") or "Untitled story",
         "section": pitch_doc.get("section", "") or "",
@@ -1120,13 +1156,14 @@ def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict):
         "editor": _user_display_name(actor_doc),
         "status": "Assigned",
         "priority": "Normal",
-        "deadline": "",
+        "deadline": story_deadline,
+        "dueDate": story_deadline,
         "submittedAt": pitch_doc.get("submittedAt") or pitch_doc.get("createdAt") or now_iso,
         "createdAt": now_iso,
         "updatedAt": now_iso,
         "summary": pitch_doc.get("angle") or pitch_doc.get("summary") or "",
-        "nextStep": "Begin reporting from the approved pitch.",
-        "editorNote": pitch_doc.get("editorFeedback", "") or "",
+        "nextStep": editor_note or "Begin reporting from the approved pitch.",
+        "editorNote": editor_note or pitch_doc.get("editorFeedback", "") or "",
         "googleDocUrl": "",
         "revisionCount": 0,
         "wordCount": 0,
@@ -1873,6 +1910,14 @@ def api_update_story(story_id: str):
             update["submittedAt"] = _now_iso()
         if next_status == "Returned":
             update["returnedAt"] = _now_iso()
+    if any(field in payload for field in DUE_DATE_FIELDS):
+        if role not in {ROLE_ADMIN, ROLE_EDITOR}:
+            return jsonify({"ok": False, "error": "Only editors and admins can update story due dates."}), 403
+        next_deadline = _first_text_value(*(payload.get(field) for field in DUE_DATE_FIELDS))
+        if len(next_deadline) > 80:
+            return jsonify({"ok": False, "error": "Due date is too long."}), 400
+        update["deadline"] = next_deadline
+        update["dueDate"] = next_deadline
     if "googleDocUrl" in payload or "documentUrl" in payload:
         if not _can_edit_story_content(story, user_doc):
             return jsonify({"ok": False, "error": "You can comment on this story, but cannot edit its attached work."}), 403
@@ -1939,6 +1984,66 @@ def _story_collaborator_payload(item: dict, role: str, message: str, actor_doc: 
     }
 
 
+def _approval_invite_emails(raw_value) -> list[str]:
+    if isinstance(raw_value, str):
+        candidates = re.split(r"[,;\s]+", raw_value)
+    elif isinstance(raw_value, list):
+        candidates = raw_value
+    else:
+        candidates = []
+    emails = []
+    for value in candidates:
+        email = normalize_email(str(value or ""))
+        if email and email not in emails:
+            emails.append(email)
+    return emails
+
+
+def _add_approval_collaborators(story: dict, emails: list[str], message: str, actor_doc: dict) -> str:
+    if not emails:
+        return ""
+    invalid = [email for email in emails if not is_valid_email(email)]
+    if invalid:
+        return f"Invite skipped. Enter valid email addresses: {', '.join(invalid)}."
+
+    actor_email = normalize_email(actor_doc.get("email") or "")
+    primary_emails = {normalize_email(story.get("writerEmail") or ""), normalize_email(story.get("ownerEmail") or "")}
+    current_collaborators = _story_collaborators(story)
+    collaborator_by_email = {item["email"]: item for item in current_collaborators}
+    invited = []
+    skipped = []
+    for email in emails:
+        if email == actor_email or email in primary_emails or email in collaborator_by_email:
+            skipped.append(email)
+            continue
+        invited_user = find_user_by_email(email)
+        if not invited_user:
+            skipped.append(email)
+            continue
+        invited_role = _current_user_role(invited_user)
+        if invited_role != ROLE_WRITER:
+            skipped.append(email)
+            continue
+        collaborator = _story_collaborator_payload(_serialize_user(invited_user), "comment", message, actor_doc)
+        collaborator_by_email[email] = collaborator
+        invited.append(collaborator)
+
+    if invited:
+        next_collaborators = sorted(collaborator_by_email.values(), key=lambda item: item.get("email", ""))
+        stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
+        activity_col.insert_one({
+            "entityType": "story",
+            "entityId": _doc_public_id(story, "storyId"),
+            "eventType": "collaborator_invite",
+            "text": f"Invited {len(invited)} collaborator{'s' if len(invited) != 1 else ''} from pitch approval.",
+            "actorId": str(actor_doc.get("_id")),
+            "actorEmail": actor_doc.get("email", ""),
+            "actorName": _user_display_name(actor_doc),
+            "createdAt": datetime.now(timezone.utc),
+        })
+    if skipped:
+        return f"Approved, but {len(skipped)} invite{'s were' if len(skipped) != 1 else ' was'} skipped."
+    return ""
 @app.post("/api/stories/<story_id>/collaborators")
 @require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
 def api_invite_story_collaborators(story_id: str):
@@ -2325,12 +2430,25 @@ def api_update_pitch(pitch_id: str):
         return jsonify({"ok": False, "error": "Pitch not found."}), 404
 
     payload = _request_payload()
+    approval_deadline = _first_text_value(*(payload.get(field) for field in DUE_DATE_FIELDS))
+    approval_message = str(payload.get("approvalMessage") or payload.get("message") or "").strip()
+    invite_emails = _approval_invite_emails(payload.get("inviteEmails") or payload.get("invites") or payload.get("emails"))
+    if len(approval_deadline) > 80:
+        return jsonify({"ok": False, "error": "Due date is too long."}), 400
+    if len(approval_message) > 200:
+        return jsonify({"ok": False, "error": "Approval message must be 200 characters or fewer."}), 400
     update = {"updatedAt": _now_iso()}
+    next_status = ""
     if "status" in payload:
         next_status = str(payload.get("status") or "").strip()
         if not next_status:
             return jsonify({"ok": False, "error": "Status is required."}), 400
         update["status"] = next_status
+    if next_status == "Approved":
+        if not approval_deadline:
+            return jsonify({"ok": False, "error": "Due date is required before approving a pitch."}), 400
+        update["deadline"] = approval_deadline
+        update["dueDate"] = approval_deadline
     if len(update) == 1:
         return jsonify({"ok": False, "error": "No editable fields provided."}), 400
 
@@ -2340,7 +2458,12 @@ def api_update_pitch(pitch_id: str):
     updated = pitches_col.find_one({"_id": pitch["_id"]}) or {}
     payload = {"ok": True, "pitch": _pitch_to_api(updated)}
     if update.get("status") == "Approved":
-        payload["story"] = _story_to_api(_create_story_from_pitch(updated, user_doc))
+        story_doc = _create_story_from_pitch(updated, user_doc, approval_deadline, approval_message)
+        invite_warning = _add_approval_collaborators(story_doc, invite_emails, approval_message, user_doc)
+        story_doc = stories_col.find_one({"_id": story_doc["_id"]}) or story_doc
+        payload["story"] = _story_to_api(story_doc)
+        if invite_warning:
+            payload["warning"] = invite_warning
     return jsonify(payload)
 
 
