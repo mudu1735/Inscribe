@@ -473,14 +473,6 @@ const sectionData = [
   { name: "Features", value: 7 },
 ];
 
-const calendarItems = [
-  { day: 10, title: "Snapchat follow-up", type: "Publish", section: "Tech" },
-  { day: 12, title: "Sports preview", type: "Review", section: "Sports" },
-  { day: 14, title: "Parking story", type: "Edit", section: "News" },
-  { day: 16, title: "Robotics photos", type: "Media", section: "Features" },
-  { day: 18, title: "Cafeteria interview", type: "Interview", section: "News" },
-  { day: 22, title: "Prom trends pitch", type: "Pitch", section: "Culture" },
-];
 
 const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Review", "Needs Revision", "Returned", "Ready for Publish", "Published"];
 const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
@@ -1175,6 +1167,11 @@ function formatDisplayDate(value) {
     else if (unit.startsWith("week")) date.setDate(date.getDate() - amount * 7);
     return monthDayYear(date);
   }
+  const isoDateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnlyMatch) {
+    const date = new Date(Number(isoDateOnlyMatch[1]), Number(isoDateOnlyMatch[2]) - 1, Number(isoDateOnlyMatch[3]));
+    return monthDayYear(date);
+  }
   const monthDayMatch = raw.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}$/i);
   if (monthDayMatch) {
     const parsedMonthDay = Date.parse(`${raw}, ${now.getFullYear()}`);
@@ -1185,6 +1182,64 @@ function formatDisplayDate(value) {
   return raw;
 }
 
+function inputDateValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function defaultApprovalDueDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 7);
+  return inputDateValue(date);
+}
+
+function parseCalendarDate(value, fallbackYear = new Date().getFullYear()) {
+  const raw = asText(value);
+  if (!raw || ["published", "draft", "idea"].includes(raw.toLowerCase())) return null;
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const date = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const monthDayMatch = raw.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}$/i);
+  const candidate = monthDayMatch ? `${raw}, ${fallbackYear}` : raw.replace(/,\s*\d{1,2}:\d{2}\s*(AM|PM)$/i, "");
+  const parsed = Date.parse(candidate);
+  if (Number.isNaN(parsed)) return null;
+  const date = new Date(parsed);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function calendarDateKey(date) {
+  return inputDateValue(date);
+}
+
+function addMonths(date, amount) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function monthYearLabel(date) {
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(date);
+}
+
+function buildCalendarCells(monthDate) {
+  const firstOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const firstVisible = new Date(firstOfMonth);
+  firstVisible.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstVisible);
+    date.setDate(firstVisible.getDate() + index);
+    return {
+      date,
+      key: calendarDateKey(date),
+      day: date.getDate(),
+      inMonth: date.getMonth() === monthDate.getMonth(),
+      isToday: calendarDateKey(date) === calendarDateKey(new Date()),
+    };
+  });
+}
 function normalizeDisplayFeedback(item = {}) {
   return {
     ...item,
@@ -1220,12 +1275,43 @@ function storyCollaboratorRoleLabel(role) {
 function storyCollaboratorRoleDescription(role) {
   return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || STORY_COLLABORATOR_ROLE_OPTIONS[0].description;
 }
+function dueDateValue(record = {}) {
+  return firstText(
+    record.deadline,
+    record.dueDate,
+    record.approvalDueDate,
+    record.due,
+    record.dateDue,
+    record.deadlineDate,
+    record.due_date,
+    record.deadline_date,
+    record.approval_due_date
+  );
+}
+
+function storyDeadlineValue(story = {}) {
+  return dueDateValue(story);
+}
+
+function storyDueDateLabel(story = {}) {
+  const deadline = storyDeadlineValue(story);
+  return formatDisplayDate(deadline) || deadline;
+}
+
+function storyWithApprovedDueDate(story, approvedDueDate) {
+  const dueDate = firstText(approvedDueDate);
+  if (!story || !dueDate || storyDeadlineValue(story)) return story;
+  return { ...story, deadline: dueDate, dueDate };
+}
+
 function normalizeDisplayStory(story = {}) {
+  const displayDeadline = storyDueDateLabel(story);
   return {
     ...story,
     submittedAt: formatDisplayDate(story.submittedAt),
     lastEdited: formatDisplayDate(story.lastEdited),
-    deadline: formatDisplayDate(story.deadline) || story.deadline,
+    deadline: displayDeadline,
+    dueDate: displayDeadline,
     feedback: Array.isArray(story.feedback) ? story.feedback.map(normalizeDisplayFeedback) : story.feedback,
     comments: Array.isArray(story.comments) ? story.comments.map(normalizeDisplayFeedback) : story.comments,
     collaborators: Array.isArray(story.collaborators) ? story.collaborators.map(normalizeStoryCollaborator) : [],
@@ -2201,6 +2287,9 @@ function runPrototypeTests() {
   console.assert(initialStories.every((story) => STORY_STATUSES.includes(story.status)), "Every story should use a supported workflow status.");
   console.assert(initialStories.some((story) => story.status === "Submitted"), "Stories page needs submitted examples.");
   console.assert(initialStories.some((story) => story.status === "Needs Revision"), "Stories page needs revision examples.");
+  const approvedPitchStory = normalizeDisplayStory({ id: "approved-pitch-story", title: "Approved pitch story", status: "Assigned", dueDate: "2026-07-14" });
+  console.assert(approvedPitchStory.deadline === "July 14, 2026", "Approved pitch due dates should display on stories without timezone drift.");
+  console.assert(storyDueDateLabel({ due_date: "2026-07-15" }) === "July 15, 2026", "Stories should recognize legacy due date field names.");
   console.assert(storyMatchesFilters(initialStories[0], "parking", "All statuses", "All sections"), "Stories search should include title text.");
   console.assert(initialStories.every((story) => !storyDocIsOpenable(story)), "Default story records should start without attached Google Docs.");
   console.assert(!storyDocIsOpenable(initialStories.find((story) => story.id === "s5")), "Missing Google Doc links should be treated as unavailable.");
@@ -2984,8 +3073,8 @@ function AppShell() {
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
     interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
-    calendar: <CalendarPage />,
-    analytics: <AnalyticsPage articles={articles} selectedArticle={selectedArticle} setSelectedArticleId={setSelectedArticleId} />,
+    calendar: <CalendarPage stories={stories} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
+    analytics: <AnalyticsPage />,
     admin: <AdminPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} />,
     settings: <SettingsPage />,
   };
@@ -3464,11 +3553,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
 
   const nextIdAfter = (id) => nextActivePitchId(activePitches.filter((pitch) => pitch.id !== id), id);
 
-  const updatePitchStatus = async (id, status, message) => {
+  const updatePitchStatus = async (id, status, message, approval = {}) => {
     if (!canManagePitches) {
       setToast("Only admins and editors can change pitch status.");
       return null;
     }
+    const approvedDueDate = status === "Approved" ? dueDateValue(approval) : "";
     try {
       const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
         method: "PATCH",
@@ -3478,31 +3568,33 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
           ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...approval }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.error || "Pitch status update failed.");
       }
       const updatedPitch = normalizeDisplayPitch(payload.pitch || { id, status, updatedAt: "Just now" });
+      const updatedStory = status === "Approved" && payload.story ? storyWithApprovedDueDate(payload.story, approvedDueDate) : payload.story;
       setPitches((previous) => previous.map((pitch) => (pitch.id === id ? { ...pitch, ...updatedPitch } : pitch)));
-      if (status === "Approved" && payload.story) {
-        onStoryCreated(payload.story);
+      if (status === "Approved" && updatedStory) {
+        onStoryCreated(updatedStory);
       }
-      setToast(message || `Updated pitch to ${status}.`);
-      return { ...payload, pitch: updatedPitch };
+      setToast(payload.warning || message || `Updated pitch to ${status}.`);
+      return { ...payload, pitch: updatedPitch, ...(updatedStory ? { story: updatedStory } : {}) };
     } catch (statusError) {
       setToast(statusError instanceof Error ? statusError.message : "Pitch status update failed.");
       return null;
     }
   };
 
-  const moveOutOfActiveBoard = async (id, status, message) => {
+  const moveOutOfActiveBoard = async (id, status, message, approval = {}) => {
     const nextId = nextIdAfter(id);
-    const result = await updatePitchStatus(id, status, message);
-    if (!result) return;
+    const result = await updatePitchStatus(id, status, message, approval);
+    if (!result) return null;
     if (nextId) navigateToPitch(nextId);
     else navigateToBoard();
+    return result;
   };
 
   const deletePitch = (id) => {
@@ -3607,7 +3699,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         activePitches={activePitches}
         onBack={navigateToBoard}
         onNeedsReview={markNeedsReview}
-        onApprove={(id) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.")}
+        onApprove={(id, approval) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.", approval)}
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
         onDelete={deletePitch}
         onNext={selectNextPitch}
@@ -3806,12 +3898,16 @@ function PitchDetailPage({
   const [editingFeedbackId, setEditingFeedbackId] = useState(null);
   const [editingFeedbackText, setEditingFeedbackText] = useState("");
   const [openItemMenu, setOpenItemMenu] = useState(null);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
 
   useEffect(() => {
     setFeedbackDraft("");
     setEditingFeedbackId(null);
     setEditingFeedbackText("");
     setOpenItemMenu(null);
+    setApprovalOpen(false);
+    setApprovalSubmitting(false);
   }, [pitch?.id]);
 
   useEffect(() => {
@@ -3894,6 +3990,12 @@ function PitchDetailPage({
     }
   };
 
+  const approvePitch = async (approval) => {
+    if (approvalSubmitting) return;
+    setApprovalSubmitting(true);
+    const result = await onApprove(pitch.id, approval);
+    if (!result) setApprovalSubmitting(false);
+  };
   const startEditingFeedback = (feedback) => {
     setEditingFeedbackId(feedback.id);
     setEditingFeedbackText(feedback.text);
@@ -4074,11 +4176,23 @@ function PitchDetailPage({
         </main>
 
         <aside className="mx-auto w-full max-w-[940px] space-y-3 2xl:sticky 2xl:top-8 2xl:max-w-none">
+          <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
+            <h3 className="text-sm font-medium text-zinc-300">Properties</h3>
+            <div className="mt-4 divide-y divide-white/[0.1]">
+              <PitchProperty label="Status">
+                <PitchStatusText status={pitch.status} />
+              </PitchProperty>
+              <PitchProperty label="Writer">{pitch.owner}</PitchProperty>
+              <PitchProperty label="Section">{pitch.section}</PitchProperty>
+              <PitchProperty label="Submitted">{pitch.submittedAt}</PitchProperty>
+            </div>
+          </div>
+
           {canManagePitches ? (
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
             <h3 className="text-sm font-medium text-zinc-300">Actions</h3>
             <div className="mt-4 space-y-2">
-              <Button onClick={() => onApprove(pitch.id)} className="w-full">Approve</Button>
+              <Button onClick={() => setApprovalOpen(true)} className="w-full">Approve</Button>
               <Button
                 variant="ghost"
                 disabled={pitch.status === "Needs Review"}
@@ -4100,24 +4214,127 @@ function PitchDetailPage({
             </div>
           </div>
           ) : null}
-
-          <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Properties</h3>
-            <div className="mt-4 divide-y divide-white/[0.1]">
-              <PitchProperty label="Status">
-                <PitchStatusText status={pitch.status} />
-              </PitchProperty>
-              <PitchProperty label="Writer">{pitch.owner}</PitchProperty>
-              <PitchProperty label="Section">{pitch.section}</PitchProperty>
-              <PitchProperty label="Submitted">{pitch.submittedAt}</PitchProperty>
-            </div>
-          </div>
         </aside>
       </div>
+      <ApprovePitchModal
+        open={approvalOpen}
+        pitch={pitch}
+        submitting={approvalSubmitting}
+        onClose={() => {
+          if (!approvalSubmitting) setApprovalOpen(false);
+        }}
+        onApprove={approvePitch}
+      />
     </motion.div>
   );
 }
 
+function ApprovePitchModal({ open, pitch, submitting, onClose, onApprove }) {
+  const [dueDate, setDueDate] = useState(defaultApprovalDueDate());
+  const [message, setMessage] = useState("");
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setDueDate(defaultApprovalDueDate());
+    setMessage("");
+    setInviteEmails("");
+    setError("");
+  }, [open, pitch?.id]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [open, onClose, submitting]);
+
+  if (!open || !pitch) return null;
+
+  const submitApproval = () => {
+    if (!dueDate) {
+      setError("Set a due date before approving this pitch.");
+      return;
+    }
+    setError("");
+    onApprove({
+      dueDate,
+      deadline: dueDate,
+      approvalDueDate: dueDate,
+      approvalMessage: message.trim(),
+      inviteEmails: inviteEmails.trim(),
+    });
+  };
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/65 px-4 py-6 backdrop-blur-sm"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="approve-pitch-title"
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.98 }}
+          transition={{ duration: 0.18 }}
+          className="w-full max-w-lg rounded-2xl border border-white/[0.12] bg-zinc-950 p-5 shadow-2xl shadow-black/60"
+        >
+          <div>
+            <h2 id="approve-pitch-title" className="text-lg font-semibold text-zinc-50">Approve pitch</h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-500">{pitch.title}</p>
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <label className="block text-sm font-medium text-zinc-300">
+              Due date
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.24]"
+              />
+            </label>
+            <label className="block text-sm font-medium text-zinc-300">
+              Optional message
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                rows={3}
+                className="mt-2 w-full resize-none rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+                placeholder="Add context for the writer or invited users"
+              />
+            </label>
+            <label className="block text-sm font-medium text-zinc-300">
+              Invite users
+              <textarea
+                value={inviteEmails}
+                onChange={(event) => setInviteEmails(event.target.value)}
+                rows={2}
+                className="mt-2 w-full resize-none rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+                placeholder="Emails separated by commas"
+              />
+            </label>
+            {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+          </div>
+
+          <div className="mt-6 flex justify-end gap-2">
+            <Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button>
+            <Button disabled={submitting} onClick={submitApproval}>{submitting ? "Approving..." : "Approve"}</Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
 function PitchItemMenu({ label, open, onToggle, onEdit, onDelete }) {
   return (
     <div className="relative shrink-0" data-pitch-action-menu>
@@ -4369,6 +4586,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
       title="Stories"
       eyebrow="Editorial workflow"
       description="Scan active drafts by review state, then open a story for notes, source checks, and approval actions."
+      className="max-w-[1280px]"
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
@@ -4424,6 +4642,7 @@ function StoryKanbanColumn({ column, stories, total, onOpenStory }) {
 }
 
 function StoryOverviewCard({ story, onOpen }) {
+  const dueDateLabel = storyDueDateLabel(story);
   return (
     <button
       type="button"
@@ -4434,7 +4653,7 @@ function StoryOverviewCard({ story, onOpen }) {
       <div className="min-w-0">
         <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{story.title}</h3>
         <p className="mt-1 truncate text-xs text-zinc-500">By {story.writer}</p>
-        <p className="mt-2 text-xs text-zinc-500">Deadline {story.deadline}</p>
+        <p className={cx("mt-2 text-xs", dueDateLabel ? "text-zinc-500" : "text-zinc-600")}>{dueDateLabel ? `Due ${dueDateLabel}` : "No due date set"}</p>
       </div>
       <div className="flex h-full min-h-16 items-center">
         <span className="inline-flex h-8 w-8 items-center justify-center text-zinc-500 transition group-hover:text-zinc-100">
@@ -4508,6 +4727,7 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     ...(Array.isArray(story.comments) ? story.comments : []),
     ...storyComments.feedback,
   ];
+  const dueDateLabel = storyDueDateLabel(story);
   const { activity: activityItems, loading: activityLoading, error: activityError } = storyActivity;
   const { loading: commentsLoading, error: commentsError } = storyComments;
 
@@ -4670,6 +4890,7 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
               <div className="min-w-0">
                 <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
                 <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+                {dueDateLabel ? <p className="mt-2 text-sm text-zinc-500">Due {dueDateLabel}</p> : null}
               </div>
               {canManageCollaborators ? (
                 <Button variant="ghost" onClick={() => setInviteDialogOpen(true)} className="shrink-0">
@@ -6456,95 +6677,120 @@ function TasksPage({ tasks, updateTaskStatus }) {
   );
 }
 
-function CalendarPage() {
-  const days = Array.from({ length: 35 }, (_, i) => i + 1);
+function buildCalendarEvents(stories = []) {
+  const currentYear = new Date().getFullYear();
+  return stories
+    .map((story) => {
+      const date = parseCalendarDate(storyDeadlineValue(story), currentYear);
+      if (!date) return null;
+      return {
+        id: `story-${story.id}`,
+        story,
+        date,
+        title: story.title,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.date - b.date || a.title.localeCompare(b.title));
+}
+
+function CalendarPage({ stories = [], onOpenStory = () => {} }) {
+  const calendarEvents = useMemo(() => buildCalendarEvents(stories), [stories]);
+  const firstEventDate = calendarEvents[0]?.date;
+  const [hasNavigatedMonth, setHasNavigatedMonth] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => {
+    const base = firstEventDate || new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+
+  useEffect(() => {
+    if (!firstEventDate || hasNavigatedMonth) return;
+    setVisibleMonth(new Date(firstEventDate.getFullYear(), firstEventDate.getMonth(), 1));
+  }, [firstEventDate, hasNavigatedMonth]);
+
+  const navigateCalendarMonth = (nextMonth) => {
+    setHasNavigatedMonth(true);
+    setVisibleMonth(nextMonth);
+  };
+
+  const cells = useMemo(() => buildCalendarCells(visibleMonth), [visibleMonth]);
+  const eventsByDay = useMemo(() => {
+    const grouped = new Map();
+    calendarEvents.forEach((event) => {
+      const key = calendarDateKey(event.date);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(event);
+    });
+    return grouped;
+  }, [calendarEvents]);
+
   return (
-    <PageShell title="Publishing calendar" eyebrow="Schedule / Deadlines" right={<div className="flex gap-2"><Button variant="ghost" icon="filter">Section filter</Button><Button icon="plus">New event</Button></div>}>
-      <Card className="p-5">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-medium">May 2026</h2>
-            <p className="mt-1 text-sm text-zinc-500">Editorial deadlines, interviews, reviews, and publish dates.</p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="ghost">Week</Button>
-            <Button>Month</Button>
+    <PageShell title="Publishing calendar">
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 border-b border-white/[0.12] pb-4 lg:flex-row lg:items-end lg:justify-between">
+          <h2 className="text-xl font-semibold tracking-tight text-zinc-50">{monthYearLabel(visibleMonth)}</h2>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => navigateCalendarMonth(addMonths(visibleMonth, -1))}>Previous</Button>
+            <Button variant="ghost" onClick={() => navigateCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>Today</Button>
+            <Button variant="ghost" onClick={() => navigateCalendarMonth(addMonths(visibleMonth, 1))}>Next</Button>
           </div>
         </div>
-        <div className="grid grid-cols-7 gap-2 text-center text-xs uppercase tracking-[0.16em] text-zinc-600">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-2">{d}</div>)}</div>
-        <div className="grid grid-cols-7 gap-2">
-          {days.map((day) => {
-            const items = calendarItems.filter((e) => e.day === day);
-            return (
-              <div key={day} className="min-h-32 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-3 text-left">
-                <div className="mb-2 text-xs text-zinc-600">{day <= 31 ? day : ""}</div>
-                <div className="space-y-1.5">
-                  {items.map((item) => (
-                    <div key={item.title} className="rounded-lg border border-white/[0.08] bg-white/[0.055] px-2 py-1.5">
-                      <p className="truncate text-xs text-zinc-200">{item.title}</p>
-                      <p className="text-[10px] text-zinc-600">{item.type} - {item.section}</p>
+
+        <div className="overflow-x-auto">
+          <div className="min-w-[860px]">
+            <div className="grid grid-cols-7 border-b border-white/[0.12] text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+                <div key={day} className="border-r border-white/[0.08] px-3 py-2 last:border-r-0">{day}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {cells.map((cell, index) => {
+                const items = eventsByDay.get(cell.key) || [];
+                return (
+                  <div
+                    key={cell.key}
+                    className={cx(
+                      "min-h-32 border-r border-b border-white/[0.08] p-2 text-left last:border-r-0",
+                      index % 7 === 6 && "border-r-0",
+                      cell.inMonth ? "bg-white/[0.018]" : "bg-black/20 text-zinc-700"
+                    )}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className={cx("flex h-7 w-7 items-center justify-center rounded-full text-xs", cell.isToday ? "bg-zinc-100 text-black" : cell.inMonth ? "text-zinc-300" : "text-zinc-700")}>{cell.day}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    </PageShell>
-  );
-}
-
-function AnalyticsPage({ articles, selectedArticle, setSelectedArticleId }) {
-  return (
-    <PageShell title="Analytics" eyebrow="Performance / Insights" right={<div className="flex gap-2"><Select value={selectedArticle.id} onChange={setSelectedArticleId} options={articles.map((a) => a.id)} className="w-44" /><Button variant="ghost" icon="upload">Import CSV</Button></div>}>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric icon="eye" label="Total views" value="42,284" delta="+18.4%" />
-        <Metric icon="people" label="Unique readers" value="29,120" delta="+11.6%" />
-        <Metric icon="clock" label="Avg. read time" value="2m 04s" delta="+4.8%" />
-        <Metric icon="link" label="Top referrer" value="Google" delta="47%" />
-      </div>
-      <section className="mt-5 grid gap-5 xl:grid-cols-[1.4fr_0.8fr]">
-        <Card className="p-5">
-          <h2 className="mb-1 font-medium">Article traffic</h2>
-          <p className="mb-5 text-sm text-zinc-500">Selected article: {selectedArticle.title}</p>
-          <div className="h-[330px]"><TrafficChart /></div>
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-1 font-medium">Section performance</h2>
-          <p className="mb-5 text-sm text-zinc-500">Share of total newsroom traffic.</p>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <PieChart>
-                <Pie data={sectionData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={3}>
-                  {sectionData.map((_, idx) => <Cell key={idx} fill={["#fafafa", "#d4d4d8", "#a1a1aa", "#71717a", "#52525b"][idx]} />)}
-                </Pie>
-                <Tooltip content={<TooltipBox />} />
-              </PieChart>
-            </ResponsiveContainer>
+                    <div className="space-y-1.5">
+                      {items.slice(0, 4).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => onOpenStory(item.story)}
+                          title={item.title}
+                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus:ring-2 focus:ring-white/15"
+                        >
+                          {item.title}
+                        </button>
+                      ))}
+                      {items.length > 4 ? <p className="px-1 text-[10px] text-zinc-500">+{items.length - 4} more</p> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="space-y-2">{sectionData.map((s) => <div key={s.name} className="flex justify-between text-sm"><span className="text-zinc-400">{s.name}</span><span className="text-zinc-600">{s.value}%</span></div>)}</div>
-        </Card>
-      </section>
-      <section className="mt-5 grid gap-5 xl:grid-cols-3">
-        <Card className="p-5">
-          <h2 className="mb-4 font-medium">Author leaderboard</h2>
-          {["Sofia Chen", "Marcus Lee", "Ava Patel", "Daniel Wu"].map((name, idx) => <div key={name} className="flex items-center justify-between border-b border-white/[0.06] py-3 last:border-0"><span className="text-sm text-zinc-300">{idx + 1}. {name}</span><span className="text-sm text-zinc-500">{fmt(9000 - idx * 1400)}</span></div>)}
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-4 font-medium">Referrers</h2>
-          {["Google Search", "Instagram", "Direct", "School Website"].map((name, idx) => <Progress key={name} label={name} value={[47, 23, 16, 9][idx]} />)}
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-4 font-medium">Editorial insight</h2>
-          <Insight title="Searchable topic" body="The Snapchat article is attracting outside search traffic. Add evergreen context and internal links." />
-          <div className="mt-3"><Insight title="Section growth" body="Science & Technology is up 28%, making it the strongest section this week." /></div>
-        </Card>
+        </div>
       </section>
     </PageShell>
   );
 }
-
+function AnalyticsPage() {
+  return (
+    <PageShell title="Analytics" className="flex min-h-[calc(100vh-5rem)] max-w-[1640px] flex-col">
+      <div className="flex flex-1 items-center justify-center text-center">
+        <h2 className="text-lg font-semibold text-zinc-100">Analytics are under construction</h2>
+      </div>
+    </PageShell>
+  );
+}
 function AdminPage({ setToast, csrfToken = "", currentUser }) {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6668,7 +6914,7 @@ function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/15"
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:bg-white/[0.035]"
       >
         <span className="flex min-w-0 items-center gap-3">
           <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", collapsed ? "-rotate-90" : "rotate-0")} />
@@ -6805,7 +7051,7 @@ function AdminRoleDropdown({ value, onChange, label }) {
           exit={{ opacity: 0, scale: 0.96, y: -4 }}
           transition={{ duration: 0.14, ease: "easeOut" }}
           style={menuStyle}
-          className="fixed z-[100] overflow-hidden rounded-xl border border-white/[0.12] bg-zinc-950 p-1 shadow-2xl shadow-black/60"
+          className="fixed z-[100] overflow-hidden rounded-xl bg-zinc-950 p-1 shadow-2xl shadow-black/60"
         >
           {ADMIN_ROLE_OPTIONS.map((option) => (
             <button
@@ -6839,8 +7085,9 @@ function AdminRoleDropdown({ value, onChange, label }) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={label}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-100 transition hover:border-white/[0.08] hover:bg-white/[0.05] focus:border-white/[0.08] focus:outline-none focus-visible:border-white/[0.08] focus-visible:outline-none active:border-white/[0.08] active:outline-none"
+        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-transparent bg-black/25 px-3 text-sm text-zinc-100 transition hover:bg-white/[0.05] focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 active:border-transparent active:outline-none active:ring-0"
       >
         <span className="truncate">{accountRoleLabel(value)}</span>
         <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", open && "rotate-180")} />

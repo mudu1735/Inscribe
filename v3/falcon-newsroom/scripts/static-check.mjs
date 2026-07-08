@@ -147,6 +147,9 @@ const expectedAppSnippets = [
   "Send to teacher approval",
   "normalizeDisplayPitch",
   "formatDisplayDate",
+  "storyDueDateLabel",
+  "storyWithApprovedDueDate",
+  "approvalDueDate",
   "onStoryCreated",
   "Approved pitch and moved it to Stories.",
   "canManageEditorialWorkflow",
@@ -314,6 +317,14 @@ for (const snippet of [
   "require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)",
   "@app.patch(\"/api/feedback/<feedback_id>\")",
   "@app.delete(\"/api/feedback/<feedback_id>\")",
+  "DUE_DATE_FIELDS",
+  "def _story_deadline",
+  "\"dueDate\": deadline",
+  "existing_update[\"dueDate\"] = story_deadline",
+  "update[\"dueDate\"] = next_deadline",
+  "Due date is required before approving a pitch.",
+  "update[\"dueDate\"] = approval_deadline",
+  "_create_story_from_pitch(updated, user_doc, approval_deadline, approval_message)",
 ]) {
   if (!v3Backend.includes(snippet)) {
     throw new Error(`Missing v3 backend auth/API behavior: ${snippet}`);
