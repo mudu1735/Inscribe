@@ -44,6 +44,7 @@ STORY_COLLECTION = os.getenv("STORY_COLLECTION", "storyRecords")
 PITCH_COLLECTION = os.getenv("PITCH_COLLECTION", "pitchRecords")
 ACTIVITY_COLLECTION = os.getenv("ACTIVITY_COLLECTION", "activityRecords")
 FEEDBACK_COLLECTION = os.getenv("FEEDBACK_COLLECTION", "feedbackRecords")
+WORKSPACE_COLLECTION = os.getenv("WORKSPACE_COLLECTION", "newsroomWorkspaces")
 AUTH_RATE_LIMIT_MAX = int(os.getenv("AUTH_RATE_LIMIT_MAX", "8"))
 AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "900"))
 MAX_STORY_ATTACHMENT_BYTES = int(os.getenv("MAX_STORY_ATTACHMENT_BYTES", str(10 * 1024 * 1024)))
@@ -71,19 +72,19 @@ GOOGLE_INTENT_LOGIN = "login"
 GOOGLE_INTENT_SIGNUP = "signup"
 GOOGLE_INTENTS = {GOOGLE_INTENT_LOGIN, GOOGLE_INTENT_SIGNUP}
 
-ROLE_VIEWER = "viewer"
+ROLE_GUEST = "guest"
 ROLE_WRITER = "writer"
 ROLE_EDITOR = "editor"
 ROLE_ADMIN = "admin"
-VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_VIEWER}
+VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_GUEST}
 ROLE_RANK = {
-    ROLE_VIEWER: 1,
+    ROLE_GUEST: 1,
     ROLE_WRITER: 2,
     ROLE_EDITOR: 3,
     ROLE_ADMIN: 4,
 }
 FRONTEND_ROLE_LANDING = {
-    ROLE_VIEWER: "/interviewees",
+    ROLE_GUEST: "/interviewees",
     ROLE_WRITER: "/stories",
     ROLE_EDITOR: "/dashboard",
     ROLE_ADMIN: "/dashboard",
@@ -94,8 +95,13 @@ BACKEND_CAPABILITIES = {
     "rbac-v4",
     "stories",
     "pitches",
+    "pitch-owner-submit",
     "shared-workflow-activity",
     "shared-feedback",
+    "personal-dashboard",
+    "story-invitations",
+    "multi-workspace",
+    "workspace-join-codes",
 }
 
 TRUSTED_CSRF_ORIGINS = {
@@ -129,6 +135,7 @@ stories_col = db[STORY_COLLECTION]
 pitches_col = db[PITCH_COLLECTION]
 activity_col = db[ACTIVITY_COLLECTION]
 feedback_col = db[FEEDBACK_COLLECTION]
+workspaces_col = db[WORKSPACE_COLLECTION]
 story_files = gridfs.GridFS(db, collection="storyAttachments")
 AUTH_FAILURES: dict[str, list[float]] = {}
 GOOGLE_STATE_MAX_AGE_SECONDS = 600
@@ -145,6 +152,16 @@ except Exception:
 
 try:
     users_col.create_index([("googleId", ASCENDING)], unique=True, sparse=True)
+except Exception:
+    pass
+
+try:
+    workspaces_col.create_index([("publicId", ASCENDING)], unique=True)
+except Exception:
+    pass
+
+try:
+    workspaces_col.create_index([("joinCode", ASCENDING)], unique=True)
 except Exception:
     pass
 
@@ -220,7 +237,91 @@ def normalize_email(email: str) -> str:
 
 def normalize_role(role_value) -> str:
     role = str(role_value or "").strip().lower()
-    return role if role in VALID_ROLES else ROLE_VIEWER
+    if role == "viewer":
+        return ROLE_GUEST
+    return role if role in VALID_ROLES else ROLE_GUEST
+
+
+def normalize_workspace_code(value) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _new_workspace_code() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    while True:
+        code = "".join(secrets.choice(alphabet) for _ in range(7))
+        if not workspaces_col.find_one({"joinCode": code}):
+            return code
+
+
+def _serialize_workspace(doc: dict | None, include_join_code: bool = False) -> dict | None:
+    if not doc:
+        return None
+    workspace = {
+        "id": str(doc.get("publicId") or doc.get("_id") or ""),
+        "name": str(doc.get("name") or "Workspace"),
+    }
+    if include_join_code:
+        workspace["joinCode"] = str(doc.get("joinCode") or "")
+    return workspace
+
+
+def _workspace_id_for_user(user_doc: dict | None) -> str:
+    return str((user_doc or {}).get("workspaceId") or "").strip()
+
+
+def _workspace_for_user(user_doc: dict | None):
+    workspace_id = _workspace_id_for_user(user_doc)
+    if not workspace_id:
+        return None
+    clauses = [{"publicId": workspace_id}]
+    try:
+        clauses.append({"_id": ObjectId(workspace_id)})
+    except Exception:
+        pass
+    return workspaces_col.find_one({"$or": clauses})
+
+
+def _workspace_query(user_doc: dict | None) -> dict:
+    workspace_id = _workspace_id_for_user(user_doc)
+    return {"workspaceId": workspace_id} if workspace_id else {"_id": None}
+
+
+def _scoped_query(user_doc: dict | None, query: dict | None = None) -> dict:
+    workspace = _workspace_query(user_doc)
+    if not query:
+        return workspace
+    return {"$and": [workspace, query]}
+
+
+def _ensure_default_workspace():
+    public_id = os.getenv("DEFAULT_WORKSPACE_ID", "poolesville-pulse").strip() or "poolesville-pulse"
+    existing = workspaces_col.find_one({"publicId": public_id})
+    if not existing:
+        now_iso = _now_iso()
+        doc = {
+            "publicId": public_id,
+            "name": os.getenv("DEFAULT_WORKSPACE_NAME", "Poolesville Pulse").strip() or "Poolesville Pulse",
+            "joinCode": normalize_workspace_code(os.getenv("DEFAULT_WORKSPACE_JOIN_CODE")) or _new_workspace_code(),
+            "createdAt": now_iso,
+            "updatedAt": now_iso,
+        }
+        try:
+            result = workspaces_col.insert_one(doc)
+            doc["_id"] = result.inserted_id
+            existing = doc
+        except DuplicateKeyError:
+            existing = workspaces_col.find_one({"publicId": public_id})
+
+    if existing and not existing.get("legacyMembershipMigratedAt"):
+        users_col.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
+        users_col.update_many({"role": "viewer"}, {"$set": {"role": ROLE_GUEST}})
+        for collection in (interviews_col, articles_col, stories_col, pitches_col, activity_col, feedback_col):
+            collection.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
+        workspaces_col.update_one({"_id": existing["_id"]}, {"$set": {"legacyMembershipMigratedAt": _now_iso()}})
+
+
+_ensure_default_workspace()
 
 
 def is_valid_email(email: str) -> bool:
@@ -380,7 +481,8 @@ def _serialize_user(doc: dict) -> dict:
         "firstName": first_name,
         "lastName": last_name,
         "name": name,
-        "role": normalize_role(doc.get("role")),
+        "role": normalize_role(doc.get("role")) if _workspace_id_for_user(doc) else "",
+        "workspaceId": _workspace_id_for_user(doc),
         "lastSeen": _month_day_year(doc.get("lastLoginAt") or doc.get("updatedAt") or doc.get("createdAt")),
     }
 
@@ -419,6 +521,8 @@ def require_role_at_least(role_name: str):
             user_doc = _current_user_doc()
             if not user_doc:
                 return jsonify({"ok": False, "error": "Unauthorized"}), 401
+            if not _workspace_id_for_user(user_doc):
+                return jsonify({"ok": False, "error": "Join a workspace first."}), 403
             if ROLE_RANK.get(normalize_role(user_doc.get("role")), 1) < ROLE_RANK.get(target, 1):
                 return jsonify({"ok": False, "error": "Editor access required."}), 403
             return fn(*args, **kwargs)
@@ -437,6 +541,8 @@ def require_roles(*role_names: str):
             user_doc = _current_user_doc()
             if not user_doc:
                 return jsonify({"ok": False, "error": "Unauthorized"}), 401
+            if not _workspace_id_for_user(user_doc):
+                return jsonify({"ok": False, "error": "Join a workspace first."}), 403
             if normalize_role(user_doc.get("role")) not in allowed:
                 return jsonify({"ok": False, "error": "Access denied."}), 403
             return fn(*args, **kwargs)
@@ -479,11 +585,14 @@ def _owned_story_query(user_doc: dict) -> dict:
 
 def _collaborator_story_query(user_doc: dict) -> dict:
     values = _owner_match_values(user_doc)
-    return {"$or": [
-        {"collaborators.userId": {"$in": values}},
-        {"collaborators.id": {"$in": values}},
-        {"collaborators.email": {"$in": values}},
-    ]}
+    return {"collaborators": {"$elemMatch": {"$and": [
+        {"$or": [{"status": "accepted"}, {"status": {"$exists": False}}]},
+        {"$or": [
+            {"userId": {"$in": values}},
+            {"id": {"$in": values}},
+            {"email": {"$in": values}},
+        ]},
+    ]}}}
 
 
 def _story_primary_owned_by_user(story: dict, user_doc: dict) -> bool:
@@ -522,9 +631,11 @@ def _story_collaborators(doc: dict) -> list[dict]:
             "email": email,
             "name": name,
             "role": role,
+            "status": str(item.get("status") or "accepted").strip().lower(),
             "message": str(item.get("message") or "").strip(),
             "invitedBy": str(item.get("invitedBy") or "").strip(),
             "invitedAt": _date_for_api(item.get("invitedAt")),
+            "invitedAtIso": _datetime_for_api(item.get("invitedAt")),
         })
     return collaborators
 
@@ -539,14 +650,14 @@ def _story_collaborator_for_user(story: dict, user_doc: dict) -> dict | None:
             str(collaborator.get("userId") or "").lower(),
             normalize_email(collaborator.get("email") or ""),
         }
-        if values.intersection({value for value in candidate_values if value}):
+        if collaborator.get("status") == "accepted" and values.intersection({value for value in candidate_values if value}):
             return collaborator
     return None
 
 
 def _can_manage_story_collaborators(story: dict, user_doc: dict) -> bool:
     role = _current_user_role(user_doc)
-    return role in {ROLE_ADMIN, ROLE_EDITOR} or (role == ROLE_WRITER and _story_primary_owned_by_user(story, user_doc))
+    return role in {ROLE_ADMIN, ROLE_EDITOR} or (role == ROLE_WRITER and (_story_primary_owned_by_user(story, user_doc) or _story_collaborator_for_user(story, user_doc) is not None))
 
 
 def _can_edit_story_content(story: dict, user_doc: dict) -> bool:
@@ -558,7 +669,7 @@ def _can_edit_story_content(story: dict, user_doc: dict) -> bool:
     if _story_primary_owned_by_user(story, user_doc):
         return True
     collaborator = _story_collaborator_for_user(story, user_doc)
-    return collaborator is not None and collaborator.get("role") == "edit"
+    return collaborator is not None
 
 def _owned_pitch_query(user_doc: dict) -> dict:
     values = _owner_match_values(user_doc)
@@ -574,20 +685,36 @@ def _owned_pitch_query(user_doc: dict) -> dict:
     ]}
 
 
+def _pitch_owned_by_user(pitch: dict, user_doc: dict) -> bool:
+    if not pitch or not user_doc:
+        return False
+    values = {str(value).lower() for value in _owner_match_values(user_doc) if value}
+    fields = [
+        pitch.get("ownerUserId"),
+        pitch.get("ownerId"),
+        pitch.get("writerUserId"),
+        pitch.get("writerId"),
+        normalize_email(pitch.get("ownerEmail") or ""),
+        normalize_email(pitch.get("writerEmail") or ""),
+    ]
+    return any(str(value).lower() in values for value in fields if value)
+
 def _story_query_for_user(user_doc: dict):
     role = _current_user_role(user_doc)
-    if role == ROLE_VIEWER:
+    if not _workspace_id_for_user(user_doc) or role == ROLE_GUEST:
         return None
     if role == ROLE_WRITER:
-        return {"$or": _owned_story_query(user_doc)["$or"] + _collaborator_story_query(user_doc)["$or"]}
-    return {}
+        return _scoped_query(user_doc, {"$or": _owned_story_query(user_doc)["$or"] + [_collaborator_story_query(user_doc)]})
+    return _workspace_query(user_doc)
 
 
 def _pitch_query_for_user(user_doc: dict):
     role = _current_user_role(user_doc)
-    if role == ROLE_VIEWER:
+    if not _workspace_id_for_user(user_doc) or role == ROLE_GUEST:
         return None
-    return {}
+    if role == ROLE_WRITER:
+        return _scoped_query(user_doc, _owned_pitch_query(user_doc))
+    return _workspace_query(user_doc)
 
 
 def _find_owned_story_or_404(story_id: str, user_doc: dict):
@@ -714,6 +841,24 @@ def _doc_public_id(doc: dict, fallback_field: str = "id") -> str:
 
 def _date_for_api(value) -> str:
     return _month_day_year(value)
+
+
+def _datetime_for_api(value) -> str:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat(timespec="milliseconds")
 
 
 def _int_field(doc: dict, field: str, default: int = 0) -> int:
@@ -997,6 +1142,12 @@ def _story_to_api(doc: dict) -> dict:
         writer = authors[0]
     attachments = _story_attachments_to_api(doc)
     deadline = _story_deadline(doc)
+    accepted_collaborators = [item for item in _story_collaborators(doc) if item.get("status") == "accepted"]
+    author_names = []
+    for name in [writer, *[item.get("name") for item in accepted_collaborators]]:
+        clean_name = str(name or "").strip()
+        if clean_name and clean_name not in author_names:
+            author_names.append(clean_name)
     return {
         "id": _doc_public_id(doc, "storyId"),
         "title": doc.get("title") or doc.get("storyTitle") or "Untitled story",
@@ -1004,6 +1155,16 @@ def _story_to_api(doc: dict) -> dict:
         "writer": writer or doc.get("writerEmail", "") or "Unassigned",
         "writerEmail": doc.get("writerEmail") or doc.get("ownerEmail") or "",
         "writerUserId": str(doc.get("writerUserId") or doc.get("ownerUserId") or ""),
+        "authors": author_names,
+        "authorProfiles": ([{
+            "name": writer or doc.get("writerEmail", "") or "Unassigned",
+            "email": doc.get("writerEmail") or doc.get("ownerEmail") or "",
+            "primary": True,
+        }] if writer or doc.get("writerEmail") or doc.get("ownerEmail") else []) + [{
+            "name": item.get("name") or item.get("email"),
+            "email": item.get("email"),
+            "primary": False,
+        } for item in accepted_collaborators],
         "editor": doc.get("editor", "") or "",
         "status": doc.get("status") or "Assigned",
         "priority": doc.get("priority") or "Normal",
@@ -1029,13 +1190,21 @@ def _story_to_api(doc: dict) -> dict:
     }
 
 
+def _normalize_pitch_status(value) -> str:
+    status = str(value or "").strip()
+    return {
+        "New": "In Progress",
+        "Submitted": "Ready for Review",
+        "Needs Review": "Ready for Review",
+    }.get(status, status or "In Progress")
+
 def _pitch_to_api(doc: dict) -> dict:
     deadline = _story_deadline(doc)
     return {
         "id": _doc_public_id(doc, "pitchId"),
         "title": doc.get("title") or "Untitled pitch",
         "angle": doc.get("angle") or doc.get("summary") or "",
-        "status": doc.get("status") or "New",
+        "status": _normalize_pitch_status(doc.get("status")),
         "section": doc.get("section", "") or "",
         "owner": doc.get("owner") or doc.get("writer") or doc.get("ownerEmail") or "Unassigned",
         "ownerEmail": doc.get("ownerEmail") or doc.get("writerEmail") or "",
@@ -1064,6 +1233,7 @@ def _activity_to_api(doc: dict) -> dict:
         "eventType": doc.get("eventType") or "",
         "text": text,
         "time": _date_for_api(doc.get("createdAt")),
+        "occurredAt": _datetime_for_api(doc.get("createdAt")),
         "actorName": doc.get("actorName") or "",
         "fromStatus": from_status,
         "toStatus": to_status,
@@ -1106,6 +1276,7 @@ def _record_status_activity(entity_type: str, entity_id: str, from_status: str, 
     if from_status == to_status:
         return
     activity_col.insert_one({
+        "workspaceId": _workspace_id_for_user(actor_doc),
         "entityType": entity_type,
         "entityId": str(entity_id),
         "eventType": "status_change",
@@ -1133,7 +1304,8 @@ def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict, deadline: str = "
     pitch_id = _doc_public_id(pitch_doc, "pitchId")
     now_iso = _now_iso()
     story_deadline = _first_text_value(deadline, _due_date_from_doc(pitch_doc))
-    existing = stories_col.find_one({"sourcePitchId": pitch_id})
+    workspace_id = _workspace_id_for_user(actor_doc)
+    existing = stories_col.find_one({"sourcePitchId": pitch_id, "workspaceId": workspace_id})
     if existing:
         existing_update = {"updatedAt": now_iso}
         if story_deadline:
@@ -1148,6 +1320,7 @@ def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict, deadline: str = "
         return existing
 
     doc = {
+        "workspaceId": workspace_id,
         "title": pitch_doc.get("title") or "Untitled story",
         "section": pitch_doc.get("section", "") or "",
         "writer": pitch_doc.get("owner") or pitch_doc.get("writer") or "Unassigned",
@@ -1183,7 +1356,6 @@ def create_user(email: str, password: str, first_name: str, last_name: str):
         "passwordHash": generate_password_hash(password),
         "firstName": (first_name or "").strip(),
         "lastName": (last_name or "").strip(),
-        "role": ROLE_VIEWER,
         "createdAt": now_iso,
         "lastLoginAt": now_iso,
         "authProviders": {"password": True},
@@ -1389,9 +1561,9 @@ def _drive_file_metadata(file_id: str, access_token: str) -> tuple[dict, str]:
         return {}, "Could not read the selected Google Drive file. Reconnect Google Drive and try again."
 
 
-def _editor_permission_emails() -> list[str]:
+def _editor_permission_emails(actor_doc: dict) -> list[str]:
     emails = set()
-    cursor = users_col.find({"role": {"$in": [ROLE_EDITOR, ROLE_ADMIN]}}, {"email": 1})
+    cursor = users_col.find({"role": {"$in": [ROLE_EDITOR, ROLE_ADMIN]}, "workspaceId": _workspace_id_for_user(actor_doc)}, {"email": 1})
     for doc in cursor:
         email = normalize_email(doc.get("email") or "")
         if email:
@@ -1409,7 +1581,7 @@ def _share_drive_attachment_with_editors(drive_attachment: dict, actor_doc: dict
         return False, [], token_error
 
     actor_email = normalize_email(actor_doc.get("email") or "")
-    editor_emails = [email for email in _editor_permission_emails() if email and email != actor_email]
+    editor_emails = [email for email in _editor_permission_emails(actor_doc) if email and email != actor_email]
     if not editor_emails:
         return False, [], "No editor or admin Google accounts are available to share this file with."
 
@@ -1573,7 +1745,6 @@ def upsert_google_user(profile: dict, allow_create: bool = True):
         **update,
         "firstName": first_name,
         "lastName": last_name,
-        "role": ROLE_VIEWER,
         "createdAt": now_iso,
         "authProviders": {"google": True},
     }
@@ -1673,8 +1844,65 @@ def api_session():
         "ok": True,
         "authenticated": True,
         "user": _serialize_user(user_doc),
+        "workspace": _serialize_workspace(_workspace_for_user(user_doc)),
         "csrfToken": _ensure_csrf_token(),
     })
+
+
+@app.post("/api/workspaces/join")
+@require_auth
+def api_join_workspace():
+    user_doc = _current_user_doc()
+    code = normalize_workspace_code(_request_payload().get("code"))
+    if not code:
+        return jsonify({"ok": False, "error": "Enter a workspace code."}), 400
+    workspace = workspaces_col.find_one({"joinCode": code})
+    if not workspace:
+        return jsonify({"ok": False, "error": "That workspace code was not found."}), 404
+
+    workspace_id = str(workspace.get("publicId") or workspace.get("_id"))
+    current_workspace_id = _workspace_id_for_user(user_doc)
+    if current_workspace_id:
+        if current_workspace_id != workspace_id:
+            return jsonify({"ok": False, "error": "You already belong to a different workspace."}), 409
+        return jsonify({
+            "ok": True,
+            "alreadyMember": True,
+            "user": _serialize_user(user_doc),
+            "workspace": _serialize_workspace(workspace),
+        })
+
+    result = users_col.update_one({
+        "_id": user_doc["_id"],
+        "$or": [
+            {"workspaceId": {"$exists": False}},
+            {"workspaceId": None},
+            {"workspaceId": ""},
+        ],
+    }, {"$set": {
+        "workspaceId": workspace_id,
+        "role": ROLE_GUEST,
+        "joinedWorkspaceAt": _now_iso(),
+        "updatedAt": _now_iso(),
+    }})
+    updated = users_col.find_one({"_id": user_doc["_id"]}) or user_doc
+    if result.matched_count == 0 and _workspace_id_for_user(updated) != workspace_id:
+        return jsonify({"ok": False, "error": "Your workspace membership changed. Refresh and try again."}), 409
+    return jsonify({
+        "ok": True,
+        "alreadyMember": result.matched_count == 0,
+        "user": _serialize_user(updated),
+        "workspace": _serialize_workspace(workspace),
+    })
+
+
+@app.get("/api/workspace")
+@require_auth
+def api_workspace():
+    workspace = _workspace_for_user(_current_user_doc())
+    if not workspace:
+        return jsonify({"ok": False, "error": "Workspace not found."}), 404
+    return jsonify({"ok": True, "workspace": _serialize_workspace(workspace, include_join_code=True)})
 
 
 @app.post("/api/auth/logout")
@@ -1828,7 +2056,8 @@ def api_google_callback():
 @app.get("/api/admin/users")
 @require_roles(ROLE_ADMIN)
 def api_admin_users():
-    docs = list(users_col.find({}).sort([("role", ASCENDING), ("email", ASCENDING)]))
+    user_doc = _current_user_doc()
+    docs = list(users_col.find(_workspace_query(user_doc)).sort([("role", ASCENDING), ("email", ASCENDING)]))
     return jsonify({"ok": True, "users": [_serialize_user(doc) for doc in docs], "roles": sorted(VALID_ROLES)})
 
 
@@ -1843,15 +2072,15 @@ def api_admin_update_user_role(user_id: str):
     payload = _request_payload()
     next_role = normalize_role(payload.get("role"))
     if str(payload.get("role") or "").strip().lower() not in VALID_ROLES:
-        return jsonify({"ok": False, "error": "Role must be admin, editor, writer, or viewer."}), 400
+        return jsonify({"ok": False, "error": "Role must be admin, editor, writer, or guest."}), 400
     if str(current_user.get("_id")) == str(oid):
         return jsonify({"ok": False, "error": "You cannot change your own role while signed in."}), 400
 
-    target = users_col.find_one({"_id": oid})
+    target = users_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(current_user)})
     if not target:
         return jsonify({"ok": False, "error": "User not found."}), 404
     if normalize_role(target.get("role")) == ROLE_ADMIN and next_role != ROLE_ADMIN:
-        admin_count = users_col.count_documents({"role": ROLE_ADMIN})
+        admin_count = users_col.count_documents({"role": ROLE_ADMIN, "workspaceId": _workspace_id_for_user(current_user)})
         if admin_count <= 1:
             return jsonify({"ok": False, "error": "At least one admin must remain."}), 400
 
@@ -1866,7 +2095,7 @@ def api_stories():
     user_doc = _current_user_doc()
     query = _story_query_for_user(user_doc)
     if query is None:
-        return jsonify({"ok": False, "error": "Stories are not available to viewers."}), 403
+        return jsonify({"ok": False, "error": "Stories are not available to guests."}), 403
     docs = list(stories_col.find(query).sort([("updatedAt", -1), ("_id", -1)]))
     return jsonify({"ok": True, "stories": [_story_to_api(doc) for doc in docs]})
 
@@ -1888,15 +2117,18 @@ def api_update_story(story_id: str):
         next_status = str(payload.get("status") or "").strip()
         if not next_status:
             return jsonify({"ok": False, "error": "Status is required."}), 400
+        is_story_author = _story_primary_owned_by_user(story, user_doc) or _story_collaborator_for_user(story, user_doc) is not None
+        author_can_submit = is_story_author and next_status == "Submitted"
+        author_can_unsubmit = is_story_author and next_status == "Drafting" and str(story.get("status") or "") == "Submitted"
         if role == ROLE_WRITER:
-            if not _story_primary_owned_by_user(story, user_doc):
-                return jsonify({"ok": False, "error": "Only the assigned writer can submit or unsubmit this story."}), 403
-            writer_can_submit = next_status == "Submitted"
-            writer_can_unsubmit = next_status == "Drafting" and str(story.get("status") or "") == "Submitted"
-            if not writer_can_submit and not writer_can_unsubmit:
-                return jsonify({"ok": False, "error": "Writers can only submit or unsubmit their own stories."}), 403
-        if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status not in {"Returned", "Ready for Publish"}:
-            return jsonify({"ok": False, "error": "Editors and admins can only return stories or send them to teacher approval."}), 403
+            if not is_story_author:
+                return jsonify({"ok": False, "error": "Only an accepted story author can submit or unsubmit this story."}), 403
+            if not author_can_submit and not author_can_unsubmit:
+                return jsonify({"ok": False, "error": "Writers can only submit or unsubmit stories they author."}), 403
+        if role in {ROLE_ADMIN, ROLE_EDITOR}:
+            editorial_workflow_action = next_status in {"Returned", "Ready for Publish"}
+            if not editorial_workflow_action and not author_can_submit and not author_can_unsubmit:
+                return jsonify({"ok": False, "error": "Editors and admins can return or approve newsroom stories, and submit or unsubmit stories they author."}), 403
         if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status == "Returned" and str(story.get("status") or "") not in {"Submitted", "In Review", "Ready for Publish"}:
             return jsonify({"ok": False, "error": "Return to writer is only available after a story is submitted."}), 400
         if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status == "Ready for Publish" and str(story.get("status") or "") not in {"Submitted", "In Review"}:
@@ -1976,7 +2208,8 @@ def _story_collaborator_payload(item: dict, role: str, message: str, actor_doc: 
         "userId": str(item.get("userId") or item.get("id") or ""),
         "email": email,
         "name": str(item.get("name") or email).strip(),
-        "role": role,
+        "role": "edit",
+        "status": "pending",
         "message": message,
         "invitedBy": _user_display_name(actor_doc),
         "invitedByEmail": normalize_email(actor_doc.get("email") or ""),
@@ -2017,7 +2250,7 @@ def _add_approval_collaborators(story: dict, emails: list[str], message: str, ac
             skipped.append(email)
             continue
         invited_user = find_user_by_email(email)
-        if not invited_user:
+        if not invited_user or _workspace_id_for_user(invited_user) != _workspace_id_for_user(actor_doc):
             skipped.append(email)
             continue
         invited_role = _current_user_role(invited_user)
@@ -2032,6 +2265,7 @@ def _add_approval_collaborators(story: dict, emails: list[str], message: str, ac
         next_collaborators = sorted(collaborator_by_email.values(), key=lambda item: item.get("email", ""))
         stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
         activity_col.insert_one({
+            "workspaceId": _workspace_id_for_user(actor_doc),
             "entityType": "story",
             "entityId": _doc_public_id(story, "storyId"),
             "eventType": "collaborator_invite",
@@ -2052,7 +2286,7 @@ def api_invite_story_collaborators(story_id: str):
     if not story:
         return jsonify({"ok": False, "error": "Story not found."}), 404
     if not _can_manage_story_collaborators(story, user_doc):
-        return jsonify({"ok": False, "error": "Only the assigned writer or editors can invite collaborators."}), 403
+        return jsonify({"ok": False, "error": "Only story authors or editors can invite co-authors."}), 403
 
     payload = _request_payload()
     raw_emails = payload.get("emails")
@@ -2073,9 +2307,7 @@ def api_invite_story_collaborators(story_id: str):
     if invalid:
         return jsonify({"ok": False, "error": f"Enter valid email addresses: {', '.join(invalid)}."}), 400
 
-    role = str(payload.get("role") or "comment").strip().lower()
-    if role not in VALID_STORY_COLLABORATOR_ROLES:
-        return jsonify({"ok": False, "error": "Collaborator role must be comment or edit."}), 400
+    role = "edit"
     message = str(payload.get("message") or "").strip()
     if len(message) > 200:
         return jsonify({"ok": False, "error": "Invite message must be 200 characters or fewer."}), 400
@@ -2090,9 +2322,13 @@ def api_invite_story_collaborators(story_id: str):
         if email == actor_email or email in primary_emails:
             skipped.append(email)
             continue
+        existing_collaborator = collaborator_by_email.get(email)
+        if existing_collaborator and existing_collaborator.get("status") in {"pending", "accepted"}:
+            skipped.append(email)
+            continue
         invited_user = find_user_by_email(email)
-        if not invited_user:
-            return jsonify({"ok": False, "error": f"No Falcon account is registered for {email}."}), 404
+        if not invited_user or _workspace_id_for_user(invited_user) != _workspace_id_for_user(user_doc):
+            return jsonify({"ok": False, "error": f"No account in this workspace is registered for {email}."}), 404
         invited_role = _current_user_role(invited_user)
         if invited_role in {ROLE_ADMIN, ROLE_EDITOR}:
             skipped.append(email)
@@ -2104,17 +2340,20 @@ def api_invite_story_collaborators(story_id: str):
         invited.append(collaborator)
 
     if not invited and skipped:
-        return jsonify({"ok": False, "error": "Those users already have access to this story."}), 400
+        return jsonify({"ok": False, "error": "Those users already have access or a pending invitation."}), 400
     if not invited:
         return jsonify({"ok": False, "error": "No collaborators were added."}), 400
 
     next_collaborators = sorted(collaborator_by_email.values(), key=lambda item: item.get("email", ""))
     stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
     activity_col.insert_one({
+        "workspaceId": _workspace_id_for_user(user_doc),
         "entityType": "story",
         "entityId": _doc_public_id(story, "storyId"),
         "eventType": "collaborator_invite",
-        "text": f"Invited {len(invited)} collaborator{'s' if len(invited) != 1 else ''}.",
+        "text": f"Invited {len(invited)} author{'s' if len(invited) != 1 else ''}.",
+        "recipientEmails": [item.get("email") for item in invited],
+        "entityTitle": story.get("title") or story.get("storyTitle") or "Untitled story",
         "actorId": str(user_doc.get("_id")),
         "actorEmail": user_doc.get("email", ""),
         "actorName": _user_display_name(user_doc),
@@ -2132,7 +2371,7 @@ def api_remove_story_collaborator(story_id: str, email: str):
     if not story:
         return jsonify({"ok": False, "error": "Story not found."}), 404
     if not _can_manage_story_collaborators(story, user_doc):
-        return jsonify({"ok": False, "error": "Only the assigned writer or editors can remove collaborators."}), 403
+        return jsonify({"ok": False, "error": "Only story authors or editors can remove co-authors."}), 403
     target_email = normalize_email(email)
     if not is_valid_email(target_email):
         return jsonify({"ok": False, "error": "Choose a valid collaborator email."}), 400
@@ -2387,7 +2626,7 @@ def api_pitches():
     user_doc = _current_user_doc()
     query = _pitch_query_for_user(user_doc)
     if query is None:
-        return jsonify({"ok": False, "error": "Pitch board is not available to viewers."}), 403
+        return jsonify({"ok": False, "error": "Pitch board is not available to guests."}), 403
     docs = list(pitches_col.find(query).sort([("updatedAt", -1), ("_id", -1)]))
     return jsonify({"ok": True, "pitches": [_pitch_to_api(doc) for doc in docs]})
 
@@ -2402,9 +2641,10 @@ def api_create_pitch():
         return jsonify({"ok": False, "error": "Pitch title is required."}), 400
     now_iso = _now_iso()
     doc = {
+        "workspaceId": _workspace_id_for_user(user_doc),
         "title": title,
         "angle": str(payload.get("angle") or "").strip(),
-        "status": "New",
+        "status": "In Progress",
         "section": str(payload.get("section") or "").strip() or "News",
         "owner": _user_display_name(user_doc),
         "ownerEmail": normalize_email(user_doc.get("email") or ""),
@@ -2422,7 +2662,7 @@ def api_create_pitch():
 
 
 @app.patch("/api/pitches/<pitch_id>")
-@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
 def api_update_pitch(pitch_id: str):
     user_doc = _current_user_doc()
     pitch = _find_owned_pitch_or_404(pitch_id, user_doc)
@@ -2440,9 +2680,16 @@ def api_update_pitch(pitch_id: str):
     update = {"updatedAt": _now_iso()}
     next_status = ""
     if "status" in payload:
-        next_status = str(payload.get("status") or "").strip()
-        if not next_status:
-            return jsonify({"ok": False, "error": "Status is required."}), 400
+        next_status = _normalize_pitch_status(payload.get("status"))
+        if next_status not in {"In Progress", "Ready for Review", "Approved", "On Hold"}:
+            return jsonify({"ok": False, "error": "Choose a valid pitch status."}), 400
+        if _current_user_role(user_doc) == ROLE_WRITER:
+            if not _pitch_owned_by_user(pitch, user_doc):
+                return jsonify({"ok": False, "error": "Only the pitch owner can submit it for review."}), 403
+            if next_status != "Ready for Review":
+                return jsonify({"ok": False, "error": "Writers can only submit their own pitch for review."}), 403
+            if _normalize_pitch_status(pitch.get("status")) not in {"In Progress", "Ready for Review"}:
+                return jsonify({"ok": False, "error": "This pitch can no longer be submitted for review."}), 409
         update["status"] = next_status
     if next_status == "Approved":
         if not approval_deadline:
@@ -2478,6 +2725,7 @@ def api_feedback():
         return jsonify({"ok": False, "error": error}), status
     docs = list(
         feedback_col.find({
+            "workspaceId": _workspace_id_for_user(user_doc),
             "entityType": entity_type,
             "entityId": entity_id,
         }).sort([("createdAt", -1), ("_id", -1)]).limit(100)
@@ -2503,6 +2751,7 @@ def api_create_feedback():
 
     now = datetime.now(timezone.utc)
     doc = {
+        "workspaceId": _workspace_id_for_user(user_doc),
         "entityType": entity_type,
         "entityId": entity_id,
         "text": text,
@@ -2524,7 +2773,7 @@ def api_update_feedback(feedback_id: str):
     oid = _object_id_or_none(feedback_id)
     if not oid:
         return jsonify({"ok": False, "error": "Invalid feedback id."}), 400
-    doc = feedback_col.find_one({"_id": oid})
+    doc = feedback_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(user_doc)})
     if not doc:
         return jsonify({"ok": False, "error": "Feedback not found."}), 404
     _, error, status = _require_feedback_entity(doc.get("entityType"), doc.get("entityId"), user_doc)
@@ -2536,7 +2785,7 @@ def api_update_feedback(feedback_id: str):
     if len(text) > 4000:
         return jsonify({"ok": False, "error": "Feedback must be 4000 characters or fewer."}), 400
     feedback_col.update_one({"_id": oid}, {"$set": {"text": text, "updatedAt": datetime.now(timezone.utc)}})
-    updated = feedback_col.find_one({"_id": oid}) or {}
+    updated = feedback_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(user_doc)}) or {}
     return jsonify({"ok": True, "feedback": _feedback_to_api(updated)})
 
 
@@ -2547,7 +2796,7 @@ def api_delete_feedback(feedback_id: str):
     oid = _object_id_or_none(feedback_id)
     if not oid:
         return jsonify({"ok": False, "error": "Invalid feedback id."}), 400
-    doc = feedback_col.find_one({"_id": oid})
+    doc = feedback_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(user_doc)})
     if not doc:
         return jsonify({"ok": False, "error": "Feedback not found."}), 404
     _, error, status = _require_feedback_entity(doc.get("entityType"), doc.get("entityId"), user_doc)
@@ -2577,12 +2826,244 @@ def api_activity():
 
     docs = list(
         activity_col.find({
+            "workspaceId": _workspace_id_for_user(user_doc),
             "entityType": entity_type,
             "entityId": entity_id,
             "eventType": {"$in": sorted(IMPORTANT_ACTIVITY_EVENTS)},
         }).sort([("createdAt", -1), ("_id", -1)]).limit(50)
     )
     return jsonify({"ok": True, "activity": [_activity_to_api(doc) for doc in docs]})
+
+
+def _pending_story_invitations(user_doc: dict) -> list[tuple[dict, dict]]:
+    email = normalize_email(user_doc.get("email") or "")
+    user_id = str(user_doc.get("_id") or "")
+    if not email and not user_id:
+        return []
+    query = {"workspaceId": _workspace_id_for_user(user_doc), "collaborators": {"$elemMatch": {
+        "status": "pending",
+        "$or": [{"email": email}, {"userId": user_id}],
+    }}}
+    invitations = []
+    for story in stories_col.find(query).sort([("updatedAt", -1), ("_id", -1)]):
+        for invite in _story_collaborators(story):
+            if invite.get("status") != "pending":
+                continue
+            if normalize_email(invite.get("email") or "") == email or str(invite.get("userId") or "") == user_id:
+                invitations.append((story, invite))
+                break
+    return invitations
+
+
+def _dashboard_entity_maps(user_doc: dict, personal_only: bool = False) -> tuple[dict[str, str], dict[str, str]]:
+    if personal_only:
+        story_query = _scoped_query(user_doc, {"$or": _owned_story_query(user_doc)["$or"] + [_collaborator_story_query(user_doc)]})
+        pitch_query = _scoped_query(user_doc, _owned_pitch_query(user_doc))
+    else:
+        story_query = _story_query_for_user(user_doc)
+        pitch_query = _pitch_query_for_user(user_doc)
+    story_titles = {}
+    pitch_titles = {}
+    if story_query is not None:
+        for doc in stories_col.find(story_query, {"_id": 1, "id": 1, "storyId": 1, "title": 1, "storyTitle": 1}):
+            story_titles[_doc_public_id(doc, "storyId")] = doc.get("title") or doc.get("storyTitle") or "Untitled story"
+    if pitch_query is not None:
+        for doc in pitches_col.find(pitch_query, {"_id": 1, "id": 1, "pitchId": 1, "title": 1}):
+            pitch_titles[_doc_public_id(doc, "pitchId")] = doc.get("title") or "Untitled pitch"
+    return story_titles, pitch_titles
+
+def _dashboard_event_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _activity_actor_is_user(doc: dict, user_doc: dict) -> bool:
+    actor_id = str(doc.get("actorId") or "").lower()
+    actor_email = normalize_email(doc.get("actorEmail") or "")
+    user_ids = {str(value).lower() for value in _owner_match_values(user_doc) if value}
+    return bool((actor_id and actor_id in user_ids) or (actor_email and actor_email in user_ids))
+
+
+def _dashboard_status_activity_relevant(doc: dict, role: str, personal_story_ids: set[str], personal_pitch_ids: set[str]) -> bool:
+    if doc.get("eventType") != "status_change":
+        return False
+    entity_type = str(doc.get("entityType") or "")
+    entity_id = str(doc.get("entityId") or "")
+    to_status = str(doc.get("toStatus") or "")
+    if entity_type == "pitch":
+        to_status = _normalize_pitch_status(to_status)
+        if entity_id in personal_pitch_ids:
+            return to_status in {"In Progress", "Approved", "On Hold"}
+        return role in {ROLE_EDITOR, ROLE_ADMIN} and to_status == "Ready for Review"
+    if entity_type == "story":
+        if entity_id in personal_story_ids:
+            return to_status in {"Assigned", "Needs Revision", "Returned", "Ready for Publish", "Published"}
+        return role in {ROLE_EDITOR, ROLE_ADMIN} and to_status == "Submitted"
+    return False
+
+
+def _dashboard_status_activity_text(doc: dict) -> str:
+    actor = str(doc.get("actorName") or "A newsroom teammate")
+    entity_type = str(doc.get("entityType") or "")
+    to_status = str(doc.get("toStatus") or "")
+    if entity_type == "pitch":
+        to_status = _normalize_pitch_status(to_status)
+        messages = {
+            "Ready for Review": f"{actor} submitted this pitch for review.",
+            "In Progress": f"{actor} requested more work before this pitch can move forward.",
+            "Approved": f"{actor} approved this pitch and moved it to Stories.",
+            "On Hold": f"{actor} placed this pitch on hold.",
+        }
+        return messages.get(to_status, str(doc.get("text") or "Pitch updated."))
+    messages = {
+        "Submitted": f"{actor} submitted this story for review.",
+        "Assigned": f"{actor} assigned this story.",
+        "Needs Revision": f"{actor} requested story revisions.",
+        "Returned": f"{actor} returned this story for revisions.",
+        "Ready for Publish": f"{actor} moved this story to teacher approval.",
+        "Published": f"{actor} marked this story published.",
+    }
+    return messages.get(to_status, str(doc.get("text") or "Story updated."))
+
+@app.get("/api/dashboard")
+@require_auth
+def api_dashboard():
+    user_doc = _current_user_doc()
+    role = _current_user_role(user_doc)
+    user_email = normalize_email(user_doc.get("email") or "")
+    tasks = []
+
+    pending_invitations = _pending_story_invitations(user_doc) if role == ROLE_WRITER else []
+    for story, invite in pending_invitations:
+        story_id = _doc_public_id(story, "storyId")
+        tasks.append({
+            "id": f"invite:{story_id}", "kind": "invitation", "title": story.get("title") or story.get("storyTitle") or "Untitled story",
+            "detail": f"{invite.get('invitedBy') or 'A newsroom teammate'} invited you to join as a co-author.",
+            "time": invite.get("invitedAt") or "", "priority": "high", "entityType": "story", "entityId": story_id,
+            "actions": ["accept", "decline"],
+        })
+
+    if role in {ROLE_EDITOR, ROLE_ADMIN}:
+        for pitch in pitches_col.find(_scoped_query(user_doc, {"status": {"$in": ["Ready for Review", "Submitted", "Needs Review"]}})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
+            if _pitch_owned_by_user(pitch, user_doc):
+                continue
+            tasks.append({"id": f"pitch:{_doc_public_id(pitch, 'pitchId')}", "kind": "pitch_review", "title": pitch.get("title") or "Untitled pitch", "detail": f"Pitch from {pitch.get('owner') or pitch.get('writer') or pitch.get('ownerEmail') or 'a writer'} needs review.", "time": _date_for_api(pitch.get("updatedAt") or pitch.get("submittedAt") or pitch.get("createdAt")), "priority": "normal", "entityType": "pitch", "entityId": _doc_public_id(pitch, "pitchId")})
+        for story in stories_col.find(_scoped_query(user_doc, {"status": {"$in": ["Submitted", "In Review"]}})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
+            if _story_primary_owned_by_user(story, user_doc):
+                continue
+            tasks.append({"id": f"story:{_doc_public_id(story, 'storyId')}", "kind": "story_review", "title": story.get("title") or story.get("storyTitle") or "Untitled story", "detail": f"{story.get('writer') or story.get('writerEmail') or 'A writer'} submitted this story for review.", "time": _date_for_api(story.get("submittedAt") or story.get("updatedAt")), "priority": "high" if story.get("dueSoon") else "normal", "entityType": "story", "entityId": _doc_public_id(story, "storyId")})
+    elif role == ROLE_WRITER:
+        for pitch in pitches_col.find(_scoped_query(user_doc, {"$and": [_owned_pitch_query(user_doc), {"status": {"$in": ["In Progress", "New"]}}]})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
+            tasks.append({"id": f"pitch:{_doc_public_id(pitch, 'pitchId')}", "kind": "pitch_work", "title": pitch.get("title") or "Untitled pitch", "detail": "Continue refining this pitch, then submit it when it is ready for editor review.", "time": _date_for_api(pitch.get("updatedAt") or pitch.get("createdAt")), "priority": "normal", "entityType": "pitch", "entityId": _doc_public_id(pitch, "pitchId")})
+        writer_story_query = _story_query_for_user(user_doc)
+        for story in stories_col.find(writer_story_query).sort([("updatedAt", -1), ("_id", -1)]).limit(30):
+            status = str(story.get("status") or "Assigned")
+            if status in {"Published", "Ready for Publish", "Submitted", "In Review"}:
+                continue
+            detail = "Revisions were requested. Review the editor notes and resubmit." if status in {"Returned", "Needs Revision"} else "Continue reporting and attach your work before the deadline."
+            tasks.append({"id": f"story:{_doc_public_id(story, 'storyId')}", "kind": "revision" if status in {"Returned", "Needs Revision"} else "story_work", "title": story.get("title") or story.get("storyTitle") or "Untitled story", "detail": detail, "time": _date_for_api(story.get("updatedAt") or story.get("createdAt")), "dueDate": _story_deadline(story), "priority": "high" if status in {"Returned", "Needs Revision"} or story.get("dueSoon") else "normal", "entityType": "story", "entityId": _doc_public_id(story, "storyId")})
+
+    story_titles, pitch_titles = _dashboard_entity_maps(user_doc)
+    personal_story_titles, personal_pitch_titles = _dashboard_entity_maps(user_doc, personal_only=True)
+    personal_story_ids = set(personal_story_titles)
+    personal_pitch_ids = set(personal_pitch_titles)
+    entity_clauses = []
+    if story_titles:
+        entity_clauses.append({"entityType": "story", "entityId": {"$in": list(story_titles)}})
+    if pitch_titles:
+        entity_clauses.append({"entityType": "pitch", "entityId": {"$in": list(pitch_titles)}})
+    personal_entity_clauses = []
+    if personal_story_titles:
+        personal_entity_clauses.append({"entityType": "story", "entityId": {"$in": list(personal_story_titles)}})
+    if personal_pitch_titles:
+        personal_entity_clauses.append({"entityType": "pitch", "entityId": {"$in": list(personal_pitch_titles)}})
+
+    if role in {ROLE_EDITOR, ROLE_ADMIN}:
+        activity_query = {"entityType": {"$in": ["story", "pitch"]}}
+    elif entity_clauses:
+        activity_query = {"$or": entity_clauses}
+    else:
+        activity_query = {"_id": None}
+
+    activities = []
+    activity_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    for doc in activity_col.find(_scoped_query(user_doc, activity_query)).sort([("createdAt", -1), ("_id", -1)]).limit(100):
+        event_datetime = _dashboard_event_datetime(doc.get("createdAt"))
+        if event_datetime is None or event_datetime < activity_cutoff:
+            continue
+        if _activity_actor_is_user(doc, user_doc):
+            continue
+        if not _dashboard_status_activity_relevant(doc, role, personal_story_ids, personal_pitch_ids):
+            continue
+        item = _activity_to_api(doc)
+        item["text"] = _dashboard_status_activity_text(doc)
+        item["title"] = doc.get("entityTitle") or (story_titles if item["entityType"] == "story" else pitch_titles).get(item["entityId"], "")
+        item["kind"] = item.get("eventType") or "update"
+        item["_sortAt"] = event_datetime.timestamp()
+        activities.append(item)
+
+    feedback_query = {"$or": personal_entity_clauses} if personal_entity_clauses else {"_id": None}
+    for doc in feedback_col.find(_scoped_query(user_doc, feedback_query)).sort([("createdAt", -1), ("_id", -1)]).limit(30):
+        if normalize_email(doc.get("authorEmail") or "") == user_email:
+            continue
+        event_datetime = _dashboard_event_datetime(doc.get("createdAt"))
+        if event_datetime is None or event_datetime < activity_cutoff:
+            continue
+        entity_type = doc.get("entityType") or ""
+        entity_id = doc.get("entityId") or ""
+        activities.append({"id": f"feedback:{doc.get('_id')}", "entityType": entity_type, "entityId": entity_id, "eventType": "comment", "kind": "comment", "text": f"{doc.get('authorName') or doc.get('actorName') or 'A teammate'} commented: {doc.get('text') or ''}", "title": (story_titles if entity_type == "story" else pitch_titles).get(entity_id, ""), "time": _date_for_api(doc.get("createdAt")), "occurredAt": _datetime_for_api(doc.get("createdAt")), "actorName": doc.get("authorName") or doc.get("actorName") or "", "_sortAt": event_datetime.timestamp()})
+
+    for story, invite in pending_invitations:
+        event_datetime = _dashboard_event_datetime(invite.get("invitedAtIso") or invite.get("invitedAt"))
+        if event_datetime is None or event_datetime < activity_cutoff:
+            continue
+        story_id = _doc_public_id(story, "storyId")
+        activities.append({"id": f"invite:{story_id}", "entityType": "story", "entityId": story_id, "eventType": "invitation", "kind": "invitation", "text": f"{invite.get('invitedBy') or 'A newsroom teammate'} invited you to co-author this story.", "title": story.get("title") or story.get("storyTitle") or "Untitled story", "time": invite.get("invitedAt") or "", "occurredAt": invite.get("invitedAtIso") or "", "actions": ["accept", "decline"], "_sortAt": event_datetime.timestamp()})
+
+    activities.sort(key=lambda item: item.get("_sortAt", 0), reverse=True)
+    for item in activities:
+        item.pop("_sortAt", None)
+    return jsonify({"ok": True, "tasks": tasks[:40], "activity": activities[:60]})
+
+
+@app.post("/api/story-invitations/<story_id>/<decision>")
+@require_roles(ROLE_WRITER)
+def api_respond_story_invitation(story_id: str, decision: str):
+    if decision not in {"accept", "decline"}:
+        return jsonify({"ok": False, "error": "Choose accept or decline."}), 400
+    user_doc = _current_user_doc()
+    email = normalize_email(user_doc.get("email") or "")
+    clauses = [{"_id": _object_id_or_none(story_id)}, {"id": story_id}, {"storyId": story_id}]
+    clauses = [clause for clause in clauses if list(clause.values())[0]]
+    story = stories_col.find_one({"$and": [_workspace_query(user_doc), {"$or": clauses}, {"collaborators": {"$elemMatch": {"email": email, "status": "pending"}}}]})
+    if not story:
+        return jsonify({"ok": False, "error": "This invitation is no longer available."}), 404
+    next_collaborators = []
+    for collaborator in _story_collaborators(story):
+        if collaborator.get("email") != email:
+            next_collaborators.append(collaborator)
+        elif decision == "accept":
+            next_collaborators.append({**collaborator, "status": "accepted", "role": "edit", "respondedAt": _now_iso()})
+    stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
+    activity_col.insert_one({"workspaceId": _workspace_id_for_user(user_doc), "entityType": "story", "entityId": _doc_public_id(story, "storyId"), "entityTitle": story.get("title") or story.get("storyTitle") or "Untitled story", "eventType": f"invitation_{'accepted' if decision == 'accept' else 'declined'}", "text": f"{_user_display_name(user_doc)} {'joined the story as a co-author' if decision == 'accept' else 'declined the co-author invitation'}.", "actorId": str(user_doc.get("_id")), "actorEmail": email, "actorName": _user_display_name(user_doc), "createdAt": datetime.now(timezone.utc)})
+    updated = stories_col.find_one({"_id": story["_id"]}) or {}
+    return jsonify({"ok": True, "decision": decision, "story": _story_to_api(updated) if decision == "accept" else None})
 
 
 @app.get("/api/article-records")
@@ -2620,6 +3101,7 @@ def api_article_records():
     if clauses:
         query = {"$and": clauses} if len(clauses) > 1 else clauses[0]
 
+    query = _scoped_query(_current_user_doc(), query)
     total = articles_col.count_documents(query)
     docs = list(
         articles_col.find(query)
@@ -2636,13 +3118,13 @@ def api_article_records():
 
     people_by_url: dict[str, list[dict]] = {}
     if urls:
-        cursor = interviews_col.find({
+        cursor = interviews_col.find(_scoped_query(_current_user_doc(), {
             "$or": [
                 {"url": {"$in": urls}},
                 {"articleUrl": {"$in": urls}},
                 {"article_url": {"$in": urls}},
             ]
-        })
+        }))
         for person_doc in cursor:
             person = _interview_to_api(person_doc)
             people_by_url.setdefault(_article_join_url_key(person["url"]), []).append(person)
@@ -2654,7 +3136,7 @@ def api_article_records():
         if text and text.lower() != "all sections":
             section_values.setdefault(text.lower(), text)
 
-    for doc in articles_col.find({}, {"section": 1, "category": 1, "tags": 1, "categories": 1}):
+    for doc in articles_col.find(_workspace_query(_current_user_doc()), {"section": 1, "category": 1, "tags": 1, "categories": 1}):
         for value in [doc.get("section"), doc.get("category")]:
             add_section_value(value)
         for field in ["tags", "categories"]:
@@ -2676,7 +3158,7 @@ def api_article_records():
 @app.get("/api/interview-records")
 @require_auth
 def api_interview_records():
-    docs = list(interviews_col.find({}).sort([("_id", -1)]))
+    docs = list(interviews_col.find(_workspace_query(_current_user_doc())).sort([("_id", -1)]))
     return jsonify({"ok": True, "people": [_interview_to_api(doc) for doc in docs]})
 
 
@@ -2698,7 +3180,7 @@ def api_update_interview_record(record_id: str):
     if not update:
         return jsonify({"ok": False, "error": "No editable fields provided"}), 400
 
-    result = interviews_col.update_one({"_id": oid}, {"$set": update})
+    result = interviews_col.update_one({"_id": oid, "workspaceId": _workspace_id_for_user(_current_user_doc())}, {"$set": update})
     if result.matched_count == 0:
         return jsonify({"ok": False, "error": "Record not found"}), 404
 
@@ -2714,7 +3196,7 @@ def api_delete_interview_record(record_id: str):
     except Exception:
         return jsonify({"ok": False, "error": "Invalid record id"}), 400
 
-    result = interviews_col.delete_one({"_id": oid})
+    result = interviews_col.delete_one({"_id": oid, "workspaceId": _workspace_id_for_user(_current_user_doc())})
     if result.deleted_count == 0:
         return jsonify({"ok": False, "error": "Record not found"}), 404
     return jsonify({"ok": True})
