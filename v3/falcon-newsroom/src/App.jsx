@@ -2,17 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
   Cell,
-  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
 import AnimatedDropdown from "./components/ui/animated-dropdown";
 
@@ -424,7 +418,7 @@ const users = [
     id: "u7",
     name: "Iris Park",
     email: "iris@school.edu",
-    role: "viewer",
+    role: "",
     lastSeen: "May 26, 2026",
   },
 ];
@@ -446,24 +440,14 @@ const ADMIN_ROLES = [
     description: "Can view assigned story work and owned pitches.",
   },
   {
-    id: "viewer",
-    label: "Viewer",
+    id: "guest",
+    label: "Guest",
     description: "Can view records, but cannot access stories, pitches, or admin tools.",
   },
 ];
 
 const ADMIN_ROLE_OPTIONS = ADMIN_ROLES.map((role) => role.id);
 const ADMIN_ROLE_FILTER_OPTIONS = ["All roles", ...ADMIN_ROLE_OPTIONS];
-
-const trafficData = [
-  { label: "Mon", views: 1280, visitors: 890 },
-  { label: "Tue", views: 1620, visitors: 1120 },
-  { label: "Wed", views: 2740, visitors: 1860 },
-  { label: "Thu", views: 3680, visitors: 2520 },
-  { label: "Fri", views: 3120, visitors: 2210 },
-  { label: "Sat", views: 1880, visitors: 1305 },
-  { label: "Sun", views: 2140, visitors: 1490 },
-];
 
 const sectionData = [
   { name: "News", value: 32 },
@@ -479,8 +463,7 @@ const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
 const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
 const STORY_COLLABORATOR_ROLE_OPTIONS = [
-  { id: "comment", label: "Can comment", description: "Can view and comment on the story." },
-  { id: "edit", label: "Can edit", description: "Can view, comment, and attach work." },
+  { id: "edit", label: "Co-author", description: "Can edit the story, attach work, comment, invite authors, and submit." },
 ];
 const STORY_WORKFLOW_COLUMNS = [
   {
@@ -926,7 +909,7 @@ const initialStories = [
   },
 ];
 
-const ACTIVE_PITCH_STATUSES = ["New", "Needs Review"];
+const ACTIVE_PITCH_STATUSES = ["In Progress", "Ready for Review"];
 const PITCH_STATUSES = [...ACTIVE_PITCH_STATUSES, "Approved", "On Hold"];
 const PITCH_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const PITCH_WRITERS = ["Ava Patel", "Daniel Wu", "Iris Park", "Lena Brooks", "Marcus Lee", "Sofia Chen"];
@@ -936,7 +919,7 @@ const initialPitches = [
     id: "p1",
     title: "How student clubs are rethinking recruitment",
     angle: "Look at how clubs are moving beyond hallway posters and using short-form video, interest forms, and peer referrals to find new members.",
-    status: "Needs Review",
+    status: "Ready for Review",
     section: "Features",
     owner: "Iris Park",
     submittedAt: "May 14, 2026",
@@ -952,7 +935,7 @@ const initialPitches = [
     id: "p2",
     title: "The quiet cost of exam season",
     angle: "A reported piece on sleep, study habits, and how students balance grades with work, family, and activities.",
-    status: "New",
+    status: "In Progress",
     section: "News",
     owner: "Marcus Lee",
     submittedAt: "May 13, 2026",
@@ -991,7 +974,7 @@ const initialPitches = [
     id: "p5",
     title: "Photo essay: the building before first period",
     angle: "A quiet visual piece following custodians, bus arrivals, practice groups, and early study spots.",
-    status: "New",
+    status: "In Progress",
     section: "Photo",
     owner: "Sofia Chen",
     submittedAt: "May 14, 2026",
@@ -1004,7 +987,7 @@ const initialPitches = [
     id: "p6",
     title: "Why students are choosing handwritten planners again",
     angle: "Explore whether paper planning is a backlash to notifications or just a useful habit that stuck.",
-    status: "Needs Review",
+    status: "Ready for Review",
     section: "Culture",
     owner: "Ava Patel",
     submittedAt: "May 12, 2026",
@@ -1022,7 +1005,7 @@ const FALLBACK_ACCOUNT = {
   email: "",
   firstName: "Newsroom",
   lastName: "User",
-  role: "viewer",
+  role: "",
 };
 const ARTICLE_PAGE_SIZE = 10;
 const EXTRACTOR_ADDED_BY = "Editor";
@@ -1128,7 +1111,7 @@ function accountInitials(user) {
 
 function accountRoleLabel(role) {
   const value = asText(role);
-  return value ? value[0].toUpperCase() + value.slice(1) : "Viewer";
+  return value ? value[0].toUpperCase() + value.slice(1) : "";
 }
 
 function monthDayYear(date) {
@@ -1247,16 +1230,29 @@ function normalizeDisplayFeedback(item = {}) {
   };
 }
 
+function activityTimestamp(item = {}) {
+  const parsed = Date.parse(item.occurredAt || item.createdAt || item.time || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sortActivitiesNewestFirst(items = []) {
+  return [...items].sort((left, right) => {
+    const timestampDifference = activityTimestamp(right) - activityTimestamp(left);
+    if (timestampDifference) return timestampDifference;
+    return asText(right.id).localeCompare(asText(left.id));
+  });
+}
+
 function normalizeDisplayActivity(item = {}) {
   return {
     ...item,
-    time: formatDisplayDate(item.time || item.createdAt),
+    time: formatDisplayDate(item.occurredAt || item.time || item.createdAt),
   };
 }
 
 function normalizeStoryCollaborator(item = {}) {
   const email = asText(item.email).toLowerCase();
-  const role = STORY_COLLABORATOR_ROLE_OPTIONS.some((option) => option.id === item.role) ? item.role : "comment";
+  const role = "edit";
   return {
     ...item,
     id: asText(item.id || item.userId || email),
@@ -1264,12 +1260,13 @@ function normalizeStoryCollaborator(item = {}) {
     email,
     name: asText(item.name) || email || "Collaborator",
     role,
+    status: asText(item.status) || "accepted",
     invitedAt: formatDisplayDate(item.invitedAt),
   };
 }
 
 function storyCollaboratorRoleLabel(role) {
-  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Can comment";
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Co-author";
 }
 
 function storyCollaboratorRoleDescription(role) {
@@ -1319,8 +1316,14 @@ function normalizeDisplayStory(story = {}) {
 }
 
 function normalizeDisplayPitch(pitch = {}) {
+  const legacyStatus = {
+    New: "In Progress",
+    Submitted: "Ready for Review",
+    "Needs Review": "Ready for Review",
+  };
   return {
     ...pitch,
+    status: legacyStatus[pitch.status] || pitch.status,
     submittedAt: formatDisplayDate(pitch.submittedAt),
     updatedAt: formatDisplayDate(pitch.updatedAt),
     feedback: Array.isArray(pitch.feedback) ? pitch.feedback.map(normalizeDisplayFeedback) : pitch.feedback,
@@ -1337,11 +1340,26 @@ function normalizeDisplayUser(user = {}) {
 
 function normalizeAppRole(role) {
   const value = asText(role).toLowerCase();
-  return ADMIN_ROLE_OPTIONS.includes(value) ? value : "viewer";
+  return ADMIN_ROLE_OPTIONS.includes(value) ? value : "guest";
 }
 
 function canManageEditorialWorkflow(role) {
   return ["admin", "editor"].includes(normalizeAppRole(role));
+}
+
+function pitchBelongsToUser(pitch, user) {
+  if (!pitch || !user) return false;
+  const pitchUserIds = [pitch.ownerUserId, pitch.writerUserId, pitch.ownerId, pitch.writerId]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const pitchEmails = [pitch.ownerEmail, pitch.writerEmail]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userIds = [user.id, user._id]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userEmail = asText(user.email).toLowerCase();
+  return userIds.some((value) => pitchUserIds.includes(value)) || Boolean(userEmail && pitchEmails.includes(userEmail));
 }
 
 function storyBelongsToUser(story, user) {
@@ -1376,20 +1394,22 @@ function storyCollaboratorForUser(story, user) {
 
 function storyVisibleToUser(story, user) {
   const role = normalizeAppRole(user?.role);
-  if (role === "viewer") return false;
-  if (role === "writer") return storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user));
+  if (role === "guest") return false;
+  if (role === "writer") return storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
   return true;
 }
 
 function canSubmitOwnStory(user, story) {
-  if (normalizeAppRole(user?.role) !== "writer" || !storyBelongsToUser(story, user)) return false;
+  const role = normalizeAppRole(user?.role);
+  const isAuthor = storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
+  if (!["writer", "editor", "admin"].includes(role) || !isAuthor) return false;
   return !["Submitted", "In Review", "Ready for Publish", "Published"].includes(story.status);
 }
 
 function canUnsubmitOwnStory(user, story) {
-  return normalizeAppRole(user?.role) === "writer"
-    && storyBelongsToUser(story, user)
-    && story?.status === "Submitted";
+  const role = normalizeAppRole(user?.role);
+  const isAuthor = storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
+  return ["writer", "editor", "admin"].includes(role) && isAuthor && story?.status === "Submitted";
 }
 
 function canUpdateOwnStorySubmission(user, story) {
@@ -1398,26 +1418,26 @@ function canUpdateOwnStorySubmission(user, story) {
 
 function canManageStoryCollaborators(user, story) {
   const role = normalizeAppRole(user?.role);
-  return ["admin", "editor"].includes(role) || (role === "writer" && storyBelongsToUser(story, user));
+  return ["admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted"));
 }
 
 function canEditStoryAttachment(user, story) {
   if (canManageEditorialWorkflow(user?.role)) return true;
   if (normalizeAppRole(user?.role) !== "writer") return false;
   if (storyBelongsToUser(story, user)) return true;
-  return storyCollaboratorForUser(story, user)?.role === "edit";
+  return storyCollaboratorForUser(story, user)?.status === "accepted";
 }
 
 function canCommentOnStory(user, story) {
   if (canManageEditorialWorkflow(user?.role)) return true;
-  return normalizeAppRole(user?.role) === "writer" && (storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user)));
+  return normalizeAppRole(user?.role) === "writer" && (storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted");
 }
 
 function navItemsForRole(role) {
   const currentRole = normalizeAppRole(role);
   return navItems.filter((item) => {
     if (item.id === "admin") return currentRole === "admin";
-    if (item.id === "pitches" || item.id === "stories") return currentRole !== "viewer";
+    if (item.id === "pitches" || item.id === "stories") return currentRole !== "guest";
     return true;
   });
 }
@@ -1428,7 +1448,7 @@ function roleCanAccessPage(role, page) {
 
 function defaultPageForRole(role) {
   const currentRole = normalizeAppRole(role);
-  if (currentRole === "viewer") return "interviewees";
+  if (currentRole === "guest") return "interviewees";
   if (currentRole === "writer") return "stories";
   return "dashboard";
 }
@@ -1743,7 +1763,7 @@ function useWorkflowActivity(entityType, entityId, refreshKey = "") {
         if (!response.ok || payload?.ok === false) {
           throw new Error(payload?.error || "Activity is unavailable.");
         }
-        setActivity(Array.isArray(payload.activity) ? payload.activity.map(normalizeDisplayActivity) : []);
+        setActivity(Array.isArray(payload.activity) ? sortActivitiesNewestFirst(payload.activity.map(normalizeDisplayActivity)) : []);
       } catch (fetchError) {
         if (fetchError.name === "AbortError") return;
         setActivity([]);
@@ -2088,7 +2108,7 @@ function buildHouseOptions(sources) {
 
 function pitchStatusTone(status) {
   if (status === "Approved") return "green";
-  if (status === "Needs Review") return "blue";
+  if (status === "Ready for Review") return "blue";
   if (status === "On Hold") return "amber";
   return "neutral";
 }
@@ -2119,7 +2139,7 @@ function pitchFeedbackItems(pitch) {
 }
 
 function pitchStatusDotClass(status) {
-  if (status === "Needs Review") return "bg-sky-400";
+  if (status === "Ready for Review") return "bg-sky-400";
   return "bg-zinc-400";
 }
 
@@ -2275,8 +2295,8 @@ function runAdminPageTests() {
   console.assert(groupedRoles.every((group) => group.users.every((user) => user.role === group.id)), "Admin role groups should only contain matching users.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("maya"), "All roles")).map((user) => user.name).join("") === "Maya Johnson", "Admin search should match staff by name.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("school"), "All roles")).length === 0, "Admin search should not match email text.");
-  console.assert(users.filter((user) => adminUserMatches(user, "", "viewer")).every((user) => user.role === "viewer"), "Admin role filter should limit visible staff.");
-  console.assert(navItemsForRole("viewer").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Viewers should not see story, pitch, or admin navigation.");
+  console.assert(users.filter((user) => adminUserMatches(user, "", "guest")).every((user) => user.role === "guest"), "Admin role filter should limit visible staff.");
+  console.assert(navItemsForRole("guest").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Guests should not see story, pitch, or admin navigation.");
   console.assert(navItemsForRole("writer").some((item) => item.id === "stories") && !navItemsForRole("writer").some((item) => item.id === "admin"), "Writers should see stories but not admin.");
 }
 runAdminPageTests();
@@ -2301,7 +2321,8 @@ function runPrototypeTests() {
   console.assert(!storyVisibleToUser(otherDraft, writerUser), "Writers should not see other writers' stories.");
   console.assert(!storyVisibleToUser(sameNameDifferentEmail, writerUser), "Writers should not inherit ownership from matching display names.");
   console.assert(canSubmitOwnStory(writerUser, ownedDraft), "Writers should be able to submit their own active drafts.");
-  console.assert(!canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should not use the writer submit action.");
+  console.assert(canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should be able to submit stories they author.");
+  console.assert(canSubmitOwnStory({ ...writerUser, role: "admin" }, ownedDraft), "Admins should be able to submit stories they author.");
   console.assert(canEditStoryAttachment({ ...writerUser, role: "editor" }, otherDraft), "Editors should be able to add work to any visible story.");
   console.assert(storyWorkflowAction(ownedDraft)?.nextStatus === "Submitted", "Story workflow action should submit writer drafts.");
   console.assert(canUnsubmitOwnStory(writerUser, { ...ownedDraft, status: "Submitted" }), "Writers should be able to unsubmit their own submitted stories.");
@@ -2410,20 +2431,6 @@ function Select({ value, onChange, options, className = "" }) {
   );
 }
 
-function TooltipBox({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-xl border border-white/[0.12] bg-zinc-950/95 p-3 shadow-2xl shadow-black/40">
-      <p className="mb-2 text-xs text-zinc-500">{label}</p>
-      {payload.map((item) => (
-        <div key={item.dataKey || item.name} className="flex min-w-36 items-center justify-between gap-6 text-sm">
-          <span className="capitalize text-zinc-400">{item.dataKey || item.name}</span>
-          <span className="font-medium text-zinc-100">{typeof item.value === "number" ? fmt(item.value) : item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function initialAppPage() {
   const pathPage = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, "");
@@ -2457,196 +2464,94 @@ function isLandingRoute() {
   return path === "/" || path === "/landing";
 }
 
-const landingWorkflowSteps = [
-  {
-    label: "Pitch",
-    title: "Start from a real assignment queue.",
-    body: "Editors see what writers are proposing, what needs a decision, and which drafts are ready to move.",
-  },
-  {
-    label: "Draft",
-    title: "Keep the article in Google Docs.",
-    body: "Line edits and comments stay in the Doc, while Falcon keeps the link, status, deadline, and editor context close.",
-  },
-  {
-    label: "Review",
-    title: "Make the next step obvious.",
-    body: "Submitted, in review, needs revision, ready for publish, returned, and published all read as plain workflow states.",
-  },
-  {
-    label: "Publish",
-    title: "Carry records into the archive.",
-    body: "Article metadata, sources, interviewees, and publication details stay connected after the story leaves the draft queue.",
-  },
-];
-
-const landingDeskRows = [
-  ["Senior Parking Rules", "Submitted", "June 2, 2026"],
-  ["Robotics Build Week", "Needs Revision", "May 20"],
-  ["Cafeteria Menu Changes", "Ready for Publish", "May 21"],
-];
-
-function LandingPage() {
+function V3LandingPage() {
   const reduceMotion = useReducedMotion();
-  const revealInitial = reduceMotion ? false : { opacity: 0, y: 18 };
-  const revealAnimate = { opacity: 1, y: 0 };
-  const revealTransition = { duration: 0.7, ease: [0.19, 1, 0.22, 1] };
+  const revealInitial = reduceMotion ? false : { opacity: 0, y: 22 };
+  const revealTransition = { duration: 0.7, ease: [0.16, 1, 0.3, 1] };
+
+  const productScreens = [
+    {
+      id: "workflow",
+      title: "Every story knows what comes next.",
+      body: "Editors can scan active work by review state, open the right draft, and move reporting from assignment through teacher approval.",
+      image: "/landing/product-stories.png",
+      alt: "Falcon Newsroom Stories view showing active drafts organized into In Progress, Ready for Review, and Teacher Approval columns.",
+    },
+    {
+      id: "records",
+      title: "Reporting records that outlast the deadline.",
+      body: "Published work stays searchable by title, author, section, tag, and interviewee, giving the next reporter a useful newsroom archive.",
+      image: "/landing/product-articles.png",
+      alt: "Falcon Newsroom Articles Database showing searchable publication records and article details.",
+    },
+  ];
 
   return (
-    <main className="landing-page">
-      <section className="landing-hero" aria-labelledby="landing-title">
-        <LandingDeskScene />
-        <nav className="landing-nav" aria-label="Landing navigation">
-          <a href="/" className="landing-mark" aria-label="Falcon Newsroom home">
-            <span>F</span>
+    <main className="v3-landing">
+      <header className="v3-landing-header">
+        <nav className="v3-landing-nav" aria-label="Main navigation">
+          <a href="/" className="v3-landing-mark" aria-label="Falcon Newsroom home">
+            <span aria-hidden="true">F</span>
             <strong>Falcon Newsroom</strong>
           </a>
-          <div className="landing-nav-links">
+          <div className="v3-nav-sections">
+            <a href="#product">Product</a>
             <a href="#workflow">Workflow</a>
-            <a href="#review">Docs review</a>
-            <a href="/dashboard">Open app</a>
+            <a href="#records">Records</a>
+          </div>
+          <div className="v3-nav-actions">
+            <a className="v3-login" href="/login">Log in</a>
+            <a className="v3-signup" href="/signup">Sign up</a>
           </div>
         </nav>
+      </header>
 
-        <div className="landing-hero-copy">
-          <p className="landing-kicker">For student editors and advisers</p>
-          <h1 id="landing-title">Falcon Newsroom</h1>
-          <p className="landing-hero-lede">
-            Move school journalism from scattered Classroom submissions to one live editorial desk.
-          </p>
-          <p className="landing-hero-body">
-            Pitches, Google Doc drafts, deadlines, sources, and publish-ready review stay visible without pulling writers out of the tools they already use.
-          </p>
-          <div className="landing-mobile-queue" aria-hidden="true">
-            <span>Draft queue: 3 ready</span>
-          </div>
-          <div className="landing-actions" aria-label="Primary actions">
-            <a className="landing-action-primary" href="/dashboard">Open newsroom</a>
-            <a className="landing-action-secondary" href="/stories">Review stories</a>
-          </div>
+      <section id="product" className="v3-hero" aria-labelledby="v3-landing-title">
+        <div className="v3-content">
+          <motion.div className="v3-heading-row v3-heading-row--hero" initial={revealInitial} animate={{ opacity: 1, y: 0 }} transition={revealTransition}>
+            <h1 id="v3-landing-title">The editorial desk your newsroom was missing.</h1>
+            <p>Falcon keeps pitches, drafts, feedback, deadlines, and source records moving together while writers keep working in Google Docs.</p>
+          </motion.div>
+          <motion.figure className="v3-product-shot" initial={reduceMotion ? false : { opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ ...revealTransition, delay: reduceMotion ? 0 : 0.12 }}>
+            <img src="/landing/product-dashboard.png" alt="Falcon Newsroom dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
+          </motion.figure>
         </div>
       </section>
 
-      <section id="workflow" className="landing-section landing-section-flow" aria-labelledby="workflow-title">
-        <div className="landing-section-heading">
-          <p className="landing-kicker">Editorial flow</p>
-          <h2 id="workflow-title">Every draft has a next move.</h2>
-          <p>
-            Falcon gives editors the review queue Google Classroom never quite becomes, while Google Docs remains the place for line edits and detailed feedback.
-          </p>
-        </div>
-        <ol className="landing-workflow-list">
-          {landingWorkflowSteps.map((step, index) => (
-            <motion.li
-              key={step.label}
-              initial={revealInitial}
-              whileInView={revealAnimate}
-              viewport={{ once: true, amount: 0.25 }}
-              transition={{ ...revealTransition, delay: reduceMotion ? 0 : index * 0.06 }}
-            >
-              <span>{step.label}</span>
-              <div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            </motion.li>
-          ))}
-        </ol>
-      </section>
+      {productScreens.map((screen) => (
+        <section id={screen.id} className="v3-landing-section" aria-labelledby={`${screen.id}-title`} key={screen.id}>
+          <div className="v3-content">
+            <motion.div className="v3-heading-row" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.45 }} transition={revealTransition}>
+              <h2 id={`${screen.id}-title`}>{screen.title}</h2>
+              <p>{screen.body}</p>
+            </motion.div>
+            <motion.figure className="v3-product-shot" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.18 }} transition={revealTransition}>
+              <img src={screen.image} alt={screen.alt} loading="lazy" />
+            </motion.figure>
+          </div>
+        </section>
+      ))}
 
-      <section id="review" className="landing-section landing-section-review" aria-labelledby="review-title">
-        <motion.div
-          className="landing-review-copy"
-          initial={revealInitial}
-          whileInView={revealAnimate}
-          viewport={{ once: true, amount: 0.35 }}
-          transition={revealTransition}
-        >
-          <p className="landing-kicker">Docs stay central</p>
-          <h2 id="review-title">Open the draft first. Update the workflow second.</h2>
-          <p>
-            Editors can jump straight into the Google Doc, return a draft, mark it ready, or link a missing Doc without turning review into another inbox.
-          </p>
-        </motion.div>
-        <motion.div
-          className="landing-doc-rail"
-          aria-label="Google Doc workflow preview"
-          initial={revealInitial}
-          whileInView={revealAnimate}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={revealTransition}
-        >
-          <div className="landing-doc-title">Robotics Build Week</div>
-          <div className="landing-doc-meta">By Daniel Wu, editor: Ava Patel</div>
-          <div className="landing-doc-action">Open Google Doc</div>
-          <div className="landing-doc-action landing-doc-action-secondary">Status: Needs Revision</div>
-          <p>Scene detail needed. Clarify the competition stakes before another editor pass.</p>
-        </motion.div>
-      </section>
-
-      <section className="landing-section landing-section-fit" aria-labelledby="fit-title">
-        <div className="landing-section-heading">
-          <p className="landing-kicker">Why it fits a newsroom</p>
-          <h2 id="fit-title">Designed around deadlines, not dashboards.</h2>
-        </div>
-        <div className="landing-fit-grid">
-          <div>
-            <h3>For editors</h3>
-            <p>See which drafts need attention, who owns them, and where the feedback belongs.</p>
-          </div>
-          <div>
-            <h3>For writers</h3>
-            <p>Keep working in Docs while the submission stays visible to the newsroom.</p>
-          </div>
-          <div>
-            <h3>For advisers</h3>
-            <p>Check the publication pipeline without rebuilding the whole class workflow.</p>
-          </div>
+      <section className="v3-school" aria-labelledby="v3-school-title">
+        <div className="v3-content v3-heading-row">
+          <h2 id="v3-school-title">A calmer editorial desk for your school.</h2>
+          <p>Give writers, editors, and advisers one shared view of the work without replacing the tools your publication already trusts.</p>
         </div>
       </section>
 
-      <section className="landing-final" aria-labelledby="final-title">
-        <div>
-          <p className="landing-kicker">Ready for the copy desk</p>
-          <h2 id="final-title">Give every story a visible path from pitch to publish.</h2>
+      <footer className="v3-footer">
+        <div className="v3-content">
+          <a href="/" className="v3-landing-mark" aria-label="Falcon Newsroom home">
+            <span aria-hidden="true">F</span>
+            <strong>Falcon Newsroom</strong>
+          </a>
+          <small>Â© 2026 Falcon Newsroom</small>
         </div>
-        <a className="landing-action-primary" href="/dashboard">Enter Falcon Newsroom</a>
-      </section>
+      </footer>
     </main>
   );
 }
 
-function LandingDeskScene() {
-  return (
-    <div className="landing-desk-scene" aria-hidden="true">
-      <div className="landing-desk-grid" />
-      <div className="landing-paper landing-paper-main">
-        <div className="landing-paper-heading">
-          <span>Draft queue</span>
-          <strong>May issue</strong>
-        </div>
-        {landingDeskRows.map((row) => (
-          <div className="landing-paper-row" key={row[0]}>
-            <span>{row[0]}</span>
-            <span>{row[1]}</span>
-            <span>{formatDisplayDate(row[2]) || row[2]}</span>
-          </div>
-        ))}
-      </div>
-      <div className="landing-paper landing-paper-doc">
-        <div className="landing-doc-lines">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="landing-editor-note">Comment: tighten the nut graf</div>
-      </div>
-      <div className="landing-deadline-strip">Deadline: June 2, 2026</div>
-      <div className="landing-source-strip">Sources confirmed: 5</div>
-    </div>
-  );
-}
 
 function AppShell() {
   const [page, setPage] = useState(initialAppPage);
@@ -2660,11 +2565,13 @@ function AppShell() {
   const [selectedArticleId, setSelectedArticleId] = useState("a1");
   const [toast, setToast] = useState("");
   const [account, setAccount] = useState(null);
+  const [workspace, setWorkspace] = useState(null);
   const [csrfToken, setCsrfToken] = useState("");
   const [signingOut, setSigningOut] = useState(false);
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
+  const hasWorkspace = Boolean(asText(account?.workspaceId));
   const availableNavItems = navItemsForRole(accountRole);
   const availableNavSections = navSectionsForItems(availableNavItems);
 
@@ -2701,6 +2608,7 @@ function AppShell() {
           return;
         }
         setAccount(normalizeDisplayUser(payload.user || FALLBACK_ACCOUNT));
+        setWorkspace(payload.workspace || null);
         setCsrfToken(payload.csrfToken || "");
       } catch (error) {
         if (!active) return;
@@ -2715,17 +2623,17 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (!account) return;
+    if (!account || !hasWorkspace) return;
     if (!roleCanAccessPage(accountRole, page)) {
       const nextPage = defaultPageForRole(accountRole);
       setToast(`${accountRoleLabel(accountRole)} access does not include ${navItems.find((item) => item.id === page)?.label || page}.`);
       setPage(nextPage);
       pushAppPath(pagePath(nextPage));
     }
-  }, [account, accountRole, page]);
+  }, [account, accountRole, hasWorkspace, page]);
 
   useEffect(() => {
-    if (!account) return undefined;
+    if (!account || !hasWorkspace) return undefined;
     const controller = new AbortController();
 
     async function loadStories() {
@@ -2751,16 +2659,16 @@ function AppShell() {
       }
     }
 
-    if (accountRole === "viewer") {
+    if (accountRole === "guest") {
       setStories([]);
-      setStoriesError("Stories are not available to viewers.");
+      setStoriesError("Stories are not available to guests.");
       setStoriesLoading(false);
       return undefined;
     }
 
     loadStories();
     return () => controller.abort();
-  }, [account, accountRole]);
+  }, [account, accountRole, hasWorkspace]);
 
   const navigatePage = (nextPage) => {
     if (account && !roleCanAccessPage(accountRole, nextPage)) {
@@ -3011,6 +2919,31 @@ function AppShell() {
     setToast(`Updated task to ${status}.`);
   };
 
+  const joinWorkspace = async (code) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/workspaces/join`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ code }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not join this workspace.");
+      }
+      setAccount(normalizeDisplayUser(payload.user));
+      setWorkspace(payload.workspace || null);
+      setToast(`Joined ${payload.workspace?.name || "workspace"}.`);
+      return true;
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Could not join this workspace.");
+    }
+  };
+
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
@@ -3066,7 +2999,7 @@ function AppShell() {
   }, [locationPath, page, stories]);
 
   const pages = {
-    dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
+    dashboard: <DashboardPage currentUser={account} csrfToken={csrfToken} setPage={setPage} setToast={setToast} onStoryAccepted={handleStoryCreatedFromPitch} />,
     pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
     stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
@@ -3076,8 +3009,16 @@ function AppShell() {
     calendar: <CalendarPage stories={stories} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
     analytics: <AnalyticsPage />,
     admin: <AdminPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} />,
-    settings: <SettingsPage />,
+    settings: <SettingsPage workspace={workspace} />,
   };
+
+  if (!account) {
+    return <div className="h-screen bg-[#08090c]" aria-label="Loading Falcon Newsroom" />;
+  }
+
+  if (!hasWorkspace) {
+    return <WorkspaceJoinShell user={account} signingOut={signingOut} onJoin={joinWorkspace} onSignOut={handleSignOut} />;
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-[#08090c] text-zinc-100">
@@ -3088,7 +3029,7 @@ function AppShell() {
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-500 text-sm font-bold text-black">F</div>
               <div>
                 <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
-                <div className="text-xs text-zinc-500">Poolesville Pulse</div>
+                <div className="text-xs text-zinc-500">{workspace?.name || "Workspace"}</div>
               </div>
             </button>
 
@@ -3146,6 +3087,101 @@ function AppShell() {
   );
 }
 
+function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
+  const reduceMotion = useReducedMotion();
+  const [code, setCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const cleanCode = code.replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (!cleanCode) {
+      setError("Enter the code shared by your newsroom.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await onJoin(cleanCode);
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : "Could not join this workspace.");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="h-screen overflow-hidden bg-[#08090c] text-zinc-100">
+      <div className="flex h-full">
+        <aside className="hidden h-full w-72 shrink-0 flex-col border-r border-white/[0.08] bg-[#08090c] p-4 lg:flex">
+          <div className="flex items-center gap-3 px-2 py-1">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-zinc-950">F</div>
+            <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
+          </div>
+          <div className="flex-1" aria-hidden="true" />
+          <AccountMenu user={user} signingOut={signingOut} onSignOut={onSignOut} />
+        </aside>
+
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.08] px-5 py-4 lg:hidden">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-zinc-950">F</div>
+            <span className="text-sm font-medium">Falcon Newsroom</span>
+          </header>
+
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-12">
+            <motion.section
+              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-md"
+              aria-labelledby="join-workspace-title"
+            >
+              <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.045] text-zinc-300">
+                <Icon name="people" className="h-5 w-5" />
+              </div>
+              <h1 id="join-workspace-title" className="text-2xl font-semibold tracking-tight text-zinc-50">Join a newsroom</h1>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">Enter the workspace code from your adviser or editor. You will join as a guest.</p>
+
+              <form onSubmit={submit} className="mt-8 border-y border-white/[0.09] py-6">
+                <label htmlFor="workspace-code" className="mb-2 block text-sm font-medium text-zinc-300">Workspace code</label>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <input
+                    id="workspace-code"
+                    autoFocus
+                    autoComplete="off"
+                    spellCheck="false"
+                    value={code}
+                    onChange={(event) => {
+                      setCode(event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 12));
+                      if (error) setError("");
+                    }}
+                    placeholder="ABC2345"
+                    aria-describedby={error ? "workspace-code-error" : "workspace-code-help"}
+                    aria-invalid={Boolean(error)}
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-white/[0.12] bg-black/25 px-3 font-mono text-sm uppercase tracking-[0.16em] text-zinc-100 outline-none transition placeholder:tracking-[0.12em] placeholder:text-zinc-700 focus:border-white/[0.28] focus:ring-2 focus:ring-white/[0.06]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={submitting || !code}
+                    className="h-11 shrink-0 rounded-xl bg-zinc-100 px-5 text-sm font-medium text-zinc-950 transition hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-100/30 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
+                  >
+                    {submitting ? "Joining..." : "Join workspace"}
+                  </button>
+                </div>
+                {error ? <p id="workspace-code-error" className="mt-3 text-sm text-rose-300" role="alert">{error}</p> : <p id="workspace-code-help" className="mt-3 text-xs leading-5 text-zinc-600">Codes are not case-sensitive.</p>}
+              </form>
+            </motion.section>
+          </div>
+
+          <div className="border-t border-white/[0.08] p-4 lg:hidden">
+            <AccountMenu user={user} signingOut={signingOut} onSignOut={onSignOut} />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function AccountMenu({ user, signingOut, onSignOut }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -3189,7 +3225,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-zinc-100">{displayName}</span>
-          <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span>
+          {roleLabel ? <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span> : null}
         </span>
       </button>
       <AnimatePresence>
@@ -3269,209 +3305,213 @@ function QuickCreateModal() {
   return null;
 }
 
-function DashboardPage({ articles, tasks, setPage, setSelectedArticleId }) {
-  const [databaseStats, setDatabaseStats] = useState({
-    articles: null,
-    interviews: null,
-    loading: true,
-    error: "",
-  });
+function DashboardPage({ currentUser, csrfToken = "", setPage, setToast, onStoryAccepted }) {
+  const [dashboard, setDashboard] = useState({ tasks: [], activity: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [respondingTo, setRespondingTo] = useState("");
+  const [showAllActivity, setShowAllActivity] = useState(false);
+  const firstName = asText(currentUser?.firstName) || accountDisplayName(currentUser).split(/\s+/)[0] || "there";
+
+  const loadDashboard = async (signal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Your dashboard is unavailable.");
+      setDashboard({
+        tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+        activity: Array.isArray(payload.activity) ? sortActivitiesNewestFirst(payload.activity.map(normalizeDisplayActivity)) : [],
+      });
+    } catch (err) {
+      if (err.name !== "AbortError") setError(err instanceof Error ? err.message : "Your dashboard is unavailable.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
 
   useEffect(() => {
+    if (!currentUser) return undefined;
     const controller = new AbortController();
-
-    const loadDatabaseStats = async () => {
-      try {
-        const [articlesResponse, interviewsResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/article-records?page=1&limit=1`, {
-            headers: { Accept: "application/json" },
-            credentials: "include",
-            signal: controller.signal,
-          }),
-          fetch(`${API_BASE}/api/interview-records`, {
-            headers: { Accept: "application/json" },
-            credentials: "include",
-            signal: controller.signal,
-          }),
-        ]);
-        const [articlesPayload, interviewsPayload] = await Promise.all([
-          articlesResponse.json().catch(() => ({})),
-          interviewsResponse.json().catch(() => ({})),
-        ]);
-
-        if (!articlesResponse.ok || articlesPayload.ok !== true) {
-          throw new Error(articlesPayload.error || "Article records unavailable.");
-        }
-        if (!interviewsResponse.ok || interviewsPayload.ok !== true) {
-          throw new Error(interviewsPayload.error || "Interview records unavailable.");
-        }
-
-        setDatabaseStats({
-          articles: Number(articlesPayload.total) || 0,
-          interviews: Number(interviewsPayload.total) || (Array.isArray(interviewsPayload.people) ? interviewsPayload.people.length : 0),
-          loading: false,
-          error: "",
-        });
-      } catch (err) {
-        if (err.name === "AbortError") return;
-        setDatabaseStats({
-          articles: null,
-          interviews: null,
-          loading: false,
-          error: err.message || "Database totals unavailable.",
-        });
-      }
-    };
-
-    loadDatabaseStats();
+    loadDashboard(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [currentUser?.id]);
 
-  const articleTotal = databaseStats.loading ? "..." : databaseStats.error ? "-" : fmt(databaseStats.articles || 0);
-  const interviewTotal = databaseStats.loading ? "..." : databaseStats.error ? "-" : fmt(databaseStats.interviews || 0);
+  const openItem = (item) => {
+    if (!item?.entityId) return;
+    if (item.entityType === "pitch") {
+      setPage("pitches");
+      pushAppPath(pitchDetailPath(item.entityId));
+    } else {
+      setPage("stories");
+      pushAppPath(storyDetailPath(item.entityId));
+    }
+  };
+
+  const respondToInvitation = async (item, decision) => {
+    if (!item?.entityId || respondingTo) return;
+    setRespondingTo(`${item.entityId}:${decision}`);
+    try {
+      const response = await fetch(`${API_BASE}/api/story-invitations/${encodeURIComponent(item.entityId)}/${decision}`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not respond to the invitation.");
+      if (payload.story) onStoryAccepted?.(payload.story);
+      setToast(decision === "accept" ? "Invitation accepted. You can now edit this story." : "Invitation declined.");
+      await loadDashboard();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Could not respond to the invitation.");
+    } finally {
+      setRespondingTo("");
+    }
+  };
+
+  const emptyMessage = (kind) => kind === "tasks"
+    ? "You are caught up. New assignments and review requests will appear here."
+    : "Status decisions, feedback, and invitations that need your attention will appear here.";
+  const visibleActivity = showAllActivity ? dashboard.activity : dashboard.activity.slice(0, 6);
+  const hasHiddenActivity = dashboard.activity.length > 6;
 
   return (
-    <PageShell title="Newsroom dashboard" eyebrow="Home / Command center">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric icon="article" label="Articles active" value={articleTotal} />
-        <Metric icon="eye" label="Views this week" value="16,460" delta="+18.4%" />
-        <Metric icon="people" label="Interviews logged" value={interviewTotal} />
-        <Metric icon="task" label="Tasks due" value={tasks.filter((t) => t.status !== "Done").length} delta="2 high priority" warn />
-      </section>
+    <PageShell
+      title={`Hi ${firstName}`}
+      description="Here's what needs your attention today."
+      className="max-w-[1440px]"
+    >
+      {error ? (
+        <div className="border-y border-red-400/20 bg-red-400/[0.055] px-4 py-3 text-sm text-red-200">{error}</div>
+      ) : null}
 
-      <section className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card className="p-5">
-          <div className="mb-5 flex items-start justify-between">
-            <div>
-              <h2 className="font-medium text-zinc-50">This week in traffic</h2>
-              <p className="mt-1 text-sm text-zinc-500">Views and visitors across published stories.</p>
-            </div>
-            <StatusBadge tone="green">Live mock data</StatusBadge>
+      <div className="grid min-h-[560px] gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] lg:gap-0">
+        <section aria-labelledby="dashboard-tasks" className="min-w-0 lg:pr-10">
+          <div className="flex items-baseline justify-between border-b border-white/[0.14] pb-3">
+            <h2 id="dashboard-tasks" className="text-base font-semibold text-zinc-100">Tasks</h2>
+            <span className="text-xs tabular-nums text-zinc-500">{dashboard.tasks.length} open</span>
           </div>
-          <div className="h-[320px]">
-            <TrafficChart />
+          <div>
+            {loading ? (
+              <DashboardSkeleton rows={5} />
+            ) : dashboard.tasks.length ? dashboard.tasks.map((item) => (
+              <DashboardTaskRow
+                key={item.id}
+                item={item}
+                busy={respondingTo.startsWith(`${item.entityId}:`)}
+                onOpen={() => openItem(item)}
+                onRespond={(decision) => respondToInvitation(item, decision)}
+              />
+            )) : (
+              <DashboardEmpty icon="task" text={emptyMessage("tasks")} />
+            )}
           </div>
-        </Card>
-        <Card className="p-5">
-          <div className="mb-5">
-            <h2 className="font-medium text-zinc-50">Top performing articles</h2>
-            <p className="mt-1 text-sm text-zinc-500">Click any story to inspect details.</p>
-          </div>
-          <div className="space-y-2">
-            {articles
-              .slice()
-              .sort((a, b) => b.views - a.views)
-              .slice(0, 5)
-              .map((article, idx) => (
-                <button key={article.id} type="button" onClick={() => { setSelectedArticleId(article.id); setPage("articles"); }} className="group flex w-full items-center justify-between gap-4 rounded-xl border border-transparent px-3 py-3 text-left transition hover:border-white/[0.08] hover:bg-white/[0.04]">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-xs text-zinc-500">{idx + 1}</div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-zinc-300 group-hover:text-zinc-50">{article.title}</p>
-                      <p className="text-xs text-zinc-600">{article.section}</p>
-                    </div>
-                  </div>
-                  <span className="text-sm text-zinc-400">{fmt(article.views)}</span>
-                </button>
-              ))}
-          </div>
-        </Card>
-      </section>
+        </section>
 
-      <section className="mt-5 grid gap-5 xl:grid-cols-3">
-        <Card className="p-5 xl:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-medium">Editorial activity</h2>
-            <Button variant="ghost" onClick={() => setPage("tasks")}>
-              View all
-            </Button>
+        <section aria-labelledby="dashboard-activity" className="min-w-0 lg:border-l lg:border-white/[0.1] lg:pl-10">
+          <div className="flex items-baseline justify-between border-b border-white/[0.14] pb-3">
+            <h2 id="dashboard-activity" className="text-base font-semibold text-zinc-100">Recent activity</h2>
+            {hasHiddenActivity ? (
+              <button type="button" onClick={() => setShowAllActivity((current) => !current)} className="text-xs font-medium text-zinc-400 transition hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+                {showAllActivity ? "Show less" : "See all"}
+              </button>
+            ) : null}
           </div>
-          <ActivityFeed />
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-4 font-medium">AI suggestions</h2>
-          <div className="space-y-3">
-            <Insight title="Follow-up opportunity" body="The Snapchat article has high search traffic. Assign an explainer about exporting memories." />
-            <Insight title="Source diversity" body="Current tech coverage leans upperclassmen. Add freshman and sophomore interviews." />
-            <Insight title="Publishing rhythm" body="Thursday afternoon had peak engagement. Schedule social posts then." />
+          <div className={cx(showAllActivity && "lg:max-h-[calc(100vh-230px)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2")}>
+            {loading ? (
+              <DashboardSkeleton rows={6} />
+            ) : visibleActivity.length ? visibleActivity.map((item) => (
+              <DashboardActivityRow
+                key={item.id}
+                item={item}
+                busy={respondingTo.startsWith(`${item.entityId}:`)}
+                onOpen={() => openItem(item)}
+                onRespond={(decision) => respondToInvitation(item, decision)}
+              />
+            )) : (
+              <DashboardEmpty icon="mail" text={emptyMessage("activity")} />
+            )}
           </div>
-        </Card>
-      </section>
+        </section>
+      </div>
     </PageShell>
   );
 }
 
-function Metric({ icon, label, value, delta, warn }) {
+function DashboardTaskRow({ item, busy, onOpen, onRespond }) {
+  const invitation = item.kind === "invitation";
   return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.045]">
-          <Icon name={icon} />
-        </div>
-        {delta && <StatusBadge tone={warn ? "amber" : "green"}>{delta}</StatusBadge>}
+    <div className="border-b border-white/[0.08] py-4">
+      <div className="flex items-start gap-3">
+        <span className={cx("mt-1.5 h-2 w-2 shrink-0 rounded-full", item.priority === "high" ? "bg-amber-300" : "bg-zinc-500")} />
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+          <span className="block truncate text-sm font-medium text-zinc-100">{item.title}</span>
+          <span className="mt-1 block text-sm leading-5 text-zinc-500">{item.detail}</span>
+          <span className="mt-1.5 block text-xs text-zinc-600">{item.dueDate ? `Due ${formatDisplayDate(item.dueDate)}` : formatDisplayDate(item.time)}</span>
+        </button>
       </div>
-      <p className="mt-5 text-sm text-zinc-500">{label}</p>
-      <h3 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-50">{value}</h3>
-    </Card>
-  );
-}
-
-function TrafficChart() {
-  return (
-    <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-      <AreaChart data={trafficData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-        <defs>
-          <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#fafafa" stopOpacity={0.22} />
-            <stop offset="95%" stopColor="#fafafa" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-        <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-        <Tooltip content={<TooltipBox />} />
-        <Area type="monotone" dataKey="views" stroke="#fafafa" strokeWidth={2} fill="url(#g)" />
-        <Line type="monotone" dataKey="visitors" stroke="#a1a1aa" strokeWidth={2} dot={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-function ActivityFeed() {
-  const feed = [
-    "Sofia submitted Snapchat story for final review",
-    "Marcus added two athlete interviews",
-    "Ava moved parking article into Editing",
-    "Daniel uploaded robotics build notes",
-    "Maya approved the weekly publishing plan",
-  ];
-  const feedDate = monthDayYear(new Date());
-  return (
-    <div className="space-y-3">
-      {feed.map((item, index) => (
-        <div key={item} className="flex items-start gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] p-3">
-          <div className="mt-1 h-2 w-2 rounded-full bg-zinc-300" />
-          <div>
-            <p className="text-sm text-zinc-300">{item}</p>
-            <p className="mt-1 text-xs text-zinc-600">{feedDate}</p>
-          </div>
+      {invitation ? (
+        <div className="mt-3 flex gap-2 pl-5">
+          <Button onClick={() => onRespond("accept")} disabled={busy} className="h-8 px-3 text-xs">Accept</Button>
+          <Button variant="ghost" onClick={() => onRespond("decline")} disabled={busy} className="h-8 px-3 text-xs">Decline</Button>
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
 
-function Insight({ title, body }) {
+function DashboardActivityRow({ item, busy, onOpen, onRespond }) {
+  const invitation = item.kind === "invitation";
   return (
-    <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.055] p-4">
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-100">
-        <Icon name="sparkles" className="h-4 w-4 text-violet-300" />
-        {title}
+    <div className="border-b border-white/[0.08] py-3.5">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.055] text-zinc-400">
+          <Icon name={invitation ? "mail" : item.kind === "comment" ? "edit" : "clock"} className="h-3.5 w-3.5" />
+        </span>
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+          <span className="flex min-w-0 items-baseline justify-between gap-3">
+            {item.title ? <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{item.title}</span> : <span />}
+            <span className="shrink-0 text-xs text-zinc-500">{formatDisplayDate(item.time)}</span>
+          </span>
+          <span className="mt-0.5 block text-sm leading-5 text-zinc-500">{item.text}</span>
+        </button>
       </div>
-      <p className="text-xs leading-5 text-zinc-500">{body}</p>
+      {invitation ? (
+        <div className="mt-2 flex gap-2 pl-10">
+          <button type="button" disabled={busy} onClick={() => onRespond("accept")} className="text-xs font-medium text-zinc-200 hover:text-white disabled:text-zinc-600">Accept</button>
+          <button type="button" disabled={busy} onClick={() => onRespond("decline")} className="text-xs text-zinc-500 hover:text-zinc-200 disabled:text-zinc-700">Decline</button>
+        </div>
+      ) : null}
     </div>
   );
 }
+
+function DashboardSkeleton({ rows }) {
+  return Array.from({ length: rows }, (_, index) => (
+    <div key={index} className="border-b border-white/[0.08] py-4" aria-hidden="true">
+      <div className="h-3 w-2/5 animate-pulse rounded bg-white/[0.07]" />
+      <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-white/[0.04]" />
+    </div>
+  ));
+}
+
+function DashboardEmpty({ icon, text }) {
+  return (
+    <div className="flex items-start gap-3 py-8 text-zinc-600">
+      <Icon name={icon} className="mt-0.5 h-4 w-4" />
+      <p className="max-w-md text-sm leading-6">{text}</p>
+    </div>
+  );
+}
+
 
 function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated = () => {} }) {
   const [pitches, setPitches] = useState([]);
@@ -3554,8 +3594,10 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   const nextIdAfter = (id) => nextActivePitchId(activePitches.filter((pitch) => pitch.id !== id), id);
 
   const updatePitchStatus = async (id, status, message, approval = {}) => {
-    if (!canManagePitches) {
-      setToast("Only admins and editors can change pitch status.");
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    const ownerCanSubmit = status === "Ready for Review" && pitchBelongsToUser(targetPitch, currentUser);
+    if (!canManagePitches && !ownerCanSubmit) {
+      setToast("Only the pitch owner can submit it for review.");
       return null;
     }
     const approvedDueDate = status === "Approved" ? dueDateValue(approval) : "";
@@ -3646,8 +3688,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     }
   };
 
-  const markNeedsReview = (id, message) => {
-    return updatePitchStatus(id, "Needs Review", message || "Marked pitch as needs review.");
+  const submitForReview = (id, message) => {
+    return updatePitchStatus(id, "Ready for Review", message || "Submitted pitch for review.");
+  };
+
+  const markInProgress = (id, message) => {
+    return updatePitchStatus(id, "In Progress", message || "Returned pitch to in progress.");
   };
 
   const addComment = (id, text) => {
@@ -3698,7 +3744,8 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         pitch={detailPitch}
         activePitches={activePitches}
         onBack={navigateToBoard}
-        onNeedsReview={markNeedsReview}
+        onSubmitForReview={submitForReview}
+        onMarkInProgress={markInProgress}
         onApprove={(id, approval) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.", approval)}
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
         onDelete={deletePitch}
@@ -3707,6 +3754,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         onEditComment={editComment}
         onDeleteComment={deleteComment}
         canManagePitches={canManagePitches}
+        canSubmitForReview={pitchBelongsToUser(detailPitch, currentUser)}
         csrfToken={csrfToken}
         setToast={setToast}
       />
@@ -3727,7 +3775,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         <div className="mb-5 flex flex-col gap-4">
           <div>
             <h2 className="font-medium text-zinc-50">Active editor queue</h2>
-            <p className="mt-1 text-sm text-zinc-500">Only new and needs-review pitches appear here.</p>
+            <p className="mt-1 text-sm text-zinc-500">Pitches stay in progress until their owners submit them for editor review.</p>
           </div>
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
             <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, section, or feedback" />
@@ -3735,7 +3783,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
-              {["All Active", "Needs Review", "New"].map((filter) => (
+              {["All Active", "Ready for Review", "In Progress"].map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -3793,8 +3841,8 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
 }
 
 function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
-  const newCount = group.pitches.filter((pitch) => pitch.status === "New").length;
-  const reviewCount = group.pitches.filter((pitch) => pitch.status === "Needs Review").length;
+  const progressCount = group.pitches.filter((pitch) => pitch.status === "In Progress").length;
+  const reviewCount = group.pitches.filter((pitch) => pitch.status === "Ready for Review").length;
 
   return (
     <div className="border-b border-white/[0.06] last:border-b-0">
@@ -3815,8 +3863,8 @@ function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <PitchCountLabel label="Active" count={group.pitches.length} />
-          <PitchCountLabel label="New" count={newCount} />
-          <PitchCountLabel label="Needs Review" count={reviewCount} />
+          <PitchCountLabel label="In Progress" count={progressCount} />
+          <PitchCountLabel label="Ready for Review" count={reviewCount} />
         </div>
       </button>
 
@@ -3885,12 +3933,14 @@ function PitchDetailPage({
   pitch,
   activePitches,
   onBack,
-  onNeedsReview,
+  onSubmitForReview,
+  onMarkInProgress,
   onApprove,
   onHold,
   onDelete,
   onNext,
   canManagePitches = false,
+  canSubmitForReview = false,
   csrfToken = "",
   setToast = () => {},
 }) {
@@ -3980,11 +4030,7 @@ function PitchDetailPage({
       const nextFeedback = normalizeDisplayFeedback(payload.feedback || { id: `feedback-${Date.now()}`, text, author: "Editor", time: "Just now" });
       pitchFeedback.setFeedback((previous) => [nextFeedback, ...previous]);
       setFeedbackDraft("");
-      if (pitch.status === "New") {
-        await onNeedsReview(pitch.id, "Added feedback and marked pitch as needs review.");
-      } else {
-        setToast("Added feedback.");
-      }
+      setToast("Added feedback.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Could not add feedback.");
     }
@@ -4068,8 +4114,7 @@ function PitchDetailPage({
           </div>
 
           <section className="border-b border-white/[0.16] pb-10">
-            <PitchStatusText status={pitch.status} />
-            <h2 className="mt-8 text-4xl font-semibold leading-[1.12] tracking-tight text-zinc-50 md:text-5xl">
+            <h2 className="text-4xl font-semibold leading-[1.12] tracking-tight text-zinc-50 md:text-5xl">
               {pitch.title}
             </h2>
             <p className="mt-6 text-lg leading-8 text-zinc-400">
@@ -4186,6 +4231,18 @@ function PitchDetailPage({
               <PitchProperty label="Section">{pitch.section}</PitchProperty>
               <PitchProperty label="Submitted">{pitch.submittedAt}</PitchProperty>
             </div>
+            {canSubmitForReview ? (
+              <div className="mt-5 border-t border-white/[0.1] pt-5">
+                <p className="text-sm leading-6 text-zinc-500">
+                  {pitch.status === "Ready for Review"
+                    ? "Submitted. An editor or admin can now approve it or return it for more work."
+                    : "Send this pitch to an editor or admin when the angle and reporting plan are ready."}
+                </p>
+                <Button className="mt-4 w-full" disabled={pitch.status === "Ready for Review"} onClick={() => onSubmitForReview(pitch.id)}>
+                  {pitch.status === "Ready for Review" ? "Submitted for review" : "Submit for review"}
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           {canManagePitches ? (
@@ -4195,11 +4252,11 @@ function PitchDetailPage({
               <Button onClick={() => setApprovalOpen(true)} className="w-full">Approve</Button>
               <Button
                 variant="ghost"
-                disabled={pitch.status === "Needs Review"}
-                onClick={() => onNeedsReview(pitch.id)}
+                disabled={pitch.status === "In Progress"}
+                onClick={() => onMarkInProgress(pitch.id)}
                 className="w-full"
               >
-                Mark needs review
+                Mark in progress
               </Button>
               <Button variant="ghost" onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
               <Button
@@ -4586,7 +4643,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
       title="Stories"
       eyebrow="Editorial workflow"
       description="Scan active drafts by review state, then open a story for notes, source checks, and approval actions."
-      className="max-w-[1280px]"
+      className="max-w-[1380px]"
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
@@ -4882,14 +4939,14 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   };
 
   return (
-    <div className="mx-auto max-w-[1280px] px-5 py-6 md:px-8">
+    <div className="mx-auto max-w-[1380px] px-5 py-6 md:px-8">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <main className="min-w-0">
           <header className="border-b border-white/[0.14] pb-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
-                <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+                <p className="mt-3 text-sm font-medium text-zinc-300">{Array.isArray(story.authors) && story.authors.length ? story.authors.join(", ") : story.writer} / {story.section}</p>
                 {dueDateLabel ? <p className="mt-2 text-sm text-zinc-500">Due {dueDateLabel}</p> : null}
               </div>
               {canManageCollaborators ? (
@@ -5063,12 +5120,11 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
 
 function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRemove }) {
   const [emails, setEmails] = useState("");
-  const [role, setRole] = useState("comment");
+  const [role] = useState("edit");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [removingEmail, setRemovingEmail] = useState("");
   const [error, setError] = useState("");
-  const selectedRole = STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role) || STORY_COLLABORATOR_ROLE_OPTIONS[0];
   const inviteCount = Array.isArray(collaborators) ? collaborators.length : 0;
 
   const submitInvite = async (event) => {
@@ -5139,23 +5195,6 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
           </label>
 
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-zinc-300">Role</span>
-            <div className="relative">
-              <select
-                value={role}
-                onChange={(event) => setRole(event.target.value)}
-                className="h-12 w-full appearance-none rounded-xl border border-white/[0.14] bg-black/20 px-4 pr-10 text-sm font-medium text-zinc-100 outline-none focus:border-white/[0.28]"
-              >
-                {STORY_COLLABORATOR_ROLE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id} className="bg-zinc-950">{option.label}</option>
-                ))}
-              </select>
-              <Icon name="chevron" className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-            </div>
-            <p className="mt-2 text-sm text-zinc-500">{selectedRole.description}</p>
-          </label>
-
-          <label className="block">
             <span className="mb-2 block text-sm font-medium text-zinc-300">Message (optional)</span>
             <div className="relative">
               <textarea
@@ -5171,7 +5210,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
         </div>
 
         <div className="mt-6">
-          <h3 className="text-sm font-medium text-zinc-300">Currently invited ({inviteCount})</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Collaborators</h3>
           <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.12]">
             {inviteCount ? collaborators.map((collaborator) => (
               <div key={collaborator.email || collaborator.id} className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3 last:border-b-0">
@@ -5180,7 +5219,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-zinc-100">{collaborator.email}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">{storyCollaboratorRoleLabel(collaborator.role)}</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">{collaborator.status === "pending" ? "Invitation pending" : storyCollaboratorRoleLabel(collaborator.role)}</p>
                 </div>
                 <button
                   type="button"
@@ -5193,7 +5232,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
                 </button>
               </div>
             )) : (
-              <p className="px-4 py-5 text-sm text-zinc-600">No collaborators invited yet.</p>
+              <p className="px-4 py-5 text-sm text-zinc-600">No additional authors yet.</p>
             )}
           </div>
         </div>
@@ -5304,7 +5343,7 @@ function StoryAttachment({ story, attachment: providedAttachment = null, onCopy,
   const showTrailingIcon = !compact || attachment.type === "file";
   const showRemove = compact && Boolean(onRemove);
   const compactGridClass = showTrailingIcon ? "min-h-14 grid-cols-[minmax(0,1fr)_54px]" : "min-h-14 grid-cols-1";
-  const compactPaddingClass = showRemove ? (showTrailingIcon ? "pr-9" : "pr-12") : "";
+  const compactPaddingClass = showRemove ? "pr-12" : "";
 
   return (
     <div className={cx("relative grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
@@ -5346,7 +5385,7 @@ function StoryAttachment({ story, attachment: providedAttachment = null, onCopy,
           aria-label="Remove attached work"
           className={cx(
             "absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20",
-            showTrailingIcon ? "right-12" : "right-2"
+            showTrailingIcon ? "right-[4.5rem]" : "right-2"
           )}
         >
           <Icon name="x" className="h-4 w-4" />
@@ -7097,29 +7136,68 @@ function AdminRoleDropdown({ value, onChange, label }) {
   );
 }
 
-function SettingsPage() {
+function SettingsPage({ workspace }) {
+  const [joinCode, setJoinCode] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API_BASE}/api/workspace`, {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load the workspace code.");
+        if (active) setJoinCode(payload.workspace?.joinCode || "");
+      })
+      .catch((error) => {
+        if (active) setCodeError(error instanceof Error ? error.message : "Could not load the workspace code.");
+      });
+    return () => { active = false; };
+  }, []);
+
+  const copyCode = async () => {
+    if (!joinCode) return;
+    try {
+      await navigator.clipboard.writeText(joinCode);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCodeError("Copy failed. Select the code and copy it manually.");
+    }
+  };
+
   return (
     <PageShell title="Workspace settings" right={<Button>Save changes</Button>}>
       <div className="grid gap-5 xl:grid-cols-2">
         <Card className="p-5">
           <h2 className="font-medium">Publication settings</h2>
-          <p className="mt-1 text-sm text-zinc-500">Configure the school newspaper workspace.</p>
+          <p className="mt-1 text-sm text-zinc-500">Configure this school newspaper workspace.</p>
           <div className="mt-5 space-y-4">
-            <Field label="Publication name" value="Poolesville Pulse" />
+            <Field label="Publication name" value={workspace?.name || "Poolesville Pulse"} />
             <Field label="Website URL" value="https://poolesvillepulse.org" />
             <Field label="Allowed article domain" value="poolesvillepulse.org" />
             <Field label="Platform type" value="SNO Sites / WordPress" />
           </div>
         </Card>
         <Card className="p-5">
-          <h2 className="font-medium">Multi-school readiness</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">The future version should add workspace IDs to every article, source, task, analytics snapshot, and user record so another school can connect its own newspaper site without sharing data with Poolesville Pulse.</p>
+          <h2 className="font-medium">Workspace code</h2>
+          <p className="mt-1 max-w-md text-sm leading-6 text-zinc-500">Share this code with people who should join {workspace?.name || "this newsroom"}. New members start as guests.</p>
+          <div className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-white/[0.1] bg-black/20 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">Join code</p>
+              <p className="mt-1 truncate font-mono text-lg font-semibold tracking-[0.18em] text-zinc-100">{joinCode || (codeError ? "Unavailable" : "Loading...")}</p>
+            </div>
+            <Button variant="ghost" onClick={copyCode} disabled={!joinCode}>{copied ? "Copied" : "Copy code"}</Button>
+          </div>
+          {codeError ? <p className="mt-3 text-sm text-rose-300" role="alert">{codeError}</p> : null}
         </Card>
       </div>
     </PageShell>
   );
 }
-
 function Field({ label, value }) {
   return (
     <label className="block">
@@ -7131,5 +7209,5 @@ function Field({ label, value }) {
 
 
 export default function FalconNewsroomFullInteractiveUI() {
-  return isLandingRoute() ? <LandingPage /> : <AppShell />;
+  return isLandingRoute() ? <V3LandingPage /> : <AppShell />;
 }

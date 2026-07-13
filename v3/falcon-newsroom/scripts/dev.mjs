@@ -9,6 +9,7 @@ const requiredCapabilities = [
   "rbac-v4",
   "stories",
   "pitches",
+  "pitch-owner-submit",
   "shared-workflow-activity",
 ];
 const venvPython = resolve(root, "..", "..", "venv", "Scripts", "python.exe");
