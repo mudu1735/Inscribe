@@ -11,6 +11,7 @@ const requiredCapabilities = [
   "pitches",
   "pitch-owner-submit",
   "shared-workflow-activity",
+  "workspace-settings",
 ];
 const venvPython = resolve(root, "..", "..", "venv", "Scripts", "python.exe");
 const pythonCommand = process.env.FALCON_V3_PYTHON || (existsSync(venvPython) ? venvPython : "python");
