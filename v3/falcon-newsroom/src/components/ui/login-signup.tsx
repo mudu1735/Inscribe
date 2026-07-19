@@ -46,14 +46,24 @@ function sleep(ms: number) {
 }
 
 function safeRedirectTarget(target: string | undefined, fallback = "/dashboard") {
-  const normalized = (target || "").trim();
+  const raw = target || "";
+  const normalized = raw.trim();
+  if (raw !== normalized || /[\\\u0000-\u001f\u007f]/.test(raw)) {
+    return fallback;
+  }
   if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
     return fallback;
   }
-  if (normalized === "/") return "/dashboard";
-  if (normalized === "/records") return "/interviewees";
-  if (normalized === "/login" || normalized === "/signup") return fallback;
-  return normalized;
+  try {
+    const resolved = new URL(normalized, window.location.origin);
+    if (resolved.origin !== window.location.origin) return fallback;
+    if (resolved.pathname === "/") return "/dashboard";
+    if (resolved.pathname === "/records") return "/interviewees";
+    if (resolved.pathname === "/login" || resolved.pathname === "/signup") return fallback;
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 async function parseAuthResponse(response: Response): Promise<AuthResponse> {
@@ -92,6 +102,7 @@ function AuthBackground() {
     type Particle = { x: number; y: number; v: number; o: number };
     let particles: Particle[] = [];
     let raf = 0;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const makeParticle = () => ({
       x: Math.random() * canvas.width,
@@ -106,11 +117,11 @@ function AuthBackground() {
       for (let i = 0; i < count; i += 1) particles.push(makeParticle());
     };
 
-    const draw = () => {
+    const draw = (advance = true) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       particles.forEach((p) => {
-        p.y -= p.v;
-        if (p.y < 0) {
+        if (advance) p.y -= p.v;
+        if (advance && p.y < 0) {
           p.x = Math.random() * canvas.width;
           p.y = canvas.height + Math.random() * 40;
           p.v = Math.random() * 0.25 + 0.05;
@@ -119,17 +130,19 @@ function AuthBackground() {
         ctx.fillStyle = `rgba(250,250,250,${p.o})`;
         ctx.fillRect(p.x, p.y, 0.7, 2.2);
       });
-      raf = requestAnimationFrame(draw);
+      if (advance) raf = requestAnimationFrame(() => draw(true));
     };
 
     const onResize = () => {
       setSize();
       init();
+      if (reduceMotion) draw(false);
     };
 
     window.addEventListener("resize", onResize);
     init();
-    raf = requestAnimationFrame(draw);
+    if (reduceMotion) draw(false);
+    else raf = requestAnimationFrame(() => draw(true));
     return () => {
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(raf);
@@ -162,6 +175,12 @@ function AuthBackground() {
         .card-animate{opacity:1;transform:translateY(0)}
         @media (prefers-reduced-motion:no-preference){
           .card-animate{animation:fadeUp .55s cubic-bezier(.22,.61,.36,1) .12s both}
+        }
+        @media (prefers-reduced-motion:reduce){
+          .hline,.vline{animation:none;opacity:.7}
+          .hline{transform:scaleX(1)}
+          .vline{transform:scaleY(1)}
+          .hline::after,.vline::after{animation:none;opacity:0}
         }
         @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
       `}</style>
@@ -312,7 +331,10 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
       }
 
       showNotice(isSignup ? "Account created. Opening the newsroom..." : "Signed in. Opening the newsroom...", "success");
-      window.location.assign(safeRedirectTarget(data.redirect, isSignup ? "/interviewees" : "/dashboard"));
+      const serverRedirect = safeRedirectTarget(data.redirect, isSignup ? "/interviewees" : "/dashboard");
+      const requestedNext = new URLSearchParams(window.location.search).get("next") || "";
+      const nextRedirect = safeRedirectTarget(requestedNext, "");
+      window.location.assign(nextRedirect || serverRedirect);
     } catch {
       const elapsed = window.performance.now() - startedAt;
       if (elapsed < AUTH_BUFFER_MS) {

@@ -1,13 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
+import { ResponsiveContainer } from "recharts";
 import AnimatedDropdown from "./components/ui/animated-dropdown";
 
 const iconPaths = {
@@ -202,7 +196,6 @@ const navItems = [
   { id: "interviewees", label: "Interviewee Database", icon: "people" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "analytics", label: "Analytics", icon: "analytics" },
-  { id: "admin", label: "Admin", icon: "admin" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
@@ -210,7 +203,7 @@ const navSections = [
   { id: "editorial", label: "Editorial desk", items: ["dashboard", "pitches", "stories"] },
   { id: "records", label: "Databases", items: ["articles", "interviewees"] },
   { id: "planning", label: "Planning", items: ["calendar", "analytics"] },
-  { id: "system", label: "Workspace", items: ["admin", "settings"] },
+  { id: "system", label: "Workspace", items: ["settings"] },
 ];
 
 function navItemForPage(page) {
@@ -449,19 +442,12 @@ const ADMIN_ROLES = [
 const ADMIN_ROLE_OPTIONS = ADMIN_ROLES.map((role) => role.id);
 const ADMIN_ROLE_FILTER_OPTIONS = ["All roles", ...ADMIN_ROLE_OPTIONS];
 
-const sectionData = [
-  { name: "News", value: 32 },
-  { name: "Sports", value: 21 },
-  { name: "Tech", value: 28 },
-  { name: "Culture", value: 12 },
-  { name: "Features", value: 7 },
-];
-
-
 const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Review", "Needs Revision", "Returned", "Ready for Publish", "Published"];
 const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
 const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
+const STORY_AUTHOR_EDITABLE_STATUSES = ["Assigned", "Reporting", "Drafting", "Needs Revision", "Returned"];
+const STORY_EDITOR_EDITABLE_STATUSES = [...STORY_AUTHOR_EDITABLE_STATUSES, "Submitted", "In Review"];
 const STORY_COLLABORATOR_ROLE_OPTIONS = [
   { id: "edit", label: "Co-author", description: "Can edit the story, attach work, comment, invite authors, and submit." },
 ];
@@ -1252,7 +1238,7 @@ function normalizeDisplayActivity(item = {}) {
 
 function normalizeStoryCollaborator(item = {}) {
   const email = asText(item.email).toLowerCase();
-  const role = "edit";
+  const role = asText(item.role).toLowerCase() || "view";
   return {
     ...item,
     id: asText(item.id || item.userId || email),
@@ -1260,17 +1246,22 @@ function normalizeStoryCollaborator(item = {}) {
     email,
     name: asText(item.name) || email || "Collaborator",
     role,
-    status: asText(item.status) || "accepted",
+    status: asText(item.status).toLowerCase() || "invalid",
     invitedAt: formatDisplayDate(item.invitedAt),
   };
 }
 
 function storyCollaboratorRoleLabel(role) {
-  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Co-author";
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Collaborator";
 }
 
 function storyCollaboratorRoleDescription(role) {
-  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || STORY_COLLABORATOR_ROLE_OPTIONS[0].description;
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || "Can view and comment, but cannot edit or submit the story.";
+}
+
+function storyEditingCollaboratorForUser(story, user) {
+  const collaborator = storyCollaboratorForUser(story, user);
+  return collaborator?.status === "accepted" && collaborator?.role === "edit" ? collaborator : null;
 }
 function dueDateValue(record = {}) {
   return firstText(
@@ -1293,6 +1284,15 @@ function storyDeadlineValue(story = {}) {
 function storyDueDateLabel(story = {}) {
   const deadline = storyDeadlineValue(story);
   return formatDisplayDate(deadline) || deadline;
+}
+
+function storyAuthorNames(story = {}) {
+  const acceptedCoauthors = Array.isArray(story.collaborators)
+    ? story.collaborators
+        .filter((collaborator) => collaborator?.status === "accepted" && collaborator?.role === "edit")
+        .map((collaborator) => collaborator.name)
+    : [];
+  return uniqueTextValues([story.writer, ...toList(story.authors), ...acceptedCoauthors]);
 }
 
 function storyWithApprovedDueDate(story, approvedDueDate) {
@@ -1401,14 +1401,14 @@ function storyVisibleToUser(story, user) {
 
 function canSubmitOwnStory(user, story) {
   const role = normalizeAppRole(user?.role);
-  const isAuthor = storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
+  const isAuthor = storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
   if (!["writer", "editor", "admin"].includes(role) || !isAuthor) return false;
   return !["Submitted", "In Review", "Ready for Publish", "Published"].includes(story.status);
 }
 
 function canUnsubmitOwnStory(user, story) {
   const role = normalizeAppRole(user?.role);
-  const isAuthor = storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
+  const isAuthor = storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
   return ["writer", "editor", "admin"].includes(role) && isAuthor && story?.status === "Submitted";
 }
 
@@ -1418,14 +1418,15 @@ function canUpdateOwnStorySubmission(user, story) {
 
 function canManageStoryCollaborators(user, story) {
   const role = normalizeAppRole(user?.role);
-  return ["admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted"));
+  if (["Ready for Publish", "Published"].includes(story?.status)) return false;
+  return ["admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user))));
 }
 
 function canEditStoryAttachment(user, story) {
-  if (canManageEditorialWorkflow(user?.role)) return true;
+  if (canManageEditorialWorkflow(user?.role)) return STORY_EDITOR_EDITABLE_STATUSES.includes(story?.status);
   if (normalizeAppRole(user?.role) !== "writer") return false;
-  if (storyBelongsToUser(story, user)) return true;
-  return storyCollaboratorForUser(story, user)?.status === "accepted";
+  if (!STORY_AUTHOR_EDITABLE_STATUSES.includes(story?.status)) return false;
+  return storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
 }
 
 function canCommentOnStory(user, story) {
@@ -1436,7 +1437,6 @@ function canCommentOnStory(user, story) {
 function navItemsForRole(role) {
   const currentRole = normalizeAppRole(role);
   return navItems.filter((item) => {
-    if (item.id === "admin") return currentRole === "admin";
     if (item.id === "pitches" || item.id === "stories") return currentRole !== "guest";
     return true;
   });
@@ -1632,7 +1632,13 @@ function storyAttachmentCopyUrl(story, selectedAttachment = null) {
 }
 
 function drivePermissionText(status) {
-  return "";
+  const normalizedStatus = asText(status).toLowerCase().replace(/[\s-]+/g, "_");
+  return {
+    shared: "Shared with newsroom editors",
+    partial: "Shared with some editors",
+    failed: "Editor sharing needs attention",
+    not_shared: "Not yet shared with editors",
+  }[normalizedStatus] || "";
 }
 
 function formatFileSize(size) {
@@ -1677,7 +1683,7 @@ function isActiveStory(story) {
 function storySearchText(story) {
   return [
     story.title,
-    story.writer,
+    storyAuthorNames(story).join(" "),
     story.editor,
     story.section,
     story.status,
@@ -2302,8 +2308,9 @@ function runAdminPageTests() {
 runAdminPageTests();
 
 function runPrototypeTests() {
-  console.assert(navItems.length === 9, "Navigation should include the visible primary tabs.");
+  console.assert(navItems.length === 8, "Navigation should include the visible primary tabs.");
   console.assert(navItems.some((item) => item.id === "stories" && item.label === "Stories"), "Navigation should include Stories.");
+  console.assert(!navItems.some((item) => item.id === "admin"), "Administration should live inside Settings.");
   console.assert(initialStories.every((story) => STORY_STATUSES.includes(story.status)), "Every story should use a supported workflow status.");
   console.assert(initialStories.some((story) => story.status === "Submitted"), "Stories page needs submitted examples.");
   console.assert(initialStories.some((story) => story.status === "Needs Revision"), "Stories page needs revision examples.");
@@ -2317,6 +2324,10 @@ function runPrototypeTests() {
   const ownedDraft = { ...initialStories[0], writer: "Ava Patel", writerEmail: "ava@example.com", writerUserId: "writer-1", status: "Drafting" };
   const otherDraft = { ...ownedDraft, writer: "Marcus Lee", writerEmail: "marcus@example.com", writerUserId: "writer-2" };
   const sameNameDifferentEmail = { ...ownedDraft, writer: "Ava Patel", writerEmail: "ava2@example.com", writerUserId: "writer-2" };
+  const commentOnlyCollaboration = normalizeDisplayStory({
+    ...otherDraft,
+    collaborators: [{ userId: "writer-1", email: "ava@example.com", role: "comment", status: "accepted" }],
+  });
   console.assert(storyVisibleToUser(ownedDraft, writerUser), "Writers should see their own stories.");
   console.assert(!storyVisibleToUser(otherDraft, writerUser), "Writers should not see other writers' stories.");
   console.assert(!storyVisibleToUser(sameNameDifferentEmail, writerUser), "Writers should not inherit ownership from matching display names.");
@@ -2324,6 +2335,10 @@ function runPrototypeTests() {
   console.assert(canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should be able to submit stories they author.");
   console.assert(canSubmitOwnStory({ ...writerUser, role: "admin" }, ownedDraft), "Admins should be able to submit stories they author.");
   console.assert(canEditStoryAttachment({ ...writerUser, role: "editor" }, otherDraft), "Editors should be able to add work to any visible story.");
+  console.assert(!canEditStoryAttachment({ ...writerUser, role: "editor" }, { ...otherDraft, status: "Ready for Publish" }), "Approved stories should lock work attachments until they are returned.");
+  console.assert(!canManageStoryCollaborators(writerUser, { ...ownedDraft, status: "Published" }), "Published stories should lock collaborator management.");
+  console.assert(storyVisibleToUser(commentOnlyCollaboration, writerUser), "Accepted collaborators should retain story visibility.");
+  console.assert(!canSubmitOwnStory(writerUser, commentOnlyCollaboration) && !canEditStoryAttachment(writerUser, commentOnlyCollaboration) && !canManageStoryCollaborators(writerUser, commentOnlyCollaboration), "Comment-only collaborators should not receive author controls.");
   console.assert(storyWorkflowAction(ownedDraft)?.nextStatus === "Submitted", "Story workflow action should submit writer drafts.");
   console.assert(canUnsubmitOwnStory(writerUser, { ...ownedDraft, status: "Submitted" }), "Writers should be able to unsubmit their own submitted stories.");
   console.assert(storyWorkflowAction({ ...ownedDraft, status: "Submitted" })?.nextStatus === "Drafting", "Submitted stories should show an unsubmit action.");
@@ -2338,6 +2353,8 @@ function runPrototypeTests() {
     { attachments: [{ id: "drive-1", type: "drive", url: "https://docs.google.com/document/d/1", name: "Draft doc", typeLabel: "Doc" }] },
     { attachments: [{ id: "file-1", type: "file", url: "/api/stories/s1/attachments/file-1", name: "photo.png", contentType: "image/png" }] }
   ).attachments.length === 2, "Story attachment updates should merge new work with existing work.");
+  console.assert(drivePermissionText("shared") === "Shared with newsroom editors" && drivePermissionText("manual") === "", "Drive attachments should explain only actionable editor-sharing states.");
+
   console.assert(initialArticles.some((a) => a.status === "Published"), "Prototype needs published article data.");
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
   console.assert(PITCH_STATUSES.every((status) => initialPitches.some((pitch) => pitch.status === status)), "Pitch board needs examples for each status.");
@@ -2349,7 +2366,6 @@ function runPrototypeTests() {
     { ...initialPitches[1], owner: "Alex Lee", ownerEmail: "alex.two@example.com", ownerUserId: "u2" },
   ]).length === 2, "Pitch board should separate owners with matching names and different accounts.");
   console.assert(pitchNoteCount({ notes: "", comments: [] }) === 0, "Pitch note count should allow zero.");
-  console.assert(sectionData.reduce((sum, s) => sum + s.value, 0) === 100, "Section analytics should total 100 percent.");
 }
 runPrototypeTests();
 
@@ -2372,7 +2388,7 @@ function Button({ children, icon, variant = "primary", className = "", onClick, 
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100",
+        "inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090c] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100 motion-reduce:transform-none motion-reduce:transition-none",
         variant === "primary" && "bg-zinc-100 text-black hover:bg-white",
         variant === "ghost" && "border border-white/[0.08] bg-white/[0.035] text-zinc-300 hover:bg-white/[0.07] hover:text-zinc-50",
         variant === "danger" && "border border-rose-400/15 bg-rose-400/10 text-rose-300 hover:bg-rose-400/15",
@@ -2407,19 +2423,19 @@ function PageShell({ title, description, children, right, titleAction, className
   );
 }
 
-function Input({ value, onChange, placeholder, className = "" }) {
+function Input({ value, onChange, placeholder, label = "", className = "" }) {
   return (
-    <div className={cx("flex h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-500", className)}>
+    <div className={cx("flex h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-500 transition focus-within:border-white/[0.18] focus-within:ring-2 focus-within:ring-white/[0.06]", className)}>
       <Icon name="search" className="h-4 w-4" />
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={label || placeholder} className="w-full bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600" />
     </div>
   );
 }
 
-function Select({ value, onChange, options, className = "" }) {
+function Select({ value, onChange, options, label = "", className = "" }) {
   return (
     <div className={cx("relative", className)}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 pr-9 text-sm text-zinc-200 outline-none hover:bg-white/[0.06]">
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label || "Select an option"} className="h-11 w-full appearance-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 pr-9 text-sm text-zinc-200 outline-none transition hover:bg-white/[0.06] focus-visible:border-white/[0.18] focus-visible:ring-2 focus-visible:ring-white/[0.06]">
         {options.map((option) => (
           <option key={option} className="bg-zinc-950" value={option}>
             {option}
@@ -2434,6 +2450,7 @@ function Select({ value, onChange, options, className = "" }) {
 
 function initialAppPage() {
   const pathPage = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, "");
+  if (pathPage === "admin" || pathPage.startsWith("settings/")) return "settings";
   if (pathPage.startsWith("pitches/")) return "pitches";
   if (pathPage.startsWith("stories/")) return "stories";
   return navItems.some((item) => item.id === pathPage) ? pathPage : "dashboard";
@@ -2495,12 +2512,12 @@ function V3LandingPage() {
             <strong>Falcon Newsroom</strong>
           </a>
           <div className="v3-nav-sections">
-            <a href="#product">Product</a>
-            <a href="#workflow">Workflow</a>
-            <a href="#records">Records</a>
+            <a className="v3-nav-link" href="#product">Product</a>
+            <a className="v3-nav-link" href="#workflow">Workflow</a>
+            <a className="v3-nav-link" href="#records">Records</a>
           </div>
           <div className="v3-nav-actions">
-            <a className="v3-login" href="/login">Log in</a>
+            <a className="v3-login v3-nav-link" href="/login">Log in</a>
             <a className="v3-signup" href="/signup">Sign up</a>
           </div>
         </nav>
@@ -2509,8 +2526,11 @@ function V3LandingPage() {
       <section id="product" className="v3-hero" aria-labelledby="v3-landing-title">
         <div className="v3-content">
           <motion.div className="v3-heading-row v3-heading-row--hero" initial={revealInitial} animate={{ opacity: 1, y: 0 }} transition={revealTransition}>
-            <h1 id="v3-landing-title">The editorial desk your newsroom was missing.</h1>
-            <p>Falcon keeps pitches, drafts, feedback, deadlines, and source records moving together while writers keep working in Google Docs.</p>
+            <h1 id="v3-landing-title" className="v3-hero-title">
+              <span>The most complete</span>
+              <span>journalism workflow tool.</span>
+            </h1>
+            <p>Everything you need in one unified workspace.</p>
           </motion.div>
           <motion.figure className="v3-product-shot" initial={reduceMotion ? false : { opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ ...revealTransition, delay: reduceMotion ? 0 : 0.12 }}>
             <img src="/landing/product-dashboard.png" alt="Falcon Newsroom dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
@@ -2545,7 +2565,7 @@ function V3LandingPage() {
             <span aria-hidden="true">F</span>
             <strong>Falcon Newsroom</strong>
           </a>
-          <small>Â© 2026 Falcon Newsroom</small>
+          <small>&copy; 2026 Falcon Newsroom</small>
         </div>
       </footer>
     </main>
@@ -2568,6 +2588,9 @@ function AppShell() {
   const [workspace, setWorkspace] = useState(null);
   const [csrfToken, setCsrfToken] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [sessionAttempt, setSessionAttempt] = useState(0);
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
@@ -2593,12 +2616,14 @@ function AppShell() {
     let active = true;
 
     async function loadSession() {
+      setSessionLoading(true);
+      setSessionError("");
       try {
         const response = await fetch(`${API_BASE}/api/auth/session`, {
           headers: { Accept: "application/json" },
           credentials: "include",
         });
-        const payload = await response.json();
+        const payload = await response.json().catch(() => ({}));
         if (!active) return;
         if (!response.ok || payload?.ok === false) {
           throw new Error(payload?.error || "Unable to verify your session.");
@@ -2612,7 +2637,11 @@ function AppShell() {
         setCsrfToken(payload.csrfToken || "");
       } catch (error) {
         if (!active) return;
-        setToast(error instanceof Error ? error.message : "Unable to verify your session.");
+        const message = error instanceof Error ? error.message : "Unable to verify your session.";
+        setSessionError(message);
+        setToast(message);
+      } finally {
+        if (active) setSessionLoading(false);
       }
     }
 
@@ -2620,7 +2649,7 @@ function AppShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [sessionAttempt]);
 
   useEffect(() => {
     if (!account || !hasWorkspace) return;
@@ -2685,20 +2714,33 @@ function AppShell() {
     setToast(`Moved story to ${status}.`);
   };
 
-  const updateStoryStatus = async (id, status) => {
+  const updateStoryStatus = async (id, status, options = {}) => {
     const currentStory = stories.find((story) => story.id === id);
     if (status === "Submitted" && canSubmitOwnStory(account, currentStory) && !storyAttachmentItems(currentStory).length) {
       setToast("Attach work before submitting this story.");
-      return;
+      return false;
     }
-    const canReturnStory = canManageEditorialWorkflow(accountRole) && status === "Returned";
-    const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && status === "Ready for Publish";
+    const canStartReview = canManageEditorialWorkflow(accountRole) && currentStory?.status === "Submitted" && status === "In Review";
+    const canReturnStory = canManageEditorialWorkflow(accountRole) && currentStory?.status === "In Review" && status === "Returned";
+    const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && currentStory?.status === "In Review" && status === "Ready for Publish";
+    const publicationUrl = asText(options.publicationUrl);
+    const canPublish =
+      accountRole === "admin" &&
+      currentStory?.status === "Ready for Publish" &&
+      status === "Published" &&
+      isValidHttpUrl(publicationUrl);
     const canUseWriterWorkflow =
       (status === "Submitted" && canSubmitOwnStory(account, currentStory)) ||
       (status === "Drafting" && canUnsubmitOwnStory(account, currentStory));
-    if (!canReturnStory && !canSendToTeacherApproval && !canUseWriterWorkflow) {
-      setToast(canManageEditorialWorkflow(accountRole) ? "Editors can return stories or send them to teacher approval." : "Writers can submit or unsubmit their own stories.");
-      return;
+    if (!canStartReview && !canReturnStory && !canSendToTeacherApproval && !canPublish && !canUseWriterWorkflow) {
+      setToast(
+        status === "Published"
+          ? "Only admins can publish a story from Ready for Publish using a valid http or https URL."
+          : canManageEditorialWorkflow(accountRole)
+            ? "Follow the review sequence before moving this story."
+            : "Writers can submit or unsubmit their own stories."
+      );
+      return false;
     }
     try {
       const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}`, {
@@ -2709,7 +2751,7 @@ function AppShell() {
           ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(canPublish ? { publicationUrl } : {}) }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
@@ -2721,9 +2763,11 @@ function AppShell() {
       }
       const updatedStory = normalizeDisplayStory(payload.story || { id, status, lastEdited: "Updated just now" });
       setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...updatedStory } : story)));
-      setToast(`Updated story to ${status}.`);
+      setToast(status === "Published" ? "Published story and added it to the article archive." : `Updated story to ${status}.`);
+      return true;
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Story status update failed.");
+      return false;
     }
   };
 
@@ -2995,6 +3039,10 @@ function AppShell() {
     if (page === "pitches" && normalizedPath.startsWith("/pitches/")) {
       return "Pitch review";
     }
+    if (page === "settings") {
+      if (normalizedPath === "/admin" || normalizedPath.includes("/administration")) return "Administration";
+      if (normalizedPath.includes("/names")) return "Names database";
+    }
     return "";
   }, [locationPath, page, stories]);
 
@@ -3003,17 +3051,51 @@ function AppShell() {
     pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
     stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
-    articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
+    articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} csrfToken={csrfToken} />,
     interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
     calendar: <CalendarPage stories={stories} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
     analytics: <AnalyticsPage />,
-    admin: <AdminPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} />,
-    settings: <SettingsPage workspace={workspace} />,
+    settings: <SettingsPage workspace={workspace} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} onWorkspaceUpdated={setWorkspace} locationPath={locationPath} />,
   };
 
+  if (!account && sessionLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100" aria-label="Loading Falcon Newsroom">
+        <div className="w-full max-w-sm" role="status">
+          <div className="h-2 w-24 animate-pulse rounded bg-white/[0.12]" />
+          <div className="mt-5 h-7 w-64 animate-pulse rounded bg-white/[0.08]" />
+          <div className="mt-3 h-4 w-full animate-pulse rounded bg-white/[0.05]" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!account && sessionError) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100">
+        <section className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-white/[0.025] p-6" aria-labelledby="session-error-title">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-300/[0.06] text-rose-200">
+            <Icon name="x" className="h-4 w-4" />
+          </div>
+          <h1 id="session-error-title" className="mt-5 text-xl font-semibold text-zinc-50">Could not open your newsroom</h1>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">{sessionError}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">Check that the newsroom server is running, then try again. You can also return to login and start a new session.</p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Retry</Button>
+            <Button variant="ghost" onClick={() => window.location.assign(loginRedirectForCurrentPath())}>Go to login</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (!account) {
-    return <div className="h-screen bg-[#08090c]" aria-label="Loading Falcon Newsroom" />;
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-sm text-zinc-400" role="status">
+        Taking you to login...
+      </div>
+    );
   }
 
   if (!hasWorkspace) {
@@ -3183,8 +3265,12 @@ function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
 }
 
 function AccountMenu({ user, signingOut, onSignOut }) {
+  const reduceMotion = useReducedMotion();
+  const menuId = useId();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const menuItemRef = useRef(null);
   const displayName = accountDisplayName(user);
   const email = asText(user?.email);
   const initials = accountInitials(user);
@@ -3193,32 +3279,43 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   useEffect(() => {
     if (!open) return undefined;
 
+    const frame = window.requestAnimationFrame(() => {
+      if (!signingOut) menuItemRef.current?.focus();
+    });
+
     const handlePointerDown = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setOpen(false);
       }
     };
     const handleKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        window.requestAnimationFrame(() => triggerRef.current?.focus());
+      }
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open]);
+  }, [open, signingOut]);
 
   return (
     <div ref={menuRef} className="relative border-t border-white/[0.08] pt-3">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Open user menu"
+        aria-controls={open ? menuId : undefined}
+        aria-label={open ? "Close user menu" : "Open user menu"}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15"
+        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 motion-reduce:transition-none"
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-xs font-semibold text-zinc-100">
           {initials}
@@ -3231,17 +3328,19 @@ function AccountMenu({ user, signingOut, onSignOut }) {
       <AnimatePresence>
         {open && (
           <motion.div
+            id={menuId}
             role="menu"
             aria-label="User account"
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.98 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
             className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[1000] w-full min-w-64 overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
           >
             {email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
             <div className="h-px bg-white/[0.08]" />
             <button
+              ref={menuItemRef}
               type="button"
               role="menuitem"
               disabled={signingOut}
@@ -3249,7 +3348,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
                 setOpen(false);
                 onSignOut();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/15 disabled:cursor-not-allowed disabled:text-zinc-600"
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:text-zinc-600 motion-reduce:transition-none"
             >
               <Icon name="logout" className="h-4 w-4" />
               {signingOut ? "Signing out" : "Sign out"}
@@ -3286,14 +3385,23 @@ function HeaderBreadcrumb({ page, detailLabel, navigatePage }) {
 }
 
 function Toast({ message, onDismiss }) {
+  const reduceMotion = useReducedMotion();
   if (!message) return null;
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur">
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.18 }}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur"
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm text-zinc-200">{message}</p>
         </div>
-        <button type="button" onClick={onDismiss} className="text-xs text-zinc-600 hover:text-zinc-300">
+        <button type="button" onClick={onDismiss} className="rounded text-xs text-zinc-600 hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
           Dismiss
         </button>
       </div>
@@ -3382,6 +3490,9 @@ function DashboardPage({ currentUser, csrfToken = "", setPage, setToast, onStory
     : "Status decisions, feedback, and invitations that need your attention will appear here.";
   const visibleActivity = showAllActivity ? dashboard.activity : dashboard.activity.slice(0, 6);
   const hasHiddenActivity = dashboard.activity.length > 6;
+  const dashboardErrorMessage = error === "Failed to fetch"
+    ? "Some dashboard data couldn't be loaded."
+    : error;
 
   return (
     <PageShell
@@ -3390,7 +3501,15 @@ function DashboardPage({ currentUser, csrfToken = "", setPage, setToast, onStory
       className="max-w-[1440px]"
     >
       {error ? (
-        <div className="border-y border-red-400/20 bg-red-400/[0.055] px-4 py-3 text-sm text-red-200">{error}</div>
+        <div className="mb-6 flex">
+          <div role="alert" className="inline-flex w-full max-w-xl items-start gap-3 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-3.5 py-2.5 sm:w-auto sm:items-center">
+            <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-rose-300/20 bg-rose-300/[0.08] text-xs font-semibold text-rose-300">!</span>
+            <p className="min-w-0 flex-1 break-words text-sm leading-5 text-rose-100">{dashboardErrorMessage}</p>
+            <button type="button" onClick={() => loadDashboard()} disabled={loading} className="shrink-0 rounded-md px-1.5 py-1 text-xs font-semibold text-rose-200 transition hover:bg-rose-300/[0.08] hover:text-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/30 disabled:cursor-not-allowed disabled:opacity-50">
+              Retry
+            </button>
+          </div>
+        </div>
       ) : null}
 
       <div className="grid min-h-[560px] gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] lg:gap-0">
@@ -3639,12 +3758,79 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     return result;
   };
 
-  const deletePitch = (id) => {
+  const updatePitchDetails = async (id, draft) => {
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    if (!pitchBelongsToUser(targetPitch, currentUser) || targetPitch?.status !== "In Progress") {
+      setToast("Only the pitch owner can edit an in-progress pitch.");
+      return false;
+    }
+    const updates = {
+      title: asText(draft.title),
+      angle: asText(draft.angle),
+      section: asText(draft.section),
+      notes: asText(draft.notes),
+    };
+    if (!updates.title || !updates.angle || !PITCH_SECTIONS.includes(updates.section) || updates.section === "All sections") {
+      setToast("Add a title, angle, and valid section before saving.");
+      return false;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(updates),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not update pitch.");
+      }
+      const updatedPitch = normalizeDisplayPitch(payload.pitch || { ...targetPitch, ...updates, updatedAt: "Just now" });
+      setPitches((previous) => previous.map((pitch) => (pitch.id === id ? { ...pitch, ...updatedPitch } : pitch)));
+      setToast("Updated pitch.");
+      return true;
+    } catch (updateError) {
+      setToast(updateError instanceof Error ? updateError.message : "Could not update pitch.");
+      return false;
+    }
+  };
+
+  const deletePitch = async (id) => {
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    const ownerCanDelete = pitchBelongsToUser(targetPitch, currentUser) && targetPitch?.status === "In Progress";
+    if (!canManagePitches && !ownerCanDelete) {
+      setToast("Only editors, admins, or the owner of an in-progress pitch can delete it.");
+      return false;
+    }
+    const confirmed = window.confirm(`Delete “${targetPitch?.title || "this pitch"}”? This cannot be undone.`);
+    if (!confirmed) return false;
     const nextId = nextIdAfter(id);
-    setPitches((previous) => previous.filter((pitch) => pitch.id !== id));
-    if (nextId) navigateToPitch(nextId);
-    else navigateToBoard();
-    setToast("Deleted pitch.");
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not delete pitch.");
+      }
+      setPitches((previous) => previous.filter((pitch) => pitch.id !== id));
+      if (nextId) navigateToPitch(nextId);
+      else navigateToBoard();
+      setToast("Deleted pitch.");
+      return true;
+    } catch (deleteError) {
+      setToast(deleteError instanceof Error ? deleteError.message : "Could not delete pitch.");
+      return false;
+    }
   };
 
   const selectNextPitch = (currentId) => {
@@ -3738,7 +3924,24 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   const expandAll = () => setExpandedWriters(new Set(writerGroups.map((group) => group.key)));
   const collapseAll = () => setExpandedWriters(new Set());
 
+  if (detailPitchId && loading) {
+    return (
+      <PageShell title="Loading pitch" eyebrow="Pitches" right={<Button variant="ghost" onClick={navigateToBoard}>Back to board</Button>}>
+        <StateMessage icon="edit" title="Loading pitch" body="Pulling the latest pitch and feedback from the newsroom." />
+      </PageShell>
+    );
+  }
+
+  if (detailPitchId && error) {
+    return (
+      <PageShell title="Pitch unavailable" eyebrow="Pitches" right={<Button variant="ghost" onClick={navigateToBoard}>Back to board</Button>}>
+        <StateMessage icon="edit" title="Could not load pitch" body={error} />
+      </PageShell>
+    );
+  }
+
   if (detailPitchId) {
+    const ownsEditablePitch = pitchBelongsToUser(detailPitch, currentUser) && detailPitch?.status === "In Progress";
     return (
       <PitchDetailPage
         pitch={detailPitch}
@@ -3748,6 +3951,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         onMarkInProgress={markInProgress}
         onApprove={(id, approval) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.", approval)}
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
+        onUpdate={updatePitchDetails}
         onDelete={deletePitch}
         onNext={selectNextPitch}
         onAddComment={addComment}
@@ -3755,6 +3959,8 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         onDeleteComment={deleteComment}
         canManagePitches={canManagePitches}
         canSubmitForReview={pitchBelongsToUser(detailPitch, currentUser)}
+        canEditPitch={ownsEditablePitch}
+        canDeletePitch={canManagePitches || ownsEditablePitch}
         csrfToken={csrfToken}
         setToast={setToast}
       />
@@ -3766,20 +3972,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
       title="Pitch Board"
       right={<Button icon="plus" onClick={() => setCreateOpen(true)}>New pitch</Button>}
     >
-      {loading ? (
-        <StateMessage icon="edit" title="Loading pitches" body="Pulling pitch records from MongoDB." />
-      ) : error ? (
-        <StateMessage icon="edit" title="Pitch board unavailable" body={error} />
-      ) : null}
-      <Card className="min-w-0 p-5">
+
+      <div className="min-w-0">
         <div className="mb-5 flex flex-col gap-4">
-          <div>
-            <h2 className="font-medium text-zinc-50">Active editor queue</h2>
-            <p className="mt-1 text-sm text-zinc-500">Pitches stay in progress until their owners submit them for editor review.</p>
-          </div>
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
             <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, section, or feedback" />
-            <Select value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} />
+            <Select value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} label="Filter pitches by section" />
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
@@ -3808,7 +4006,16 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08]" aria-busy={loading}>
+          {loading ? <PitchBoardSkeleton /> : null}
+          {!loading && error && (
+            <StateMessage
+              icon="edit"
+              title="Could not load pitches"
+              body={error}
+              action={<Button variant="ghost" onClick={() => loadPitches()}>Try again</Button>}
+            />
+          )}
           {!loading && !error && writerGroups.map((group) => (
             <PitchWriterRow
               key={group.key}
@@ -3826,7 +4033,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
             </div>
           )}
         </div>
-      </Card>
+      </div>
 
       <AnimatePresence>
         {createOpen && (
@@ -3837,6 +4044,28 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         )}
       </AnimatePresence>
     </PageShell>
+  );
+}
+
+function PitchBoardSkeleton() {
+  return (
+    <div role="status" aria-label="Loading pitches">
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} className="border-b border-white/[0.06] px-4 py-4 last:border-b-0" aria-hidden="true">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="h-4 w-4 shrink-0 animate-pulse rounded bg-white/[0.06]" />
+              <div className="h-4 w-full max-w-48 animate-pulse rounded bg-white/[0.08]" />
+            </div>
+            <div className="hidden shrink-0 gap-2 sm:flex">
+              <div className="h-7 w-20 animate-pulse rounded-lg bg-white/[0.05]" />
+              <div className="h-7 w-24 animate-pulse rounded-lg bg-white/[0.05]" />
+              <div className="h-7 w-28 animate-pulse rounded-lg bg-white/[0.05]" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -3937,10 +4166,13 @@ function PitchDetailPage({
   onMarkInProgress,
   onApprove,
   onHold,
+  onUpdate,
   onDelete,
   onNext,
   canManagePitches = false,
   canSubmitForReview = false,
+  canEditPitch = false,
+  canDeletePitch = false,
   csrfToken = "",
   setToast = () => {},
 }) {
@@ -3950,6 +4182,8 @@ function PitchDetailPage({
   const [openItemMenu, setOpenItemMenu] = useState(null);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   useEffect(() => {
     setFeedbackDraft("");
@@ -3958,6 +4192,8 @@ function PitchDetailPage({
     setOpenItemMenu(null);
     setApprovalOpen(false);
     setApprovalSubmitting(false);
+    setEditOpen(false);
+    setEditSubmitting(false);
   }, [pitch?.id]);
 
   useEffect(() => {
@@ -4042,6 +4278,14 @@ function PitchDetailPage({
     const result = await onApprove(pitch.id, approval);
     if (!result) setApprovalSubmitting(false);
   };
+
+  const savePitchEdits = async (draft) => {
+    if (editSubmitting) return;
+    setEditSubmitting(true);
+    const saved = await onUpdate(pitch.id, draft);
+    setEditSubmitting(false);
+    if (saved) setEditOpen(false);
+  };
   const startEditingFeedback = (feedback) => {
     setEditingFeedbackId(feedback.id);
     setEditingFeedbackText(feedback.text);
@@ -4108,7 +4352,7 @@ function PitchDetailPage({
       className="mx-auto min-h-full max-w-[1640px] px-5 py-8 md:px-8"
     >
       <div className="grid gap-10 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
-        <main className="mx-auto w-full max-w-[940px] space-y-10">
+        <section className="mx-auto w-full max-w-[940px] space-y-10" aria-label="Pitch review details">
           <div className="relative border-b border-white/[0.16] pb-8">
             <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">Pitch review</h1>
           </div>
@@ -4218,7 +4462,7 @@ function PitchDetailPage({
               )}
             </div>
           </section>
-        </main>
+        </section>
 
         <aside className="mx-auto w-full max-w-[940px] space-y-3 2xl:sticky 2xl:top-8 2xl:max-w-none">
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
@@ -4241,6 +4485,14 @@ function PitchDetailPage({
                 <Button className="mt-4 w-full" disabled={pitch.status === "Ready for Review"} onClick={() => onSubmitForReview(pitch.id)}>
                   {pitch.status === "Ready for Review" ? "Submitted for review" : "Submit for review"}
                 </Button>
+                {canEditPitch ? (
+                  <div className="mt-2 grid gap-2">
+                    <Button variant="ghost" onClick={() => setEditOpen(true)} className="w-full">Edit pitch</Button>
+                    {!canManagePitches && canDeletePitch ? (
+                      <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -4267,7 +4519,7 @@ function PitchDetailPage({
               >
                 Next active pitch
               </Button>
-              <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button>
+              {canDeletePitch ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
             </div>
           </div>
           ) : null}
@@ -4282,6 +4534,18 @@ function PitchDetailPage({
         }}
         onApprove={approvePitch}
       />
+      <AnimatePresence>
+        {editOpen && pitch ? (
+          <PitchEditModal
+            pitch={pitch}
+            submitting={editSubmitting}
+            onClose={() => {
+              if (!editSubmitting) setEditOpen(false);
+            }}
+            onSave={savePitchEdits}
+          />
+        ) : null}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -4460,7 +4724,6 @@ function PitchCreateModal({ onClose, onCreate }) {
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-zinc-50">New pitch</h2>
-            <p className="mt-1 text-sm text-zinc-500">Capture the angle before it becomes an assignment.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200">x</button>
         </div>
@@ -4483,6 +4746,118 @@ function PitchCreateModal({ onClose, onCreate }) {
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
             <input
               required
+              value={draft.title}
+              onChange={(event) => updateDraft("title", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+              placeholder="Title"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Description</span>
+            <textarea
+              required
+              rows={4}
+              value={draft.angle}
+              onChange={(event) => updateDraft("angle", event.target.value)}
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+              placeholder="What is the story?"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Additional notes</span>
+            <textarea
+              rows={3}
+              value={draft.notes}
+              onChange={(event) => updateDraft("notes", event.target.value)}
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <button type="submit" className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white">
+            Create pitch
+          </button>
+        </div>
+      </motion.form>
+    </motion.div>
+  );
+}
+
+function PitchEditModal({ pitch, submitting = false, onClose, onSave }) {
+  const [draft, setDraft] = useState({
+    title: pitch?.title || "",
+    angle: pitch?.angle || "",
+    notes: pitch?.notes || "",
+    section: pitch?.section || "News",
+  });
+
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, submitting]);
+
+  const updateDraft = (field, value) => {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-pitch-title"
+    >
+      <motion.form
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/[0.1] bg-[#0b0c10] p-5 shadow-2xl shadow-black"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(draft);
+        }}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 id="edit-pitch-title" className="text-lg font-semibold text-zinc-50">Edit pitch</h2>
+            <p className="mt-1 text-sm text-zinc-500">Revise the reporting plan before submitting it for review.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close pitch editor" className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-45">x</button>
+        </div>
+
+        <div className="grid gap-4">
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
+            <select
+              value={draft.section}
+              onChange={(event) => updateDraft("section", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+            >
+              {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
+                <option key={option} value={option} className="bg-zinc-950">{option}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
+            <input
+              required
+              autoFocus
               value={draft.title}
               onChange={(event) => updateDraft("title", event.target.value)}
               className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
@@ -4509,15 +4884,15 @@ function PitchCreateModal({ onClose, onCreate }) {
               value={draft.notes}
               onChange={(event) => updateDraft("notes", event.target.value)}
               className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
-              placeholder="Interview ideas, possible sources, photo ideas, visuals, or questions to check before assigning."
+              placeholder="Interview ideas, possible sources, visuals, or questions to check."
             />
           </label>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <button type="submit" className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white">
-            Create pitch
+          <Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button>
+          <button type="submit" disabled={submitting} className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white disabled:cursor-wait disabled:opacity-45">
+            {submitting ? "Saving..." : "Save changes"}
           </button>
         </div>
       </motion.form>
@@ -4563,7 +4938,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
           <span>{article.authors.join(", ")}</span>
         </div>
       </button>
-      <Select value={article.status} onChange={(status) => updateArticleStatus(article.id, status)} options={columns} className="mt-3" />
+      <Select value={article.status} onChange={(status) => updateArticleStatus(article.id, status)} options={columns} label={`Change status for ${article.title}`} className="mt-3" />
     </Card>
   );
 }
@@ -4618,6 +4993,22 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
     pushAppPath(storyDetailPath(story.id));
   };
 
+  if (detailStoryId && loading) {
+    return (
+      <PageShell title="Loading story" eyebrow="Stories" titleAction={<Button variant="ghost" onClick={navigateToStories}>Back</Button>}>
+        <StateMessage icon="article" title="Loading story" body="Pulling the latest draft, comments, and workflow state." />
+      </PageShell>
+    );
+  }
+
+  if (detailStoryId && error) {
+    return (
+      <PageShell title="Story unavailable" eyebrow="Stories" titleAction={<Button variant="ghost" onClick={navigateToStories}>Back</Button>}>
+        <StateMessage icon="article" title="Could not load story" body={error} />
+      </PageShell>
+    );
+  }
+
   if (detailStoryId) {
     return (
       <StoryDetailPage
@@ -4647,7 +5038,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
-        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="h-10" />
+        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} label="Filter stories by section" className="h-10" />
       </section>
 
       {loading ? (
@@ -4700,6 +5091,7 @@ function StoryKanbanColumn({ column, stories, total, onOpenStory }) {
 
 function StoryOverviewCard({ story, onOpen }) {
   const dueDateLabel = storyDueDateLabel(story);
+  const authorNames = storyAuthorNames(story);
   return (
     <button
       type="button"
@@ -4709,7 +5101,7 @@ function StoryOverviewCard({ story, onOpen }) {
     >
       <div className="min-w-0">
         <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{story.title}</h3>
-        <p className="mt-1 truncate text-xs text-zinc-500">By {story.writer}</p>
+        <p className="mt-1 break-words text-xs leading-5 text-zinc-500">By {authorNames.length ? authorNames.join(", ") : "Unassigned"}</p>
         <p className={cx("mt-2 text-xs", dueDateLabel ? "text-zinc-500" : "text-zinc-600")}>{dueDateLabel ? `Due ${dueDateLabel}` : "No due date set"}</p>
       </div>
       <div className="flex h-full min-h-16 items-center">
@@ -4729,6 +5121,10 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [openingDrivePicker, setOpeningDrivePicker] = useState(false);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [publicationUrl, setPublicationUrl] = useState("");
+  const [publicationError, setPublicationError] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const attachmentMenuRef = useRef(null);
 
   useEffect(() => {
@@ -4739,6 +5135,10 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     setUploadingAttachment(false);
     setOpeningDrivePicker(false);
     setInviteDialogOpen(false);
+    setPublicationOpen(false);
+    setPublicationUrl(asText(story?.publicationUrl));
+    setPublicationError("");
+    setPublishing(false);
   }, [story?.id]);
 
   useEffect(() => {
@@ -4777,8 +5177,11 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   const hasSubmissionWork = attachments.length > 0;
   const canUseWriterSubmission = canUpdateOwnStorySubmission(currentUser, story) && Boolean(workflowAction);
   const canClickSubmitStory = canUseWriterSubmission && (workflowAction.nextStatus !== "Submitted" || hasSubmissionWork);
-  const canReturnStory = canManageStory && ["Submitted", "In Review", "Ready for Publish"].includes(story.status);
-  const canSendToTeacherApproval = canManageStory && ["Submitted", "In Review"].includes(story.status);
+  const currentRole = normalizeAppRole(currentUser?.role);
+  const canStartReview = canManageStory && story.status === "Submitted";
+  const canReturnStory = canManageStory && story.status === "In Review";
+  const canSendToTeacherApproval = canManageStory && story.status === "In Review";
+  const canPublishStory = currentRole === "admin" && story.status === "Ready for Publish";
   const commentItems = [
     ...storyFeedbackItems(story),
     ...(Array.isArray(story.comments) ? story.comments : []),
@@ -4938,15 +5341,28 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     }
   };
 
+  const publishStory = async () => {
+    const nextUrl = publicationUrl.trim();
+    if (!isValidHttpUrl(nextUrl)) {
+      setPublicationError("Enter the published story’s full http or https URL.");
+      return;
+    }
+    setPublishing(true);
+    setPublicationError("");
+    const saved = await updateStoryStatus(story.id, "Published", { publicationUrl: nextUrl });
+    setPublishing(false);
+    if (saved) setPublicationOpen(false);
+  };
+
   return (
     <div className="mx-auto max-w-[1380px] px-5 py-6 md:px-8">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-        <main className="min-w-0">
+        <article className="min-w-0" aria-labelledby="story-detail-title">
           <header className="border-b border-white/[0.14] pb-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
-                <p className="mt-3 text-sm font-medium text-zinc-300">{Array.isArray(story.authors) && story.authors.length ? story.authors.join(", ") : story.writer} / {story.section}</p>
+                <h1 id="story-detail-title" className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
+                <p className="mt-3 text-sm font-medium text-zinc-300">{storyAuthorNames(story).join(", ") || "Unassigned"} | {story.section}</p>
                 {dueDateLabel ? <p className="mt-2 text-sm text-zinc-500">Due {dueDateLabel}</p> : null}
               </div>
               {canManageCollaborators ? (
@@ -4982,7 +5398,7 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
               )}
             </div>
           </section>
-        </main>
+        </article>
 
         <aside className="min-w-0 space-y-4">
           <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
@@ -5034,11 +5450,41 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
             ) : null}
 
             <div className="mt-4 space-y-2">
+              {canStartReview ? (
+                <Button onClick={() => updateStoryStatus(story.id, "In Review")} className="w-full rounded-full">Start editor review</Button>
+              ) : null}
               {canReturnStory ? (
                 <Button onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
               ) : null}
               {canSendToTeacherApproval ? (
                 <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Ready for Publish")} className="w-full rounded-full">Send to teacher approval</Button>
+              ) : null}
+              {canPublishStory ? (
+                <Button onClick={() => setPublicationOpen((open) => !open)} className="w-full rounded-full">
+                  {publicationOpen ? "Cancel publishing" : "Publish story"}
+                </Button>
+              ) : null}
+              {canPublishStory && publicationOpen ? (
+                <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+                  <label htmlFor={`publication-url-${story.id}`} className="block text-sm font-medium text-zinc-300">Published story URL</label>
+                  <input
+                    id={`publication-url-${story.id}`}
+                    type="url"
+                    value={publicationUrl}
+                    onChange={(event) => {
+                      setPublicationUrl(event.target.value);
+                      if (publicationError) setPublicationError("");
+                    }}
+                    placeholder="https://publication.example/story"
+                    autoComplete="url"
+                    aria-describedby={publicationError ? `publication-error-${story.id}` : undefined}
+                    className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+                  />
+                  {publicationError ? <p id={`publication-error-${story.id}`} className="mt-2 text-sm text-rose-300">{publicationError}</p> : null}
+                  <Button disabled={publishing} onClick={publishStory} className="mt-3 w-full rounded-full">
+                    {publishing ? "Publishing..." : "Confirm publication"}
+                  </Button>
+                </div>
               ) : null}
               {canUseWriterSubmission ? (
                 <Button
@@ -5343,59 +5789,73 @@ function StoryAttachment({ story, attachment: providedAttachment = null, onCopy,
   const showTrailingIcon = !compact || attachment.type === "file";
   const showRemove = compact && Boolean(onRemove);
   const compactGridClass = showTrailingIcon ? "min-h-14 grid-cols-[minmax(0,1fr)_54px]" : "min-h-14 grid-cols-1";
-  const compactPaddingClass = showRemove ? "pr-12" : "";
+
+  const attachmentDetails = (
+    <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
+      <div className="truncate text-sm font-medium text-zinc-100">{attachment.name}</div>
+      <div className="mt-1 text-xs text-zinc-500">{attachment.detail}</div>
+      {attachment.type === "drive" && drivePermissionText(attachment.permissionStatus) ? (
+        <div className={cx(
+          "mt-1 text-xs",
+          attachment.permissionStatus === "failed" ? "text-amber-300" : "text-zinc-600"
+        )}>
+          {drivePermissionText(attachment.permissionStatus)}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const trailingIcon = showTrailingIcon ? (
+    <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
+      <Icon name={attachment.type === "file" ? "upload" : "link"} className="h-5 w-5" />
+    </div>
+  ) : null;
+
+  if (showRemove) {
+    return (
+      <div className="grid min-h-14 min-w-0 grid-cols-[minmax(0,1fr)_44px] overflow-hidden rounded-xl border border-white/[0.16] bg-black/20">
+        <a
+          href={attachment.url}
+          target="_blank"
+          rel="noreferrer"
+          className={cx(
+            "grid min-w-0 text-left transition hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
+            showTrailingIcon ? "grid-cols-[minmax(0,1fr)_54px]" : "grid-cols-1"
+          )}
+        >
+          {attachmentDetails}
+          {trailingIcon}
+        </a>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove attached work"
+          className="grid h-full w-11 place-items-center border-l border-white/[0.16] bg-white/[0.015] text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20"
+        >
+          <Icon name="x" className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className={cx("relative grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
+    <div className={cx("grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
       <a
         href={attachment.url}
         target="_blank"
         rel="noreferrer"
         className={cx(
           "grid overflow-hidden rounded-xl border border-white/[0.16] bg-black/20 text-left transition hover:border-white/[0.26] hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/20",
-          compact ? cx(compactGridClass, compactPaddingClass) : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
+          compact ? compactGridClass : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
         )}
       >
-        <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
-          <div className="truncate text-sm font-medium text-zinc-100">{attachment.name}</div>
-          <div className="mt-1 text-xs text-zinc-500">{attachment.detail}</div>
-          {attachment.type === "drive" && drivePermissionText(attachment.permissionStatus) ? (
-            <div className={cx(
-              "mt-1 text-xs",
-              attachment.permissionStatus === "failed" ? "text-amber-300" : "text-zinc-600"
-            )}>
-              {drivePermissionText(attachment.permissionStatus)}
-            </div>
-          ) : null}
-        </div>
-        {showTrailingIcon ? (
-          <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
-            <Icon name={attachment.type === "file" ? "upload" : "link"} className="h-5 w-5" />
-          </div>
-        ) : null}
+        {attachmentDetails}
+        {trailingIcon}
       </a>
-      {showRemove ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onRemove();
-          }}
-          aria-label="Remove attached work"
-          className={cx(
-            "absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20",
-            showTrailingIcon ? "right-[4.5rem]" : "right-2"
-          )}
-        >
-          <Icon name="x" className="h-4 w-4" />
-        </button>
-      ) : null}
       {compact || !attachment.copyable ? null : <Button variant="ghost" icon="link" onClick={onCopy} className="self-center">Copy link</Button>}
     </div>
   );
 }
-
 function StoryTextBlock({ label, children }) {
   return (
     <div>
@@ -5414,7 +5874,7 @@ function StorySideLine({ label, value }) {
   );
 }
 
-function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setToast = () => {} }) {
+function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setToast = () => {}, csrfToken = "" }) {
   const [articles, setArticles] = useState([]);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [query, setQuery] = useState("");
@@ -5535,7 +5995,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
       <div className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
         <div>
           <div className="mb-4 flex flex-col gap-3 md:flex-row">
-            <Input value={query} onChange={handleSearchChange} placeholder="Search title, author, section, tag, or interviewee" className="flex-1" />
+            <Input value={query} onChange={handleSearchChange} placeholder="Search title, author, section, or tag" className="flex-1" />
             <AnimatedDropdown
               text={section}
               items={sections.map((name) => ({ name, link: "#" }))}
@@ -5577,8 +6037,17 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
                   <tr
                     key={article.id}
                     onClick={() => handleArticleClick(article)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleArticleClick(article);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View article details for ${article.title}`}
                     className={cx(
-                      "cursor-pointer border-t border-white/[0.06] hover:bg-white/[0.04]",
+                      "cursor-pointer border-t border-white/[0.06] hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                       selectedArticle?.id === article.id && "bg-white/[0.055]"
                     )}
                   >
@@ -5603,7 +6072,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
               <StateMessage
                 icon={hasActiveArticleFilter ? "search" : "article"}
                 title={hasActiveArticleFilter ? "No matching articles" : "No articles found"}
-                body={hasActiveArticleFilter ? "Try a different title, author, section, tag, or interviewee search." : "No article records were returned by the database yet."}
+                body={hasActiveArticleFilter ? "Try a different title, author, section, or tag search." : "No article records were returned by the database yet."}
               />
             )}
           </div>
@@ -5661,6 +6130,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
           <ArticleExtractorOverlay
             onClose={() => setExtractorOpen(false)}
             onSaved={handleExtractorSaved}
+            csrfToken={csrfToken}
           />
         )}
       </AnimatePresence>
@@ -6080,8 +6550,17 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
                   <tr
                     key={record.id}
                     onClick={() => handleRecordSelect(record)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleRecordSelect(record);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View source record for ${record.name}`}
                     className={cx(
-                      "cursor-pointer border-t border-white/[0.06] transition hover:bg-white/[0.04]",
+                      "cursor-pointer border-t border-white/[0.06] transition hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                       selectedRecord?.id === record.id && "bg-white/[0.055]"
                     )}
                   >
@@ -6351,9 +6830,9 @@ function Progress({ label, value }) {
 }
 
 function makeExtractorRow(person = {}, articleUrl = "") {
-  const fullName = firstText(person.name, person.fullName, person.full_name);
-  let firstName = firstText(person.firstName, person.first_name);
-  let lastName = firstText(person.lastName, person.last_name);
+  const fullName = extractorSafeText(firstText(person.name, person.fullName, person.full_name), 200);
+  let firstName = extractorSafeText(firstText(person.firstName, person.first_name), 100);
+  let lastName = extractorSafeText(firstText(person.lastName, person.last_name), 100);
 
   if ((!firstName || !lastName) && fullName) {
     const parts = fullName.split(/\s+/).filter(Boolean);
@@ -6365,39 +6844,184 @@ function makeExtractorRow(person = {}, articleUrl = "") {
     id: firstText(person.id, person._id) || `extractor-row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     firstName,
     lastName,
-    grade: firstText(person.grade),
-    house: firstText(person.house),
+    grade: extractorSafeText(firstText(person.grade), 40),
+    house: extractorSafeText(firstText(person.house), 80),
     url: articleUrl,
-    dateAdded: firstText(person.dateAdded) || new Date().toISOString().slice(0, 10),
+    dateAdded: extractorSafeText(firstText(person.dateAdded), 40) || new Date().toISOString().slice(0, 10),
   };
 }
 
-function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
+function extractorSafeText(value, maxLength = 500) {
+  return asText(value).replace(/\s+/g, " ").slice(0, maxLength);
+}
+
+function extractorSafeList(value, maxItems = 12, maxLength = 120) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? [value]
+      : toList(value);
+  return uniqueTextValues(rawValues.map((item) => (
+    item && typeof item === "object"
+      ? extractorSafeText(firstText(item.name, item.fullName, item.full_name), maxLength)
+      : extractorSafeText(item, maxLength)
+  ))).slice(0, maxItems);
+}
+
+function absoluteHttpUrl(value) {
+  try {
+    const parsed = new URL(asText(value));
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeExtractorWarnings(...sources) {
+  const warnings = [];
+  sources.forEach((source) => {
+    const items = Array.isArray(source) ? source : source ? [source] : [];
+    items.forEach((item) => {
+      const value = item && typeof item === "object"
+        ? firstText(item.message, item.warning, item.detail, item.code)
+        : item;
+      const text = extractorSafeText(value, 500);
+      if (text) warnings.push(text);
+    });
+  });
+  return uniqueTextValues(warnings).slice(0, 10);
+}
+
+function normalizeExtractorMetadata(payload, fallbackUrl) {
+  const candidate = payload?.articleMetadata || payload?.article_metadata || payload?.article;
+  const metadata = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+  const canonicalUrl = absoluteHttpUrl(firstText(
+    metadata.canonicalUrl,
+    metadata.canonical_url,
+    metadata.url,
+    payload?.canonicalUrl,
+    payload?.canonical_url,
+    payload?.articleUrl,
+    payload?.article_url,
+  )) || fallbackUrl;
+  return {
+    url: canonicalUrl,
+    title: extractorSafeText(firstText(metadata.title, payload?.articleTitle, payload?.title), 300),
+    authors: extractorSafeList(metadata.authors ?? metadata.author ?? payload?.authors ?? payload?.author, 12, 120),
+    publishedAt: extractorSafeText(firstText(
+      metadata.datePublished,
+      metadata.date_published,
+      metadata.publishedAt,
+      metadata.published_at,
+      metadata.date,
+      payload?.datePublished,
+      payload?.publishedAt,
+    ), 100),
+    tags: extractorSafeList(metadata.tags ?? metadata.categories ?? payload?.tags ?? payload?.categories, 16, 80),
+  };
+}
+
+function normalizeIntervieweeExtraction(payload) {
+  const candidate = payload?.intervieweeExtraction || payload?.interviewee_extraction;
+  const extraction = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+  const people = [extraction.people, extraction.interviewees, payload?.people, payload?.interviewees]
+    .find((value) => Array.isArray(value)) || [];
+  return {
+    people: people.filter((person) => person && typeof person === "object"),
+    mode: extractorSafeText(firstText(extraction.mode, extraction.method, payload?.extractionMode), 80),
+    message: extractorSafeText(firstText(extraction.message, extraction.note, extraction.warning), 500),
+    warnings: normalizeExtractorWarnings(extraction.warnings, extraction.warning),
+  };
+}
+
+function ArticleExtractorOverlay({ onClose, onSaved = async () => {}, csrfToken = "" }) {
   const [url, setUrl] = useState("");
   const [articleUrl, setArticleUrl] = useState("");
+  const [extractionToken, setExtractionToken] = useState("");
+  const [articleMetadata, setArticleMetadata] = useState(null);
+  const [warnings, setWarnings] = useState([]);
+  const [intervieweeExtraction, setIntervieweeExtraction] = useState(null);
   const [rows, setRows] = useState([]);
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const reduceMotion = useReducedMotion();
+  const dialogRef = useRef(null);
+  const urlInputRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const canCloseRef = useRef(true);
+  const returnFocusRef = useRef(typeof document !== "undefined" ? document.activeElement : null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const urlInputId = useId();
+  const errorId = useId();
 
   const canClose = !extracting && !saving;
-  const hasReviewRows = Boolean(articleUrl);
+  const hasReviewRows = Boolean(articleUrl && extractionToken);
+  const hasValidNamedRows = rows.length > 0 && rows.every((row) => asText(row.firstName) && asText(row.lastName));
+  const canSave = Boolean(extractionToken && articleUrl && hasValidNamedRows) && !extracting && !saving;
 
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape" && canClose) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    onCloseRef.current = onClose;
+    canCloseRef.current = canClose;
   }, [canClose, onClose]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => urlInputRef.current?.focus());
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && canCloseRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...(dialogRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [])].filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      returnFocusRef.current?.focus?.();
+    };
+  }, []);
+
+  const clearExtractionResult = () => {
+    setArticleUrl("");
+    setExtractionToken("");
+    setArticleMetadata(null);
+    setWarnings([]);
+    setIntervieweeExtraction(null);
+    setRows([]);
+  };
+
   const requestClose = () => {
-    if (canClose) onClose();
+    if (!canClose) return;
+    clearExtractionResult();
+    setUrl("");
+    setError("");
+    onClose();
   };
 
   const validateUrl = () => {
     const nextUrl = url.trim();
     if (!nextUrl) return "Enter an article URL.";
+    if (!absoluteHttpUrl(nextUrl)) return "Enter a complete article URL beginning with http:// or https://.";
     return "";
   };
 
@@ -6408,16 +7032,18 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
       return;
     }
 
+    clearExtractionResult();
     setExtracting(true);
     setError("");
 
     try {
-      const nextUrl = url.trim();
+      const nextUrl = absoluteHttpUrl(url);
       const response = await fetch(`${API_BASE}/api/extract`, {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
         body: JSON.stringify({ url: nextUrl }),
@@ -6433,12 +7059,35 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         throw new Error(payload.error || `Extraction failed (${response.status})`);
       }
 
-      const resolvedArticleUrl = firstText(payload.article_url, payload.articleUrl, nextUrl);
-      const nextRows = Array.isArray(payload.people)
-        ? payload.people.map((person) => makeExtractorRow(person, resolvedArticleUrl))
-        : [];
+      const rawToken = payload.extractionToken ?? payload.extraction_token;
+      const token = typeof rawToken === "string" ? rawToken.trim().slice(0, 8192) : "";
+      if (!token) {
+        throw new Error("Extraction completed without a save token. Run the extraction again.");
+      }
+
+      const metadata = normalizeExtractorMetadata(payload, nextUrl);
+      const extraction = normalizeIntervieweeExtraction(payload);
+      const resolvedArticleUrl = metadata.url || nextUrl;
+      const extractedRows = extraction.people.map((person) => makeExtractorRow(person, resolvedArticleUrl));
+      const manualMode = extractedRows.length === 0;
+      const nextRows = manualMode ? [makeExtractorRow({}, resolvedArticleUrl)] : extractedRows;
 
       setArticleUrl(resolvedArticleUrl);
+      setExtractionToken(token);
+      setArticleMetadata(metadata);
+      setWarnings(normalizeExtractorWarnings(
+        payload.warnings,
+        payload.warning,
+        payload.articleMetadata?.warnings,
+        payload.article_metadata?.warnings,
+        extraction.warnings,
+      ));
+      setIntervieweeExtraction({
+        mode: extraction.mode,
+        message: extraction.message,
+        foundCount: extractedRows.length,
+        manualMode,
+      });
       setRows(nextRows);
     } catch (err) {
       setError(err.message || "Extraction failed.");
@@ -6452,9 +7101,8 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   };
 
   const addRow = () => {
-    const rowArticleUrl = articleUrl || url.trim();
-    setRows((currentRows) => [...currentRows, makeExtractorRow({}, rowArticleUrl)]);
-    if (!articleUrl && rowArticleUrl) setArticleUrl(rowArticleUrl);
+    if (!articleUrl || !extractionToken) return;
+    setRows((currentRows) => [...currentRows, makeExtractorRow({}, articleUrl)]);
   };
 
   const deleteRow = (id) => {
@@ -6462,7 +7110,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   };
 
   const validateRows = () => {
-    if (!articleUrl) return "Run extraction or add a row before saving.";
+    if (!extractionToken || !articleUrl) return "Run extraction before saving.";
     if (!rows.length) return "Add at least one row before saving.";
     for (const row of rows) {
       if (!row.firstName.trim() || !row.lastName.trim()) {
@@ -6488,9 +7136,11 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
         body: JSON.stringify({
+          extractionToken,
           articleUrl,
           addedBy: EXTRACTOR_ADDED_BY,
           people: rows.map((row) => ({
@@ -6513,7 +7163,10 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         throw new Error(payload.error || `Save failed (${response.status})`);
       }
 
-      await onSaved(payload.message ? `Saved. ${payload.message}` : "Saved interviewees.");
+      const saveMessage = extractorSafeText(payload.message, 300);
+      await onSaved(saveMessage ? `Saved. ${saveMessage}` : "Saved interviewees.");
+      clearExtractionResult();
+      setUrl("");
       onClose();
     } catch (err) {
       setError(err.message || "Save failed.");
@@ -6525,24 +7178,32 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   return (
     <motion.div
       className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
-      initial={{ opacity: 0 }}
+      initial={reduceMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestClose();
       }}
     >
       <motion.div
         className="mx-auto flex min-h-full w-full max-w-6xl items-center py-6"
-        initial={{ opacity: 0, scale: 0.97, y: 18 }}
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.97, y: 18 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.97, y: 18 }}
-        transition={{ duration: 0.2 }}
+        exit={reduceMotion ? undefined : { opacity: 0, scale: 0.97, y: 18 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.2 }}
       >
-        <div className="w-full overflow-hidden rounded-3xl border border-white/[0.22] bg-[#0b0c10] shadow-2xl shadow-black ring-1 ring-white/[0.06]">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={descriptionId}
+          aria-busy={extracting || saving}
+          className="w-full overflow-hidden rounded-3xl border border-white/[0.22] bg-[#0b0c10] shadow-2xl shadow-black ring-1 ring-white/[0.06]"
+        >
           <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] px-5 py-4">
             <div>
-              <h2 className="text-xl font-semibold tracking-tight text-zinc-50">AI article extractor</h2>
+              <h2 id={titleId} className="text-xl font-semibold tracking-tight text-zinc-50">AI article extractor</h2>
             </div>
             <button
               type="button"
@@ -6558,38 +7219,95 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
           <div className="px-5 py-5">
             <div className="mx-auto max-w-3xl py-4 text-center">
               <h3 className="text-2xl font-semibold tracking-tight text-zinc-50">Paste a published article URL</h3>
-              <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Find interviewees, review the fields, then save them to the live article database.</p>
+              <p id={descriptionId} className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Find interviewees, review the fields, then save them to the live article database.</p>
               <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-white/[0.18] bg-black/25 p-2 transition focus-within:border-white/[0.32] md:flex-row">
+                <label htmlFor={urlInputId} className="sr-only">Published article URL</label>
                 <input
+                  ref={urlInputRef}
+                  id={urlInputId}
+                  type="url"
+                  inputMode="url"
+                  autoComplete="url"
+                  required
                   value={url}
                   onChange={(event) => {
                     setUrl(event.target.value);
+                    clearExtractionResult();
                     if (error) setError("");
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") runExtract();
+                    if (event.key === "Enter" && !extracting && !saving) runExtract();
                   }}
+                  disabled={extracting || saving}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : descriptionId}
                   className="min-w-0 flex-1 rounded-xl bg-transparent px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
-                  placeholder="Paste an article URL..."
+                  placeholder="https://example.com/article"
                 />
                 <Button onClick={runExtract} disabled={extracting || saving}>
                   {extracting ? "Extracting..." : "Extract"}
                 </Button>
               </div>
-              {error && <p className="mt-3 text-sm font-medium text-rose-300">{error}</p>}
+              {error && <p id={errorId} role="alert" className="mt-3 text-sm font-medium text-rose-300">{error}</p>}
             </div>
 
             {hasReviewRows && (
               <div className="mt-5">
-                <div className="mb-5">
+                <div className="mb-5 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-600">Article metadata</p>
+                      <h3 className="mt-2 text-lg font-semibold text-zinc-50">{articleMetadata?.title || "Title unavailable"}</h3>
+                      <p className="mt-2 break-all text-sm text-zinc-500">{articleUrl}</p>
+                    </div>
+                    <dl className="grid shrink-0 gap-3 text-sm sm:grid-cols-2 lg:w-[28rem]">
+                      <div>
+                        <dt className="text-xs text-zinc-600">Authors</dt>
+                        <dd className="mt-1 text-zinc-300">{articleMetadata?.authors?.length ? articleMetadata.authors.join(", ") : "Unavailable"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-zinc-600">Published</dt>
+                        <dd className="mt-1 text-zinc-300">{articleMetadata?.publishedAt || "Unavailable"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  {articleMetadata?.tags?.length ? (
+                    <div className="mt-4 flex flex-wrap gap-2" aria-label="Article tags">
+                      {articleMetadata.tags.map((tag) => <span key={tag} className="rounded-full border border-white/[0.08] bg-black/20 px-2.5 py-1 text-xs text-zinc-400">{tag}</span>)}
+                    </div>
+                  ) : null}
+                  {warnings.length ? (
+                    <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-left" role="status">
+                      <p className="text-sm font-medium text-amber-200">Review notes</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-5 text-amber-100/75">
+                        {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {intervieweeExtraction?.manualMode ? (
+                    <p className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm leading-6 text-zinc-400" role="status">
+                      No interviewees were detected. A blank source row is ready for manual entry.
+                      {intervieweeExtraction.message ? ` ${intervieweeExtraction.message}` : ""}
+                    </p>
+                  ) : intervieweeExtraction?.message ? (
+                    <p className="mt-4 text-sm leading-6 text-zinc-500" role="status">{intervieweeExtraction.message}</p>
+                  ) : null}
+                </div>
+
+                <div className="mb-3">
                   <div>
                     <h3 className="font-medium text-zinc-50">Review interviewees</h3>
-                    <p className="mt-1 break-all text-sm text-zinc-500">{articleUrl}</p>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {intervieweeExtraction?.manualMode
+                        ? "Add the source name before saving."
+                        : `${intervieweeExtraction?.foundCount || rows.length} source${(intervieweeExtraction?.foundCount || rows.length) === 1 ? "" : "s"} found. Check each name before saving.`}
+                    </p>
                   </div>
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-white/[0.08]">
                   <table className="w-full min-w-[680px] text-left text-sm">
+                    <caption className="sr-only">Interviewees to save for this article</caption>
                     <thead className="bg-white/[0.035] text-xs uppercase tracking-[0.14em] text-zinc-600">
                       <tr>
                         <th className="px-4 py-3">First name</th>
@@ -6600,12 +7318,13 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row) => (
+                      {rows.map((row, rowIndex) => (
                         <tr key={row.id} className="border-t border-white/[0.06]">
                           <td className="px-4 py-4">
                             <input
                               value={row.firstName}
                               onChange={(event) => updateRow(row.id, "firstName", event.target.value)}
+                              aria-label={`First name for source row ${rowIndex + 1}`}
                               className="w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                               placeholder="First"
                             />
@@ -6614,6 +7333,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <input
                               value={row.lastName}
                               onChange={(event) => updateRow(row.id, "lastName", event.target.value)}
+                              aria-label={`Last name for source row ${rowIndex + 1}`}
                               className="w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                               placeholder="Last"
                             />
@@ -6622,6 +7342,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <select
                               value={row.grade}
                               onChange={(event) => updateRow(row.id, "grade", event.target.value)}
+                              aria-label={`Grade for source row ${rowIndex + 1}`}
                               className="h-10 w-full rounded-xl border border-white/[0.08] bg-zinc-950 px-3 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                             >
                               {optionsWithCurrent(EXTRACTOR_GRADE_OPTIONS, row.grade).map((option) => (
@@ -6633,6 +7354,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <select
                               value={row.house}
                               onChange={(event) => updateRow(row.id, "house", event.target.value)}
+                              aria-label={`House for source row ${rowIndex + 1}`}
                               className="h-10 w-full rounded-xl border border-white/[0.08] bg-zinc-950 px-3 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                             >
                               {optionsWithCurrent(EXTRACTOR_HOUSE_OPTIONS, row.house).map((option) => (
@@ -6645,8 +7367,8 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                               type="button"
                               onClick={() => deleteRow(row.id)}
                               className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-400/15 bg-rose-400/10 text-rose-300 transition hover:bg-rose-400/15"
-                              aria-label="Delete row"
-                              title="Delete row"
+                              aria-label={`Delete source row ${rowIndex + 1}`}
+                              title={`Delete source row ${rowIndex + 1}`}
                             >
                               <Icon name="trash" className="h-4 w-4" />
                             </button>
@@ -6671,7 +7393,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
 
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="ghost" onClick={requestClose} disabled={!canClose}>Cancel</Button>
-                  <Button icon="task" onClick={saveRows} disabled={saving || extracting}>
+                  <Button icon="task" onClick={saveRows} disabled={!canSave} title={!extractionToken ? "Run extraction before saving" : !hasValidNamedRows ? "Add first and last names for every source" : undefined}>
                     {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
@@ -6705,7 +7427,7 @@ function TasksPage({ tasks, updateTaskStatus }) {
                   <h3 className="text-sm font-medium leading-5">{task.title}</h3>
                   <p className="mt-2 text-xs text-zinc-500">{task.article}</p>
                   <p className="mt-3 text-xs text-zinc-600">Owner: {task.owner}</p>
-                  <Select value={task.status} onChange={(next) => updateTaskStatus(task.id, next)} options={statuses} className="mt-3" />
+                  <Select value={task.status} onChange={(next) => updateTaskStatus(task.id, next)} options={statuses} label={`Change status for ${task.title}`} className="mt-3" />
                 </div>
               ))}
             </div>
@@ -6737,6 +7459,7 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
   const calendarEvents = useMemo(() => buildCalendarEvents(stories), [stories]);
   const firstEventDate = calendarEvents[0]?.date;
   const [hasNavigatedMonth, setHasNavigatedMonth] = useState(false);
+  const [expandedDays, setExpandedDays] = useState(() => new Set());
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const base = firstEventDate || new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
@@ -6749,7 +7472,17 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
 
   const navigateCalendarMonth = (nextMonth) => {
     setHasNavigatedMonth(true);
+    setExpandedDays(new Set());
     setVisibleMonth(nextMonth);
+  };
+
+  const toggleExpandedDay = (dayKey) => {
+    setExpandedDays((current) => {
+      const next = new Set(current);
+      if (next.has(dayKey)) next.delete(dayKey);
+      else next.add(dayKey);
+      return next;
+    });
   };
 
   const cells = useMemo(() => buildCalendarCells(visibleMonth), [visibleMonth]);
@@ -6762,9 +7495,15 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     });
     return grouped;
   }, [calendarEvents]);
+  const visibleMonthEventCount = useMemo(
+    () => calendarEvents.filter((event) => (
+      event.date.getFullYear() === visibleMonth.getFullYear() && event.date.getMonth() === visibleMonth.getMonth()
+    )).length,
+    [calendarEvents, visibleMonth]
+  );
 
   return (
-    <PageShell title="Publishing calendar">
+    <PageShell title="Publishing calendar" description="Story deadlines from your current newsroom view.">
       <section className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-white/[0.12] pb-4 lg:flex-row lg:items-end lg:justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-zinc-50">{monthYearLabel(visibleMonth)}</h2>
@@ -6774,6 +7513,22 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
             <Button variant="ghost" onClick={() => navigateCalendarMonth(addMonths(visibleMonth, 1))}>Next</Button>
           </div>
         </div>
+
+        {visibleMonthEventCount === 0 ? (
+          <div className="flex items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3" role="status">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-400">
+              <Icon name="calendar" className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-zinc-200">No deadlines in {monthYearLabel(visibleMonth)}</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                {calendarEvents.length
+                  ? "Move between months to review scheduled work, or add a due date from a story."
+                  : "Add a due date to a story and it will appear here automatically."}
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <div className="overflow-x-auto">
           <div className="min-w-[860px]">
@@ -6785,6 +7540,9 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
             <div className="grid grid-cols-7">
               {cells.map((cell, index) => {
                 const items = eventsByDay.get(cell.key) || [];
+                const expanded = expandedDays.has(cell.key);
+                const visibleItems = expanded ? items : items.slice(0, 4);
+                const eventListId = `calendar-events-${cell.key}`;
                 return (
                   <div
                     key={cell.key}
@@ -6797,19 +7555,30 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
                     <div className="mb-2 flex items-center justify-between">
                       <span className={cx("flex h-7 w-7 items-center justify-center rounded-full text-xs", cell.isToday ? "bg-zinc-100 text-black" : cell.inMonth ? "text-zinc-300" : "text-zinc-700")}>{cell.day}</span>
                     </div>
-                    <div className="space-y-1.5">
-                      {items.slice(0, 4).map((item) => (
+                    <div id={eventListId} className="space-y-1.5">
+                      {visibleItems.map((item) => (
                         <button
                           key={item.id}
                           type="button"
                           onClick={() => onOpenStory(item.story)}
                           title={item.title}
-                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus:ring-2 focus:ring-white/15"
+                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
                         >
                           {item.title}
                         </button>
                       ))}
-                      {items.length > 4 ? <p className="px-1 text-[10px] text-zinc-500">+{items.length - 4} more</p> : null}
+                      {items.length > 4 ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandedDay(cell.key)}
+                          aria-expanded={expanded}
+                          aria-controls={eventListId}
+                          aria-label={expanded ? `Show fewer deadlines for ${monthDayYear(cell.date)}` : `Show ${items.length - 4} more deadlines for ${monthDayYear(cell.date)}`}
+                          className="rounded px-1 py-0.5 text-[10px] font-medium text-zinc-500 transition hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+                        >
+                          {expanded ? "Show fewer" : `+${items.length - 4} more`}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -6821,16 +7590,16 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     </PageShell>
   );
 }
+
 function AnalyticsPage() {
   return (
-    <PageShell title="Analytics" className="flex min-h-[calc(100vh-5rem)] max-w-[1640px] flex-col">
-      <div className="flex flex-1 items-center justify-center text-center">
-        <h2 className="text-lg font-semibold text-zinc-100">Analytics are under construction</h2>
-      </div>
+    <PageShell title="Analytics">
+      <p className="pt-2 text-sm text-zinc-500">Coming soon.</p>
     </PageShell>
   );
 }
-function AdminPage({ setToast, csrfToken = "", currentUser }) {
+
+function AdministrationSettings({ setToast, csrfToken = "", currentUser = FALLBACK_ACCOUNT }) {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -6900,24 +7669,46 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
     }
   };
 
+  const removeUserMembership = async (userId) => {
+    const user = staff.find((item) => item.id === userId);
+    if (!user || accountsReferToSameUser(user, currentUser)) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/membership`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Membership removal failed.");
+      setStaff((previous) => previous.filter((item) => item.id !== userId));
+      setToast(`${user.name} was removed from this workspace.`);
+    } catch (removeError) {
+      setToast(removeError instanceof Error ? removeError.message : "Membership removal failed.");
+    }
+  };
+
   const toggleRole = (roleId) => {
     setCollapsedRoles((previous) => ({ ...previous, [roleId]: !previous[roleId] }));
   };
 
   return (
-    <PageShell
-      title="Admin"
-      description="Manage staff access and roles for the newsroom."
-      className="max-w-7xl"
-      right={<Button icon="mail" onClick={() => setToast("Invite staff is ready for backend wiring.")}>Invite staff</Button>}
-    >
+    <div>
+      <p className="mb-5 text-sm leading-6 text-zinc-500">Manage newsroom access and assign workspace roles.</p>
       <section className="space-y-5">
-        <Input value={search} onChange={setSearch} placeholder="Search staff" className="h-11 max-w-xl" />
+        <Input value={search} onChange={setSearch} placeholder="Search staff" label="Search staff by name" className="h-11 w-full" />
 
         {loading ? (
-          <AdminSurfaceMessage icon="admin" title="Loading users" body="Pulling users and roles from MongoDB." />
+          <AdminSettingsSkeleton />
         ) : error ? (
-          <AdminSurfaceMessage icon="admin" title="Admin users unavailable" body={error} />
+          <AdminSurfaceMessage
+            icon="admin"
+            title="Could not load staff"
+            body={error}
+            action={<Button variant="ghost" onClick={() => loadStaff()}>Try again</Button>}
+          />
         ) : visibleCount === 0 ? (
           <AdminSurfaceMessage icon="search" title="No matching staff" body="Try a different staff name." />
         ) : (
@@ -6929,34 +7720,235 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
                 collapsed={Boolean(collapsedRoles[group.id])}
                 onToggle={() => toggleRole(group.id)}
                 onRoleChange={updateUserRole}
+                onRemove={removeUserMembership}
+                currentUser={currentUser}
               />
             ))}
           </div>
         )}
       </section>
-    </PageShell>
-  );
-}
-
-function AdminSurfaceMessage({ icon, title, body }) {
-  return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025]">
-      <StateMessage icon={icon} title={title} body={body} />
     </div>
   );
 }
 
-function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
+function InviteStaffModal({ workspace, setToast, onRotate, onClose }) {
+  const reduceMotion = useReducedMotion();
+  const closeButtonRef = useRef(null);
+  const returnFocusRef = useRef(document.activeElement);
+  const onCloseRef = useRef(onClose);
+  const [copyError, setCopyError] = useState("");
+  const [copied, setCopied] = useState("");
+  const [rotationPending, setRotationPending] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const workspaceName = asText(workspace?.name) || "your newsroom";
+  const joinCode = asText(workspace?.joinCode);
+  const signupUrl = `${window.location.origin}/signup`;
+  const inviteMessage = joinCode
+    ? `Join ${workspaceName} on Falcon Newsroom. Sign up at ${signupUrl}, then enter workspace code ${joinCode}.`
+    : "The workspace join code is currently unavailable. Close this dialog and reload Administration before inviting staff.";
+  const mailtoHref = joinCode
+    ? `mailto:?subject=${encodeURIComponent(`Join ${workspaceName} on Falcon Newsroom`)}&body=${encodeURIComponent(inviteMessage)}`
+    : "";
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = closeButtonRef.current?.closest('[role="dialog"]');
+      const focusable = [...(dialog?.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+        .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      returnFocusRef.current?.focus?.();
+    };
+  }, []);
+
+  const copyText = async (value, copiedLabel, toastMessage) => {
+    if (!value) return;
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(copiedLabel);
+      setToast(toastMessage);
+      window.setTimeout(() => setCopied(""), 1800);
+    } catch {
+      setCopyError("Copy failed. Select the text in this dialog and copy it manually.");
+    }
+  };
+
+  const rotateCode = async () => {
+    if (rotating) return;
+    if (!rotationPending) {
+      setRotationPending(true);
+      window.setTimeout(() => setRotationPending(false), 6000);
+      return;
+    }
+    setRotating(true);
+    setCopyError("");
+    try {
+      await onRotate();
+      setRotationPending(false);
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : "Join code rotation failed.");
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  return createPortal(
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={reduceMotion ? undefined : { opacity: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.16 }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-staff-title"
+      aria-describedby="invite-staff-description"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <motion.section
+        initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={reduceMotion ? undefined : { opacity: 0, y: 8, scale: 0.98 }}
+        transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-xl rounded-2xl border border-white/[0.12] bg-[#0b0c10] p-5 shadow-2xl shadow-black/60 sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-5">
+          <div>
+            <h2 id="invite-staff-title" className="text-xl font-semibold text-zinc-50">Invite staff</h2>
+            <p id="invite-staff-description" className="mt-2 max-w-md text-sm leading-6 text-zinc-500">
+              Share the code or send a ready-to-use email. New members join as guests until an admin assigns a role.
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close invite staff dialog"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+          >
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-white/[0.1] bg-black/25 p-4">
+          <p className="text-xs font-medium text-zinc-500">Workspace join code</p>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <code className="select-all break-all text-xl font-semibold tracking-[0.16em] text-zinc-100">{joinCode || "Unavailable"}</code>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" onClick={() => copyText(joinCode, "code", "Copied workspace join code.")} disabled={!joinCode}>
+                {copied === "code" ? "Copied" : "Copy code"}
+              </Button>
+              <Button variant="ghost" onClick={rotateCode} disabled={rotating}>
+                {rotating ? "Rotating..." : rotationPending ? "Confirm rotation" : "Rotate code"}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label htmlFor="staff-invite-message" className="text-xs font-medium text-zinc-500">Invite message</label>
+          <textarea
+            id="staff-invite-message"
+            readOnly
+            rows={4}
+            value={inviteMessage}
+            className="mt-2 w-full resize-none rounded-xl border border-white/[0.1] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-300 outline-none focus:border-white/[0.2]"
+          />
+        </div>
+
+        {copyError ? <p className="mt-3 text-sm text-rose-300" role="alert">{copyError}</p> : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <Button variant="ghost" onClick={() => copyText(inviteMessage, "message", "Copied staff invite message.")} disabled={!joinCode}>
+            {copied === "message" ? "Copied message" : "Copy message"}
+          </Button>
+          {mailtoHref ? (
+            <a
+              href={mailtoHref}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 motion-reduce:transition-none"
+            >
+              <Icon name="mail" className="h-4 w-4" />
+              Open email
+            </a>
+          ) : (
+            <span className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black opacity-45" aria-disabled="true">
+              <Icon name="mail" className="h-4 w-4" />
+              Open email
+            </span>
+          )}
+        </div>
+      </motion.section>
+    </motion.div>,
+    document.body
+  );
+}
+
+function AdminSettingsSkeleton() {
+  return (
+    <div role="status" aria-live="polite">
+      <span className="sr-only">Loading staff</span>
+      <div className="space-y-3 animate-pulse" aria-hidden="true">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-4">
+            <div className="h-4 w-4 shrink-0 rounded bg-white/[0.07]" />
+            <div className="h-4 w-24 shrink-0 rounded bg-white/[0.08]" />
+            <div className="h-3 w-full max-w-72 rounded bg-white/[0.045]" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminSurfaceMessage({ icon, title, body, action }) {
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025]">
+      <StateMessage icon={icon} title={title} body={body} action={action} />
+    </div>
+  );
+}
+
+function AdminRoleSection({ group, collapsed, onToggle, onRoleChange, onRemove, currentUser }) {
+  const reduceMotion = useReducedMotion();
   return (
     <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:bg-white/[0.035]"
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:bg-white/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20"
       >
         <span className="flex min-w-0 items-center gap-3">
-          <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", collapsed ? "-rotate-90" : "rotate-0")} />
+          <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition motion-reduce:transition-none", collapsed ? "-rotate-90" : "rotate-0")} />
           <span className="min-w-0">
             <span className="text-sm font-semibold text-zinc-100">{group.label}</span>{" "}
             <span className="ml-3 text-sm text-zinc-500">{group.description}</span>
@@ -6966,14 +7958,14 @@ function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
       <AnimatePresence initial={false}>
         {!collapsed && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
+            initial={reduceMotion ? false : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
+            exit={reduceMotion ? undefined : { opacity: 0, height: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.16, ease: "easeOut" }}
             className="overflow-hidden border-t border-white/[0.08]"
           >
             {group.users.length ? (
-              <AdminStaffTable staff={group.users} onRoleChange={onRoleChange} />
+              <AdminStaffTable staff={group.users} onRoleChange={onRoleChange} onRemove={onRemove} currentUser={currentUser} />
             ) : (
               <div className="px-4 py-6 text-sm text-zinc-600">No staff in this role.</div>
             )}
@@ -6984,7 +7976,16 @@ function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
   );
 }
 
-function AdminStaffTable({ staff, onRoleChange }) {
+function accountsReferToSameUser(left, right) {
+  const leftIds = [left?.id, left?._id].map((value) => asText(value).toLowerCase()).filter(Boolean);
+  const rightIds = [right?.id, right?._id].map((value) => asText(value).toLowerCase()).filter(Boolean);
+  if (leftIds.some((id) => rightIds.includes(id))) return true;
+  const leftEmail = asText(left?.email).toLowerCase();
+  const rightEmail = asText(right?.email).toLowerCase();
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
+function AdminStaffTable({ staff, onRoleChange, onRemove, currentUser }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-left text-sm">
@@ -6993,11 +7994,12 @@ function AdminStaffTable({ staff, onRoleChange }) {
             <th className="px-4 py-3 font-medium">Staff member</th>
             <th className="w-44 px-4 py-3 font-medium">Role</th>
             <th className="w-44 px-4 py-3 font-medium">Last seen</th>
+            <th className="w-36 px-4 py-3 font-medium">Access</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06]">
           {staff.map((user) => (
-            <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} />
+            <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} onRemove={onRemove} isCurrentUser={accountsReferToSameUser(user, currentUser)} />
           ))}
         </tbody>
       </table>
@@ -7005,7 +8007,17 @@ function AdminStaffTable({ staff, onRoleChange }) {
   );
 }
 
-function AdminUserRow({ user, onRoleChange }) {
+function AdminUserRow({ user, onRoleChange, onRemove, isCurrentUser = false }) {
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const requestRemoval = () => {
+    if (!confirmingRemoval) {
+      setConfirmingRemoval(true);
+      window.setTimeout(() => setConfirmingRemoval(false), 6000);
+      return;
+    }
+    setConfirmingRemoval(false);
+    onRemove(user.id);
+  };
   return (
     <tr className="transition hover:bg-white/[0.025]">
       <td className="px-4 py-3">
@@ -7020,14 +8032,36 @@ function AdminUserRow({ user, onRoleChange }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <AdminRoleDropdown value={user.role} onChange={(nextRole) => onRoleChange(user.id, nextRole)} label={`${user.name} role`} />
+        {isCurrentUser ? (
+          <div>
+            <span className="text-sm text-zinc-300">{accountRoleLabel(user.role)}</span>
+            <span className="mt-1 block text-xs text-zinc-600">Current account</span>
+          </div>
+        ) : (
+          <AdminRoleDropdown value={user.role} onChange={(nextRole) => onRoleChange(user.id, nextRole)} label={`${user.name} role`} />
+        )}
       </td>
       <td className="px-4 py-3 text-zinc-500">{user.lastSeen || "Not recorded"}</td>
+      <td className="px-4 py-3">
+        {isCurrentUser ? (
+          <span className="text-xs text-zinc-600">Protected</span>
+        ) : (
+          <button
+            type="button"
+            onClick={requestRemoval}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/30"
+            aria-label={`${confirmingRemoval ? "Confirm removal of" : "Remove"} ${user.name} from workspace`}
+          >
+            {confirmingRemoval ? "Confirm remove" : "Remove"}
+          </button>
+        )}
+      </td>
     </tr>
   );
 }
 
 function AdminRoleDropdown({ value, onChange, label }) {
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
   const buttonRef = useRef(null);
@@ -7062,7 +8096,24 @@ function AdminRoleDropdown({ value, onChange, label }) {
       setOpen(false);
     };
     const handleKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || !menuRef.current) return;
+      const options = [...menuRef.current.querySelectorAll('[role="option"]')];
+      if (!options.length) return;
+      event.preventDefault();
+      const currentIndex = Math.max(0, options.indexOf(document.activeElement));
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? options.length - 1
+          : event.key === "ArrowDown"
+            ? (currentIndex + 1) % options.length
+            : (currentIndex - 1 + options.length) % options.length;
+      options[nextIndex].focus();
     };
 
     updatePosition();
@@ -7079,16 +8130,24 @@ function AdminRoleDropdown({ value, onChange, label }) {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !menuStyle) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector('[role="option"][aria-selected="true"]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [menuStyle, open]);
+
   const menu = open && menuStyle
     ? createPortal(
         <motion.div
           ref={menuRef}
           role="listbox"
           aria-label={label}
-          initial={{ opacity: 0, scale: 0.96, y: -4 }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: -4 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: -4 }}
-          transition={{ duration: 0.14, ease: "easeOut" }}
+          exit={reduceMotion ? undefined : { opacity: 0, scale: 0.96, y: -4 }}
+          transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
           style={menuStyle}
           className="fixed z-[100] overflow-hidden rounded-xl bg-zinc-950 p-1 shadow-2xl shadow-black/60"
         >
@@ -7101,9 +8160,10 @@ function AdminRoleDropdown({ value, onChange, label }) {
               onClick={() => {
                 if (option !== value) onChange(option);
                 setOpen(false);
+                buttonRef.current?.focus();
               }}
               className={cx(
-                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:outline-none",
+                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                 option === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
               )}
             >
@@ -7126,37 +8186,419 @@ function AdminRoleDropdown({ value, onChange, label }) {
         aria-label={label}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-transparent bg-black/25 px-3 text-sm text-zinc-100 transition hover:bg-white/[0.05] focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 active:border-transparent active:outline-none active:ring-0"
+        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-transparent bg-black/25 px-3 text-sm text-zinc-100 transition hover:bg-white/[0.05] focus:outline-none focus-visible:border-white/[0.16] focus-visible:ring-2 focus-visible:ring-white/15 active:border-transparent active:outline-none"
       >
         <span className="truncate">{accountRoleLabel(value)}</span>
-        <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", open && "rotate-180")} />
+        <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition motion-reduce:transition-none", open && "rotate-180")} />
       </button>
       {menu}
     </>
   );
 }
 
-function SettingsPage({ workspace }) {
+export default function FalconNewsroomFullInteractiveUI() {
+  return isLandingRoute() ? <V3LandingPage /> : <AppShell />;
+}
+function workspaceSettingsDraft(workspace = {}) {
+  return {
+    name: asText(workspace?.name) || "Poolesville Pulse",
+    publicationUrl: asText(workspace?.publicationUrl) || "https://poolesvillepulse.org",
+  };
+}
+
+function SettingsField({ id, label, hint, value, onChange, disabled = false, type = "text", autoComplete = "off" }) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  return (
+    <label htmlFor={id} className="block">
+      <span className="mb-2 block text-sm font-medium text-zinc-200">{label}</span>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        autoComplete={autoComplete}
+        aria-describedby={hintId}
+        className="h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 hover:border-white/[0.15] focus:border-white/[0.24] focus:ring-2 focus:ring-white/[0.06] disabled:cursor-not-allowed disabled:bg-black/10 disabled:text-zinc-500 disabled:hover:border-white/[0.1]"
+      />
+      {hint ? <span id={hintId} className="mt-2 block text-xs leading-5 text-zinc-500">{hint}</span> : null}
+    </label>
+  );
+}
+
+const SETTINGS_SECTIONS = [
+  { id: "workspace", label: "Workspace", icon: "settings", path: "/settings" },
+  { id: "names", label: "Names database", icon: "people", path: "/settings/names", adminOnly: true },
+  { id: "administration", label: "Administration", icon: "admin", path: "/settings/administration", adminOnly: true },
+];
+
+function settingsSectionForPath(pathname = "") {
+  const path = pathname.toLowerCase().replace(/\/+$/, "") || "/settings";
+  if (path === "/admin" || path.includes("/administration")) return "administration";
+  if (path.includes("/names")) return "names";
+  return "workspace";
+}
+
+function SettingsNavigation({ activeSection, canManageWorkspace }) {
+  const sections = SETTINGS_SECTIONS.filter((section) => canManageWorkspace || !section.adminOnly);
+  return (
+    <nav className="flex w-full flex-wrap gap-x-6 gap-y-1 overflow-visible border-b border-white/[0.08]" aria-label="Settings sections">
+      {sections.map((section) => (
+        <button
+          key={section.id}
+          type="button"
+          onClick={() => pushAppPath(section.path)}
+          aria-current={activeSection === section.id ? "page" : undefined}
+          className={cx(
+            "-mb-px flex shrink-0 items-center gap-2.5 border-b-2 px-1 pb-3 pt-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20",
+            activeSection === section.id ? "border-zinc-100 text-zinc-50" : "border-transparent text-zinc-500 hover:border-white/[0.18] hover:text-zinc-200"
+          )}
+        >
+          <Icon name={section.icon} className="h-4 w-4 shrink-0" />
+          <span>{section.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function WorkspaceSettings({ draft, updateDraft, loading, saving, canManageWorkspace, isDirty, loadError, saveError, saveSettings, joinCode, copied, copyCode }) {
+  return (
+    <div>
+      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-50">Workspace</h2>
+        </div>
+        {canManageWorkspace ? (
+          <div className="flex items-center gap-3">
+            {isDirty && !saving ? <span className="hidden text-xs text-zinc-500 sm:inline">Unsaved changes</span> : null}
+            <Button onClick={saveSettings} disabled={loading || saving || !isDirty}>{saving ? "Saving..." : "Save changes"}</Button>
+          </div>
+        ) : <StatusBadge>Admin managed</StatusBadge>}
+      </div>
+
+      {loadError ? <div className="mt-5 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-300" role="alert">{loadError}</div> : null}
+      {saveError ? <div className="mt-5 rounded-xl border border-amber-400/15 bg-amber-400/[0.07] px-4 py-3 text-sm text-amber-200" role="alert">{saveError}</div> : null}
+
+      <section className="py-7" aria-labelledby="workspace-details-title">
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <SettingsField id="workspace-name" label="Workspace name" value={draft.name} onChange={(value) => updateDraft("name", value)} disabled={loading || !canManageWorkspace} autoComplete="organization" />
+          <SettingsField id="publication-url" label="Publication website" value={draft.publicationUrl} onChange={(value) => updateDraft("publicationUrl", value)} disabled={loading || !canManageWorkspace} type="url" autoComplete="url" />
+        </div>
+      </section>
+
+      {canManageWorkspace ? <section className="border-t border-white/[0.08] pt-7" aria-labelledby="workspace-access-title">
+        <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px] md:items-center">
+          <div>
+            <h3 id="workspace-access-title" className="text-sm font-semibold text-zinc-200">Workspace access code</h3>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">Share this with people joining {draft.name || "your newsroom"}. New members start as guests.</p>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.09] bg-black/20 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-xs text-zinc-500">Join code</p>
+              <p className="mt-1 truncate font-mono text-lg font-semibold tracking-[0.16em] text-zinc-100">{joinCode || (loadError ? "Unavailable" : "Loading...")}</p>
+            </div>
+            <Button variant="ghost" onClick={copyCode} disabled={!joinCode}>{copied ? "Copied" : "Copy"}</Button>
+          </div>
+        </div>
+      </section> : null}
+    </div>
+  );
+}
+
+function readableFileSize(bytes = 0) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function NamesDatabaseSettings({ csrfToken = "", setToast = () => {} }) {
+  const fileInputRef = useRef(null);
+  const [summary, setSummary] = useState({ count: 0, updatedAt: "", updatedBy: "", sourceFile: "" });
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    fetch(`${API_BASE}/api/admin/names`, {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load names database details.");
+        setSummary(payload);
+      })
+      .catch((loadError) => {
+        if (loadError.name !== "AbortError") setError(loadError instanceof Error ? loadError.message : "Could not load names database details.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  const selectFile = (file) => {
+    setResult(null);
+    setError("");
+    if (!file) return;
+    const extension = file.name.toLowerCase().split(".").pop();
+    if (!["csv", "xlsx"].includes(extension)) {
+      setSelectedFile(null);
+      setError("Choose a CSV or .xlsx Excel file.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setSelectedFile(null);
+      setError("The names file must be 10 MB or smaller.");
+      return;
+    }
+    setSelectedFile(file);
+  };
+
+  const uploadNames = async () => {
+    if (!selectedFile || uploading) return;
+    setUploading(true);
+    setError("");
+    setResult(null);
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/names/upload`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not replace the names database.");
+      setSummary(payload);
+      setResult(payload);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setToast(`Names database replaced with ${Number(payload.count || 0).toLocaleString()} records.`);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not replace the names database.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragActive(false);
+    selectFile(event.dataTransfer.files?.[0]);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-50">Names database</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">Keep the student and staff roster used by the AI extractor current.</p>
+        </div>
+        <div className="text-left sm:text-right">
+          <p className="text-2xl font-semibold tabular-nums text-zinc-100">{loading ? "..." : Number(summary.count || 0).toLocaleString()}</p>
+          <p className="text-xs text-zinc-600">names available</p>
+        </div>
+      </div>
+
+      <section className="py-7" aria-labelledby="replace-roster-title">
+        <div className="mb-5">
+          <h3 id="replace-roster-title" className="text-sm font-semibold text-zinc-200">Replace roster</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">A successful upload overwrites the current names collection. The existing list stays in place if validation fails.</p>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          className="sr-only"
+          onChange={(event) => selectFile(event.target.files?.[0])}
+        />
+        <div
+          onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDragActive(false); }}
+          onDrop={handleDrop}
+          className={cx(
+            "rounded-2xl border border-dashed px-6 py-10 text-center transition duration-200",
+            dragActive ? "border-zinc-300 bg-white/[0.07]" : "border-white/[0.14] bg-black/15"
+          )}
+        >
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.05] text-zinc-300">
+            <Icon name="upload" className="h-5 w-5" />
+          </div>
+          <p className="mt-4 text-sm font-medium text-zinc-200">Drop a spreadsheet here</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">CSV or Excel .xlsx, up to 10 MB</p>
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="mt-4 text-sm font-medium text-zinc-300 underline decoration-zinc-600 underline-offset-4 transition hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">Choose a file</button>
+        </div>
+
+        {selectedFile ? (
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-white/[0.09] bg-white/[0.03] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <Icon name="article" className="h-5 w-5 shrink-0 text-zinc-400" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-zinc-100">{selectedFile.name}</p>
+                <p className="mt-0.5 text-xs text-zinc-600">{readableFileSize(selectedFile.size)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>Remove</Button>
+              <Button icon="upload" onClick={uploadNames} disabled={uploading}>{uploading ? "Replacing..." : "Replace names database"}</Button>
+            </div>
+          </div>
+        ) : null}
+
+        {error ? <div className="mt-4 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-300" role="alert">{error}</div> : null}
+        {result ? (
+          <div className="mt-4 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.07] px-4 py-3 text-sm text-emerald-200" role="status">
+            Replaced with {Number(result.count || 0).toLocaleString()} names. {result.skipped ? `${result.skipped} incomplete or duplicate rows were skipped.` : "Every row was imported."}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="grid gap-6 border-t border-white/[0.08] pt-7 md:grid-cols-[minmax(0,1fr)_240px]" aria-labelledby="file-format-title">
+        <div>
+          <h3 id="file-format-title" className="text-sm font-semibold text-zinc-200">Spreadsheet format</h3>
+          <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">The first row must contain column headers.</p>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08]">
+            <div className="grid min-w-[520px] grid-cols-5 bg-white/[0.04] text-xs text-zinc-400">
+              {["firstName", "lastName", "grade", "house", "type"].map((field) => <span key={field} className="border-r border-white/[0.07] px-3 py-2.5 last:border-r-0">{field}</span>)}
+            </div>
+            <div className="grid min-w-[520px] grid-cols-5 text-xs text-zinc-600">
+              {["Maya", "Johnson", "11", "Global", "Student"].map((value) => <span key={value} className="border-r border-white/[0.07] px-3 py-2.5 last:border-r-0">{value}</span>)}
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-zinc-600">Required: firstName and lastName. Optional: grade, house, type, email, and title.</p>
+        </div>
+        <div className="md:border-l md:border-white/[0.08] md:pl-6">
+          <p className="text-xs font-medium text-zinc-400">Last replacement</p>
+          <p className="mt-2 text-sm text-zinc-300">{summary.updatedAt ? formatDisplayDate(summary.updatedAt) : "No upload recorded"}</p>
+          {summary.updatedBy ? <p className="mt-1 text-xs text-zinc-600">by {summary.updatedBy}</p> : null}
+          {summary.sourceFile ? <p className="mt-3 break-all text-xs text-zinc-600">{summary.sourceFile}</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsPage({ workspace, currentUser, csrfToken = "", setToast = () => {}, onWorkspaceUpdated = () => {}, locationPath = "/settings" }) {
+  const startingSettings = workspaceSettingsDraft(workspace);
+  const [draft, setDraft] = useState(startingSettings);
+  const [savedSettings, setSavedSettings] = useState(startingSettings);
   const [joinCode, setJoinCode] = useState("");
-  const [codeError, setCodeError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
+  const canManageWorkspace = normalizeAppRole(currentUser?.role) === "admin";
+  const requestedSection = settingsSectionForPath(locationPath);
+  const activeSection = canManageWorkspace ? requestedSection : "workspace";
+  const isDirty = Object.keys(savedSettings).some((key) => draft[key] !== savedSettings[key]);
+
+  useEffect(() => {
+    if (!canManageWorkspace && requestedSection !== "workspace") {
+      window.history.replaceState(null, "", "/settings");
+      window.dispatchEvent(new Event("falcon-route-change"));
+      return;
+    }
+    if (locationPath.toLowerCase().replace(/\/+$/, "") === "/admin") {
+      window.history.replaceState(null, "", canManageWorkspace ? "/settings/administration" : "/settings");
+      window.dispatchEvent(new Event("falcon-route-change"));
+    }
+  }, [canManageWorkspace, locationPath, requestedSection]);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     fetch(`${API_BASE}/api/workspace`, {
       headers: { Accept: "application/json" },
       credentials: "include",
     })
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load the workspace code.");
-        if (active) setJoinCode(payload.workspace?.joinCode || "");
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load workspace settings.");
+        if (!active) return;
+        const nextSettings = workspaceSettingsDraft(payload.workspace);
+        setDraft(nextSettings);
+        setSavedSettings(nextSettings);
+        setJoinCode(asText(payload.workspace?.joinCode));
+        onWorkspaceUpdated(payload.workspace);
       })
       .catch((error) => {
-        if (active) setCodeError(error instanceof Error ? error.message : "Could not load the workspace code.");
+        if (active) setLoadError(error instanceof Error ? error.message : "Could not load workspace settings.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
     return () => { active = false; };
   }, []);
+
+  const updateDraft = (key, value) => {
+    setSaveError("");
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const validateSettings = () => {
+    if (!asText(draft.name)) return "Workspace name is required.";
+    try {
+      const publicationUrl = new URL(asText(draft.publicationUrl));
+      if (!publicationUrl.hostname || !["http:", "https:"].includes(publicationUrl.protocol)) throw new Error();
+    } catch {
+      return "Enter a valid publication URL beginning with http:// or https://.";
+    }
+    return "";
+  };
+
+  const saveSettings = async () => {
+    if (!canManageWorkspace || saving || !isDirty) return;
+    const validationError = validateSettings();
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/workspace`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          name: asText(draft.name),
+          publicationUrl: asText(draft.publicationUrl).replace(/\/$/, ""),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not save workspace settings.");
+      const nextSettings = workspaceSettingsDraft(payload.workspace);
+      setDraft(nextSettings);
+      setSavedSettings(nextSettings);
+      setJoinCode(asText(payload.workspace?.joinCode));
+      onWorkspaceUpdated(payload.workspace);
+      setToast("Workspace settings saved.");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save workspace settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const copyCode = async () => {
     if (!joinCode) return;
@@ -7165,49 +8607,44 @@ function SettingsPage({ workspace }) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      setCodeError("Copy failed. Select the code and copy it manually.");
+      setLoadError("Copy failed. Select the code and copy it manually.");
     }
   };
 
   return (
-    <PageShell title="Workspace settings" right={<Button>Save changes</Button>}>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Card className="p-5">
-          <h2 className="font-medium">Publication settings</h2>
-          <p className="mt-1 text-sm text-zinc-500">Configure this school newspaper workspace.</p>
-          <div className="mt-5 space-y-4">
-            <Field label="Publication name" value={workspace?.name || "Poolesville Pulse"} />
-            <Field label="Website URL" value="https://poolesvillepulse.org" />
-            <Field label="Allowed article domain" value="poolesvillepulse.org" />
-            <Field label="Platform type" value="SNO Sites / WordPress" />
-          </div>
-        </Card>
-        <Card className="p-5">
-          <h2 className="font-medium">Workspace code</h2>
-          <p className="mt-1 max-w-md text-sm leading-6 text-zinc-500">Share this code with people who should join {workspace?.name || "this newsroom"}. New members start as guests.</p>
-          <div className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-white/[0.1] bg-black/20 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">Join code</p>
-              <p className="mt-1 truncate font-mono text-lg font-semibold tracking-[0.18em] text-zinc-100">{joinCode || (codeError ? "Unavailable" : "Loading...")}</p>
-            </div>
-            <Button variant="ghost" onClick={copyCode} disabled={!joinCode}>{copied ? "Copied" : "Copy code"}</Button>
-          </div>
-          {codeError ? <p className="mt-3 text-sm text-rose-300" role="alert">{codeError}</p> : null}
-        </Card>
-      </div>
+    <PageShell title="Settings" description="" className="max-w-[1380px]">
+      <SettingsNavigation activeSection={activeSection} canManageWorkspace={canManageWorkspace} />
+      <section
+        className={cx(
+          "mt-7 min-w-0",
+          activeSection !== "administration" && "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-2xl shadow-black/15 sm:p-7"
+        )}
+      >
+          {activeSection === "workspace" ? (
+            <WorkspaceSettings
+              draft={draft}
+              updateDraft={updateDraft}
+              loading={loading}
+              saving={saving}
+              canManageWorkspace={canManageWorkspace}
+              isDirty={isDirty}
+              loadError={loadError}
+              saveError={saveError}
+              saveSettings={saveSettings}
+              joinCode={joinCode}
+              copied={copied}
+              copyCode={copyCode}
+            />
+          ) : null}
+          {activeSection === "names" ? <NamesDatabaseSettings csrfToken={csrfToken} setToast={setToast} /> : null}
+          {activeSection === "administration" ? (
+            <AdministrationSettings
+              setToast={setToast}
+              csrfToken={csrfToken}
+              currentUser={currentUser}
+            />
+          ) : null}
+      </section>
     </PageShell>
   );
-}
-function Field({ label, value }) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</span>
-      <input defaultValue={value} className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]" />
-    </label>
-  );
-}
-
-
-export default function FalconNewsroomFullInteractiveUI() {
-  return isLandingRoute() ? <V3LandingPage /> : <AppShell />;
 }
