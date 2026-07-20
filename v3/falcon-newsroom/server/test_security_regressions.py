@@ -51,6 +51,32 @@ class Upload:
 
 
 class SecurityHelperTests(unittest.TestCase):
+    def test_workspace_roles_are_canonicalized_independently_of_legacy_migrations(self):
+        loaded = load_functions(
+            {"_canonicalize_workspace_user_roles"},
+            {
+                "ROLE_GUEST": "guest",
+                "VALID_ROLES": {"admin", "editor", "writer", "guest"},
+            },
+        )
+
+        class Users:
+            calls = []
+
+            def update_many(self, query, update):
+                self.calls.append((query, update))
+
+        users = Users()
+        loaded["users_col"] = users
+        loaded["_canonicalize_workspace_user_roles"]()
+        self.assertEqual(users.calls, [(
+            {
+                "workspaceId": {"$exists": True, "$nin": [None, ""]},
+                "role": {"$nin": ["admin", "editor", "guest", "writer"]},
+            },
+            {"$set": {"role": "guest"}},
+        )])
+
     def test_legacy_v2_startup_does_not_downgrade_v3_workspace_roles(self):
         entrypoint_source = ROOT_APP_PATH.read_text(encoding="utf-8")
         self.assertIn("from v2.app.app import app", entrypoint_source)
@@ -71,6 +97,15 @@ class SecurityHelperTests(unittest.TestCase):
         self.assertIn('"$exists": False', role_rewrites[0])
         self.assertNotIn('"$nin"', role_rewrites[0])
         self.assertIn("Roles that v2 does not", source)
+
+        role_endpoint = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "api_admin_update_user_role"
+        )
+        role_endpoint_source = ast.get_source_segment(source, role_endpoint) or ""
+        self.assertIn('user_doc.get("workspaceId")', role_endpoint_source)
+        self.assertIn("managed by v3", role_endpoint_source)
+        self.assertLess(role_endpoint_source.index("workspaceId"), role_endpoint_source.index("update_one"))
 
 
 

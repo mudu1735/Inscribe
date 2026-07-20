@@ -123,6 +123,7 @@ ROLE_WRITER = "writer"
 ROLE_EDITOR = "editor"
 ROLE_ADMIN = "admin"
 VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_GUEST}
+ROLE_SCHEMA_CAPABILITY = "guest-role-v1"
 PITCH_SECTIONS = {
     "News",
     "Features",
@@ -177,6 +178,7 @@ FRONTEND_ROLE_LANDING = {
 IMPORTANT_ACTIVITY_EVENTS = {"status_change"}
 BACKEND_CAPABILITIES = {
     "admin-users",
+    ROLE_SCHEMA_CAPABILITY,
     "rbac-v4",
     "stories",
     "pitches",
@@ -458,8 +460,6 @@ def normalize_email(email: str) -> str:
 
 def normalize_role(role_value) -> str:
     role = str(role_value or "").strip().lower()
-    if role == "viewer":
-        return ROLE_GUEST
     return role if role in VALID_ROLES else ROLE_GUEST
 
 
@@ -543,7 +543,6 @@ def _ensure_default_workspace():
 
     if existing and not existing.get("legacyMembershipMigratedAt"):
         users_col.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
-        users_col.update_many({"role": "viewer"}, {"$set": {"role": ROLE_GUEST}})
         for collection in (interviews_col, articles_col, stories_col, pitches_col, activity_col, feedback_col):
             collection.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
         workspaces_col.update_one({"_id": existing["_id"]}, {"$set": {"legacyMembershipMigratedAt": _now_iso()}})
@@ -576,7 +575,19 @@ def _ensure_default_workspace():
         workspaces_col.update_one({"_id": existing["_id"]}, {"$set": workspace_update})
 
 
+def _canonicalize_workspace_user_roles():
+    """Keep every workspace membership on the current v3 role vocabulary."""
+    users_col.update_many(
+        {
+            "workspaceId": {"$exists": True, "$nin": [None, ""]},
+            "role": {"$nin": sorted(VALID_ROLES)},
+        },
+        {"$set": {"role": ROLE_GUEST}},
+    )
+
+
 _ensure_default_workspace()
+_canonicalize_workspace_user_roles()
 
 
 def is_valid_email(email: str) -> bool:
@@ -2674,7 +2685,7 @@ def api_health():
         "ok": True,
         "status": "healthy",
         "service": "falcon-newsroom-v3-auth",
-        "version": "v3-rbac-activity-2026-06-02",
+        "version": "v3-rbac-guest-2026-07-20",
         "capabilities": sorted(BACKEND_CAPABILITIES),
     })
 

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { ResponsiveContainer } from "recharts";
 import AnimatedDropdown from "./components/ui/animated-dropdown";
+import V4LandingPage from "./V4LandingPage";
 
 const iconPaths = {
   dashboard: (
@@ -2595,6 +2596,7 @@ function AppShell() {
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
   const hasWorkspace = Boolean(asText(account?.workspaceId));
+  const workspaceName = asText(workspace?.name) || "Workspace";
   const availableNavItems = navItemsForRole(accountRole);
   const availableNavSections = navSectionsForItems(availableNavItems);
 
@@ -3107,12 +3109,9 @@ function AppShell() {
       <div className="relative flex h-screen overflow-hidden">
         <aside className="hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-white/[0.08] bg-[#08090c]/80 p-4 backdrop-blur-xl lg:flex">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            <button onClick={() => navigatePage("dashboard")} className="mb-7 flex w-full items-center gap-3 rounded-xl px-2 py-1 text-left hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-500 text-sm font-bold text-black">F</div>
-              <div>
-                <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
-                <div className="text-xs text-zinc-500">{workspace?.name || "Workspace"}</div>
-              </div>
+            <button type="button" onClick={() => navigatePage("dashboard")} className="group mb-7 flex w-full items-center gap-2 rounded-xl border-0 bg-transparent px-2 py-1 text-left outline-none focus:outline-none focus-visible:outline-none">
+              <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+              <div className="min-w-0 truncate text-sm font-medium text-zinc-100 group-focus-visible:underline group-focus-visible:underline-offset-4">{workspaceName}</div>
             </button>
 
             <nav className="space-y-5" aria-label="Primary navigation">
@@ -3137,9 +3136,9 @@ function AppShell() {
         <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
           <header className="relative z-[100] shrink-0 border-b border-white/[0.08] bg-[#08090c]/75 px-5 py-4 backdrop-blur-2xl md:px-8">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 lg:hidden">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-black">F</div>
-                <span className="font-medium">Falcon</span>
+              <div className="flex items-center gap-2 lg:hidden">
+                <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+                <span className="max-w-[55vw] truncate font-medium">{workspaceName}</span>
               </div>
               <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
             </div>
@@ -4353,29 +4352,26 @@ function PitchDetailPage({
     >
       <div className="grid gap-10 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
         <section className="mx-auto w-full max-w-[940px] space-y-10" aria-label="Pitch review details">
-          <div className="relative border-b border-white/[0.16] pb-8">
-            <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">Pitch review</h1>
-          </div>
-
           <section className="border-b border-white/[0.16] pb-10">
-            <h2 className="text-4xl font-semibold leading-[1.12] tracking-tight text-zinc-50 md:text-5xl">
+            <p className="mb-4 text-sm font-semibold text-zinc-400">Pitch review</p>
+            <h1 className="max-w-[24ch] text-3xl font-semibold leading-[1.16] tracking-tight text-zinc-50 md:text-4xl">
               {pitch.title}
-            </h2>
-            <p className="mt-6 text-lg leading-8 text-zinc-400">
+            </h1>
+            <p className="mt-5 max-w-[70ch] text-base leading-7 text-zinc-400 md:text-[1.0625rem]">
               {pitch.angle}
             </p>
             {pitch.notes ? (
-              <div className="mt-8">
-                <h3 className="text-sm font-medium text-zinc-300">Additional notes</h3>
-                <p className="mt-2 text-sm leading-7 text-zinc-500">{pitch.notes}</p>
+              <div className="mt-7 max-w-[70ch]">
+                <h2 className="text-sm font-semibold text-zinc-300">Additional notes</h2>
+                <p className="mt-2 text-[0.9375rem] leading-6 text-zinc-500">{pitch.notes}</p>
               </div>
             ) : null}
           </section>
 
           <section className="border-b border-white/[0.16] pb-10">
             <div className="mb-5">
-              <h3 className="text-lg font-semibold tracking-tight text-zinc-50">Editor feedback</h3>
-              <p className="mt-1 text-sm text-zinc-500">Direction for revision, reporting focus, and next steps.</p>
+              <h2 className="text-xl font-semibold tracking-tight text-zinc-50">Editor feedback</h2>
+              <p className="mt-1.5 text-[0.9375rem] leading-6 text-zinc-500">Direction for revision, reporting focus, and next steps.</p>
             </div>
             <div className="space-y-4">
               {feedbackItems.map((feedback) => {
@@ -4384,7 +4380,7 @@ function PitchDetailPage({
                   <div key={feedback.id} className="group border-b border-white/[0.1] pb-4 last:border-b-0 last:pb-0">
                     <div className="mb-2 flex items-start justify-between gap-4">
                       <div>
-                        <span className="text-sm font-medium text-zinc-300">{feedback.author}</span>
+                        <span className="text-sm font-semibold text-zinc-300">{feedback.author}</span>
                         <span className="ml-2 text-xs text-zinc-600">{feedback.time}</span>
                       </div>
                       {editingFeedbackId === feedback.id ? (
@@ -4413,7 +4409,7 @@ function PitchDetailPage({
                         className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-sm leading-6 text-zinc-300 outline-none focus:border-white/[0.18]"
                       />
                     ) : (
-                      <p className="text-sm leading-7 text-zinc-500">{feedback.text}</p>
+                      <p className="max-w-[70ch] text-[0.9375rem] leading-6 text-zinc-500">{feedback.text}</p>
                     )}
                   </div>
                 );
@@ -4443,7 +4439,7 @@ function PitchDetailPage({
           </section>
 
           <section>
-            <h3 className="text-lg font-semibold tracking-tight text-zinc-50">Activity</h3>
+            <h2 className="text-xl font-semibold tracking-tight text-zinc-50">Activity</h2>
             <div className="mt-5 space-y-4">
               {activityLoading ? (
                 <p className="text-sm text-zinc-600">Loading workflow activity...</p>
@@ -4466,7 +4462,7 @@ function PitchDetailPage({
 
         <aside className="mx-auto w-full max-w-[940px] space-y-3 2xl:sticky 2xl:top-8 2xl:max-w-none">
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Properties</h3>
+            <h2 className="text-base font-semibold text-zinc-100">Properties</h2>
             <div className="mt-4 divide-y divide-white/[0.1]">
               <PitchProperty label="Status">
                 <PitchStatusText status={pitch.status} />
@@ -4499,7 +4495,7 @@ function PitchDetailPage({
 
           {canManagePitches ? (
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Actions</h3>
+            <h2 className="text-base font-semibold text-zinc-100">Actions</h2>
             <div className="mt-4 space-y-2">
               <Button onClick={() => setApprovalOpen(true)} className="w-full">Approve</Button>
               <Button
@@ -5032,8 +5028,6 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
   return (
     <PageShell
       title="Stories"
-      eyebrow="Editorial workflow"
-      description="Scan active drafts by review state, then open a story for notes, source checks, and approval actions."
       className="max-w-[1380px]"
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
@@ -5090,7 +5084,6 @@ function StoryKanbanColumn({ column, stories, total, onOpenStory }) {
 }
 
 function StoryOverviewCard({ story, onOpen }) {
-  const dueDateLabel = storyDueDateLabel(story);
   const authorNames = storyAuthorNames(story);
   return (
     <button
@@ -5102,9 +5095,8 @@ function StoryOverviewCard({ story, onOpen }) {
       <div className="min-w-0">
         <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{story.title}</h3>
         <p className="mt-1 break-words text-xs leading-5 text-zinc-500">By {authorNames.length ? authorNames.join(", ") : "Unassigned"}</p>
-        <p className={cx("mt-2 text-xs", dueDateLabel ? "text-zinc-500" : "text-zinc-600")}>{dueDateLabel ? `Due ${dueDateLabel}` : "No due date set"}</p>
       </div>
-      <div className="flex h-full min-h-16 items-center">
+      <div className="flex h-full items-center">
         <span className="inline-flex h-8 w-8 items-center justify-center text-zinc-500 transition group-hover:text-zinc-100">
           <Icon name="chevron" className="h-4 w-4 -rotate-90" />
         </span>
@@ -8197,12 +8189,12 @@ function AdminRoleDropdown({ value, onChange, label }) {
 }
 
 export default function FalconNewsroomFullInteractiveUI() {
-  return isLandingRoute() ? <V3LandingPage /> : <AppShell />;
+  return isLandingRoute() ? <V4LandingPage /> : <AppShell />;
 }
 function workspaceSettingsDraft(workspace = {}) {
   return {
-    name: asText(workspace?.name) || "Poolesville Pulse",
-    publicationUrl: asText(workspace?.publicationUrl) || "https://poolesvillepulse.org",
+    name: asText(workspace?.name),
+    publicationUrl: asText(workspace?.publicationUrl),
   };
 }
 
