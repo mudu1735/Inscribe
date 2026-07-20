@@ -3,3 +3,14 @@
 .env
 .env.*
 !.env.example
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+app/templates/*-react/
+app/scrape_all_test/
+artifacts/
+legacy_experiments/
+v2/data/pulse_scrape/
+.playwright-cli/
+%SystemDrive%/

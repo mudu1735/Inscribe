@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, "..");
 const healthUrl = "http://127.0.0.1:5003/api/health";
 const requiredCapabilities = [
   "admin-users",
+  "guest-role-v1",
   "rbac-v4",
   "stories",
   "pitches",

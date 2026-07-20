@@ -252,7 +252,7 @@ for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:a
   }
 }
 
-for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "rbac-v4", "server.auth_app", "npx", "vite", "taskkill", "\"-B\"", "\"--port\", \"5173\", \"--strictPort\""]) {
+for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "guest-role-v1", "rbac-v4", "server.auth_app", "npx", "vite", "taskkill", "\"-B\"", "\"--port\", \"5173\", \"--strictPort\""]) {
   if (!devScript.includes(snippet)) {
     throw new Error(`Missing combined v3 dev launcher behavior: ${snippet}`);
   }
@@ -260,7 +260,7 @@ for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities
 
 for (const snippet of [
   "falcon-newsroom-v3-auth",
-  "v3-rbac-activity-2026-06-02",
+  "v3-rbac-guest-2026-07-20",
   "BACKEND_CAPABILITIES",
   "@app.post(\"/api/auth/register\")",
   "@app.post(\"/api/auth/login\")",
@@ -322,6 +322,7 @@ for (const snippet of [
   "@app.get(\"/api/interview-records\")",
   "@app.delete(\"/api/interview-records/<record_id>\")",
   "ROLE_WRITER",
+  "ROLE_SCHEMA_CAPABILITY",
   "VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_GUEST}",
   "ACTIVITY_COLLECTION",
   "FEEDBACK_COLLECTION",
