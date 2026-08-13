@@ -13,8 +13,9 @@ function modeFromPath(pathname: string): AuthMode {
 }
 
 function redirectForRole(role: string | undefined) {
+  if (role === "owner") return "/owner";
   if (role === "writer") return "/stories";
-  return role === "viewer" ? "/interviewees" : "/dashboard";
+  return role === "guest" ? "/interviewees" : "/dashboard";
 }
 
 export default function AuthPages() {

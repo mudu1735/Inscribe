@@ -1,20 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { ResponsiveContainer } from "recharts";
 import AnimatedDropdown from "./components/ui/animated-dropdown";
+import V4LandingPage from "./V4LandingPage";
 
 const iconPaths = {
   dashboard: (
@@ -208,7 +197,6 @@ const navItems = [
   { id: "interviewees", label: "Interviewee Database", icon: "people" },
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "analytics", label: "Analytics", icon: "analytics" },
-  { id: "admin", label: "Admin", icon: "admin" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
@@ -216,7 +204,7 @@ const navSections = [
   { id: "editorial", label: "Editorial desk", items: ["dashboard", "pitches", "stories"] },
   { id: "records", label: "Databases", items: ["articles", "interviewees"] },
   { id: "planning", label: "Planning", items: ["calendar", "analytics"] },
-  { id: "system", label: "Workspace", items: ["admin", "settings"] },
+  { id: "system", label: "Workspace", items: ["settings"] },
 ];
 
 function navItemForPage(page) {
@@ -424,7 +412,7 @@ const users = [
     id: "u7",
     name: "Iris Park",
     email: "iris@school.edu",
-    role: "viewer",
+    role: "",
     lastSeen: "May 26, 2026",
   },
 ];
@@ -446,41 +434,24 @@ const ADMIN_ROLES = [
     description: "Can view assigned story work and owned pitches.",
   },
   {
-    id: "viewer",
-    label: "Viewer",
+    id: "guest",
+    label: "Guest",
     description: "Can view records, but cannot access stories, pitches, or admin tools.",
   },
 ];
 
 const ADMIN_ROLE_OPTIONS = ADMIN_ROLES.map((role) => role.id);
+const APP_ROLE_OPTIONS = [...ADMIN_ROLE_OPTIONS, "owner"];
 const ADMIN_ROLE_FILTER_OPTIONS = ["All roles", ...ADMIN_ROLE_OPTIONS];
-
-const trafficData = [
-  { label: "Mon", views: 1280, visitors: 890 },
-  { label: "Tue", views: 1620, visitors: 1120 },
-  { label: "Wed", views: 2740, visitors: 1860 },
-  { label: "Thu", views: 3680, visitors: 2520 },
-  { label: "Fri", views: 3120, visitors: 2210 },
-  { label: "Sat", views: 1880, visitors: 1305 },
-  { label: "Sun", views: 2140, visitors: 1490 },
-];
-
-const sectionData = [
-  { name: "News", value: 32 },
-  { name: "Sports", value: 21 },
-  { name: "Tech", value: 28 },
-  { name: "Culture", value: 12 },
-  { name: "Features", value: 7 },
-];
-
 
 const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Review", "Needs Revision", "Returned", "Ready for Publish", "Published"];
 const STORY_FILTER_STATUSES = ["All statuses", ...STORY_STATUSES];
 const STORY_FILTER_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const ACTIVE_STORY_STATUSES = STORY_STATUSES.filter((status) => status !== "Published");
+const STORY_AUTHOR_EDITABLE_STATUSES = ["Assigned", "Reporting", "Drafting", "Needs Revision", "Returned"];
+const STORY_EDITOR_EDITABLE_STATUSES = [...STORY_AUTHOR_EDITABLE_STATUSES, "Submitted", "In Review"];
 const STORY_COLLABORATOR_ROLE_OPTIONS = [
-  { id: "comment", label: "Can comment", description: "Can view and comment on the story." },
-  { id: "edit", label: "Can edit", description: "Can view, comment, and attach work." },
+  { id: "edit", label: "Co-author", description: "Can edit the story, attach work, comment, invite authors, and submit." },
 ];
 const STORY_WORKFLOW_COLUMNS = [
   {
@@ -926,7 +897,7 @@ const initialStories = [
   },
 ];
 
-const ACTIVE_PITCH_STATUSES = ["New", "Needs Review"];
+const ACTIVE_PITCH_STATUSES = ["In Progress", "Ready for Review"];
 const PITCH_STATUSES = [...ACTIVE_PITCH_STATUSES, "Approved", "On Hold"];
 const PITCH_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const PITCH_WRITERS = ["Ava Patel", "Daniel Wu", "Iris Park", "Lena Brooks", "Marcus Lee", "Sofia Chen"];
@@ -936,7 +907,7 @@ const initialPitches = [
     id: "p1",
     title: "How student clubs are rethinking recruitment",
     angle: "Look at how clubs are moving beyond hallway posters and using short-form video, interest forms, and peer referrals to find new members.",
-    status: "Needs Review",
+    status: "Ready for Review",
     section: "Features",
     owner: "Iris Park",
     submittedAt: "May 14, 2026",
@@ -952,7 +923,7 @@ const initialPitches = [
     id: "p2",
     title: "The quiet cost of exam season",
     angle: "A reported piece on sleep, study habits, and how students balance grades with work, family, and activities.",
-    status: "New",
+    status: "In Progress",
     section: "News",
     owner: "Marcus Lee",
     submittedAt: "May 13, 2026",
@@ -991,7 +962,7 @@ const initialPitches = [
     id: "p5",
     title: "Photo essay: the building before first period",
     angle: "A quiet visual piece following custodians, bus arrivals, practice groups, and early study spots.",
-    status: "New",
+    status: "In Progress",
     section: "Photo",
     owner: "Sofia Chen",
     submittedAt: "May 14, 2026",
@@ -1004,7 +975,7 @@ const initialPitches = [
     id: "p6",
     title: "Why students are choosing handwritten planners again",
     angle: "Explore whether paper planning is a backlash to notifications or just a useful habit that stuck.",
-    status: "Needs Review",
+    status: "Ready for Review",
     section: "Culture",
     owner: "Ava Patel",
     submittedAt: "May 12, 2026",
@@ -1022,7 +993,7 @@ const FALLBACK_ACCOUNT = {
   email: "",
   firstName: "Newsroom",
   lastName: "User",
-  role: "viewer",
+  role: "",
 };
 const ARTICLE_PAGE_SIZE = 10;
 const EXTRACTOR_ADDED_BY = "Editor";
@@ -1128,7 +1099,7 @@ function accountInitials(user) {
 
 function accountRoleLabel(role) {
   const value = asText(role);
-  return value ? value[0].toUpperCase() + value.slice(1) : "Viewer";
+  return value ? value[0].toUpperCase() + value.slice(1) : "";
 }
 
 function monthDayYear(date) {
@@ -1247,16 +1218,29 @@ function normalizeDisplayFeedback(item = {}) {
   };
 }
 
+function activityTimestamp(item = {}) {
+  const parsed = Date.parse(item.occurredAt || item.createdAt || item.time || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sortActivitiesNewestFirst(items = []) {
+  return [...items].sort((left, right) => {
+    const timestampDifference = activityTimestamp(right) - activityTimestamp(left);
+    if (timestampDifference) return timestampDifference;
+    return asText(right.id).localeCompare(asText(left.id));
+  });
+}
+
 function normalizeDisplayActivity(item = {}) {
   return {
     ...item,
-    time: formatDisplayDate(item.time || item.createdAt),
+    time: formatDisplayDate(item.occurredAt || item.time || item.createdAt),
   };
 }
 
 function normalizeStoryCollaborator(item = {}) {
   const email = asText(item.email).toLowerCase();
-  const role = STORY_COLLABORATOR_ROLE_OPTIONS.some((option) => option.id === item.role) ? item.role : "comment";
+  const role = asText(item.role).toLowerCase() || "view";
   return {
     ...item,
     id: asText(item.id || item.userId || email),
@@ -1264,16 +1248,22 @@ function normalizeStoryCollaborator(item = {}) {
     email,
     name: asText(item.name) || email || "Collaborator",
     role,
+    status: asText(item.status).toLowerCase() || "invalid",
     invitedAt: formatDisplayDate(item.invitedAt),
   };
 }
 
 function storyCollaboratorRoleLabel(role) {
-  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Can comment";
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.label || "Collaborator";
 }
 
 function storyCollaboratorRoleDescription(role) {
-  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || STORY_COLLABORATOR_ROLE_OPTIONS[0].description;
+  return STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role)?.description || "Can view and comment, but cannot edit or submit the story.";
+}
+
+function storyEditingCollaboratorForUser(story, user) {
+  const collaborator = storyCollaboratorForUser(story, user);
+  return collaborator?.status === "accepted" && collaborator?.role === "edit" ? collaborator : null;
 }
 function dueDateValue(record = {}) {
   return firstText(
@@ -1298,6 +1288,15 @@ function storyDueDateLabel(story = {}) {
   return formatDisplayDate(deadline) || deadline;
 }
 
+function storyAuthorNames(story = {}) {
+  const acceptedCoauthors = Array.isArray(story.collaborators)
+    ? story.collaborators
+        .filter((collaborator) => collaborator?.status === "accepted" && collaborator?.role === "edit")
+        .map((collaborator) => collaborator.name)
+    : [];
+  return uniqueTextValues([story.writer, ...toList(story.authors), ...acceptedCoauthors]);
+}
+
 function storyWithApprovedDueDate(story, approvedDueDate) {
   const dueDate = firstText(approvedDueDate);
   if (!story || !dueDate || storyDeadlineValue(story)) return story;
@@ -1319,8 +1318,14 @@ function normalizeDisplayStory(story = {}) {
 }
 
 function normalizeDisplayPitch(pitch = {}) {
+  const legacyStatus = {
+    New: "In Progress",
+    Submitted: "Ready for Review",
+    "Needs Review": "Ready for Review",
+  };
   return {
     ...pitch,
+    status: legacyStatus[pitch.status] || pitch.status,
     submittedAt: formatDisplayDate(pitch.submittedAt),
     updatedAt: formatDisplayDate(pitch.updatedAt),
     feedback: Array.isArray(pitch.feedback) ? pitch.feedback.map(normalizeDisplayFeedback) : pitch.feedback,
@@ -1337,11 +1342,26 @@ function normalizeDisplayUser(user = {}) {
 
 function normalizeAppRole(role) {
   const value = asText(role).toLowerCase();
-  return ADMIN_ROLE_OPTIONS.includes(value) ? value : "viewer";
+  return APP_ROLE_OPTIONS.includes(value) ? value : "guest";
 }
 
 function canManageEditorialWorkflow(role) {
-  return ["admin", "editor"].includes(normalizeAppRole(role));
+  return ["owner", "admin", "editor"].includes(normalizeAppRole(role));
+}
+
+function pitchBelongsToUser(pitch, user) {
+  if (!pitch || !user) return false;
+  const pitchUserIds = [pitch.ownerUserId, pitch.writerUserId, pitch.ownerId, pitch.writerId]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const pitchEmails = [pitch.ownerEmail, pitch.writerEmail]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userIds = [user.id, user._id]
+    .map((value) => asText(value).toLowerCase())
+    .filter(Boolean);
+  const userEmail = asText(user.email).toLowerCase();
+  return userIds.some((value) => pitchUserIds.includes(value)) || Boolean(userEmail && pitchEmails.includes(userEmail));
 }
 
 function storyBelongsToUser(story, user) {
@@ -1376,20 +1396,22 @@ function storyCollaboratorForUser(story, user) {
 
 function storyVisibleToUser(story, user) {
   const role = normalizeAppRole(user?.role);
-  if (role === "viewer") return false;
-  if (role === "writer") return storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user));
+  if (role === "guest") return false;
+  if (role === "writer") return storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted";
   return true;
 }
 
 function canSubmitOwnStory(user, story) {
-  if (normalizeAppRole(user?.role) !== "writer" || !storyBelongsToUser(story, user)) return false;
+  const role = normalizeAppRole(user?.role);
+  const isAuthor = storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
+  if (!["writer", "editor", "admin"].includes(role) || !isAuthor) return false;
   return !["Submitted", "In Review", "Ready for Publish", "Published"].includes(story.status);
 }
 
 function canUnsubmitOwnStory(user, story) {
-  return normalizeAppRole(user?.role) === "writer"
-    && storyBelongsToUser(story, user)
-    && story?.status === "Submitted";
+  const role = normalizeAppRole(user?.role);
+  const isAuthor = storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
+  return ["writer", "editor", "admin"].includes(role) && isAuthor && story?.status === "Submitted";
 }
 
 function canUpdateOwnStorySubmission(user, story) {
@@ -1398,26 +1420,26 @@ function canUpdateOwnStorySubmission(user, story) {
 
 function canManageStoryCollaborators(user, story) {
   const role = normalizeAppRole(user?.role);
-  return ["admin", "editor"].includes(role) || (role === "writer" && storyBelongsToUser(story, user));
+  if (["Ready for Publish", "Published"].includes(story?.status)) return false;
+  return ["owner", "admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user))));
 }
 
 function canEditStoryAttachment(user, story) {
-  if (canManageEditorialWorkflow(user?.role)) return true;
+  if (canManageEditorialWorkflow(user?.role)) return STORY_EDITOR_EDITABLE_STATUSES.includes(story?.status);
   if (normalizeAppRole(user?.role) !== "writer") return false;
-  if (storyBelongsToUser(story, user)) return true;
-  return storyCollaboratorForUser(story, user)?.role === "edit";
+  if (!STORY_AUTHOR_EDITABLE_STATUSES.includes(story?.status)) return false;
+  return storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user));
 }
 
 function canCommentOnStory(user, story) {
   if (canManageEditorialWorkflow(user?.role)) return true;
-  return normalizeAppRole(user?.role) === "writer" && (storyBelongsToUser(story, user) || Boolean(storyCollaboratorForUser(story, user)));
+  return normalizeAppRole(user?.role) === "writer" && (storyBelongsToUser(story, user) || storyCollaboratorForUser(story, user)?.status === "accepted");
 }
 
 function navItemsForRole(role) {
   const currentRole = normalizeAppRole(role);
   return navItems.filter((item) => {
-    if (item.id === "admin") return currentRole === "admin";
-    if (item.id === "pitches" || item.id === "stories") return currentRole !== "viewer";
+    if (item.id === "pitches" || item.id === "stories") return currentRole !== "guest";
     return true;
   });
 }
@@ -1428,9 +1450,14 @@ function roleCanAccessPage(role, page) {
 
 function defaultPageForRole(role) {
   const currentRole = normalizeAppRole(role);
-  if (currentRole === "viewer") return "interviewees";
+  if (currentRole === "owner") return "dashboard";
+  if (currentRole === "guest") return "interviewees";
   if (currentRole === "writer") return "stories";
   return "dashboard";
+}
+
+function isOwnerRoute(pathname = window.location.pathname) {
+  return pathname.toLowerCase().replace(/\/+$/, "") === "/owner";
 }
 
 function loginRedirectForCurrentPath() {
@@ -1612,7 +1639,13 @@ function storyAttachmentCopyUrl(story, selectedAttachment = null) {
 }
 
 function drivePermissionText(status) {
-  return "";
+  const normalizedStatus = asText(status).toLowerCase().replace(/[\s-]+/g, "_");
+  return {
+    shared: "Shared with newsroom editors",
+    partial: "Shared with some editors",
+    failed: "Editor sharing needs attention",
+    not_shared: "Not yet shared with editors",
+  }[normalizedStatus] || "";
 }
 
 function formatFileSize(size) {
@@ -1657,7 +1690,7 @@ function isActiveStory(story) {
 function storySearchText(story) {
   return [
     story.title,
-    story.writer,
+    storyAuthorNames(story).join(" "),
     story.editor,
     story.section,
     story.status,
@@ -1743,7 +1776,7 @@ function useWorkflowActivity(entityType, entityId, refreshKey = "") {
         if (!response.ok || payload?.ok === false) {
           throw new Error(payload?.error || "Activity is unavailable.");
         }
-        setActivity(Array.isArray(payload.activity) ? payload.activity.map(normalizeDisplayActivity) : []);
+        setActivity(Array.isArray(payload.activity) ? sortActivitiesNewestFirst(payload.activity.map(normalizeDisplayActivity)) : []);
       } catch (fetchError) {
         if (fetchError.name === "AbortError") return;
         setActivity([]);
@@ -2088,7 +2121,7 @@ function buildHouseOptions(sources) {
 
 function pitchStatusTone(status) {
   if (status === "Approved") return "green";
-  if (status === "Needs Review") return "blue";
+  if (status === "Ready for Review") return "blue";
   if (status === "On Hold") return "amber";
   return "neutral";
 }
@@ -2119,7 +2152,7 @@ function pitchFeedbackItems(pitch) {
 }
 
 function pitchStatusDotClass(status) {
-  if (status === "Needs Review") return "bg-sky-400";
+  if (status === "Ready for Review") return "bg-sky-400";
   return "bg-zinc-400";
 }
 
@@ -2275,15 +2308,19 @@ function runAdminPageTests() {
   console.assert(groupedRoles.every((group) => group.users.every((user) => user.role === group.id)), "Admin role groups should only contain matching users.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("maya"), "All roles")).map((user) => user.name).join("") === "Maya Johnson", "Admin search should match staff by name.");
   console.assert(users.filter((user) => adminUserMatches(user, adminSearchQuery("school"), "All roles")).length === 0, "Admin search should not match email text.");
-  console.assert(users.filter((user) => adminUserMatches(user, "", "viewer")).every((user) => user.role === "viewer"), "Admin role filter should limit visible staff.");
-  console.assert(navItemsForRole("viewer").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Viewers should not see story, pitch, or admin navigation.");
+  console.assert(users.filter((user) => adminUserMatches(user, "", "guest")).every((user) => user.role === "guest"), "Admin role filter should limit visible staff.");
+  console.assert(navItemsForRole("guest").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Guests should not see story, pitch, or admin navigation.");
   console.assert(navItemsForRole("writer").some((item) => item.id === "stories") && !navItemsForRole("writer").some((item) => item.id === "admin"), "Writers should see stories but not admin.");
+  console.assert(APP_ROLE_OPTIONS.includes("owner") && !ADMIN_ROLE_OPTIONS.includes("owner"), "Owner should be an app role, not a workspace role option.");
+  console.assert(navItemsForRole("owner").length === navItems.length, "Owners should see the complete workspace navigation after opening a workspace.");
+  console.assert(defaultPageForRole("owner") === "dashboard", "Opened owner workspaces should start on the dashboard.");
 }
 runAdminPageTests();
 
 function runPrototypeTests() {
-  console.assert(navItems.length === 9, "Navigation should include the visible primary tabs.");
+  console.assert(navItems.length === 8, "Navigation should include the visible primary tabs.");
   console.assert(navItems.some((item) => item.id === "stories" && item.label === "Stories"), "Navigation should include Stories.");
+  console.assert(!navItems.some((item) => item.id === "admin"), "Administration should live inside Settings.");
   console.assert(initialStories.every((story) => STORY_STATUSES.includes(story.status)), "Every story should use a supported workflow status.");
   console.assert(initialStories.some((story) => story.status === "Submitted"), "Stories page needs submitted examples.");
   console.assert(initialStories.some((story) => story.status === "Needs Revision"), "Stories page needs revision examples.");
@@ -2297,12 +2334,21 @@ function runPrototypeTests() {
   const ownedDraft = { ...initialStories[0], writer: "Ava Patel", writerEmail: "ava@example.com", writerUserId: "writer-1", status: "Drafting" };
   const otherDraft = { ...ownedDraft, writer: "Marcus Lee", writerEmail: "marcus@example.com", writerUserId: "writer-2" };
   const sameNameDifferentEmail = { ...ownedDraft, writer: "Ava Patel", writerEmail: "ava2@example.com", writerUserId: "writer-2" };
+  const commentOnlyCollaboration = normalizeDisplayStory({
+    ...otherDraft,
+    collaborators: [{ userId: "writer-1", email: "ava@example.com", role: "comment", status: "accepted" }],
+  });
   console.assert(storyVisibleToUser(ownedDraft, writerUser), "Writers should see their own stories.");
   console.assert(!storyVisibleToUser(otherDraft, writerUser), "Writers should not see other writers' stories.");
   console.assert(!storyVisibleToUser(sameNameDifferentEmail, writerUser), "Writers should not inherit ownership from matching display names.");
   console.assert(canSubmitOwnStory(writerUser, ownedDraft), "Writers should be able to submit their own active drafts.");
-  console.assert(!canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should not use the writer submit action.");
+  console.assert(canSubmitOwnStory({ ...writerUser, role: "editor" }, ownedDraft), "Editors should be able to submit stories they author.");
+  console.assert(canSubmitOwnStory({ ...writerUser, role: "admin" }, ownedDraft), "Admins should be able to submit stories they author.");
   console.assert(canEditStoryAttachment({ ...writerUser, role: "editor" }, otherDraft), "Editors should be able to add work to any visible story.");
+  console.assert(!canEditStoryAttachment({ ...writerUser, role: "editor" }, { ...otherDraft, status: "Ready for Publish" }), "Approved stories should lock work attachments until they are returned.");
+  console.assert(!canManageStoryCollaborators(writerUser, { ...ownedDraft, status: "Published" }), "Published stories should lock collaborator management.");
+  console.assert(storyVisibleToUser(commentOnlyCollaboration, writerUser), "Accepted collaborators should retain story visibility.");
+  console.assert(!canSubmitOwnStory(writerUser, commentOnlyCollaboration) && !canEditStoryAttachment(writerUser, commentOnlyCollaboration) && !canManageStoryCollaborators(writerUser, commentOnlyCollaboration), "Comment-only collaborators should not receive author controls.");
   console.assert(storyWorkflowAction(ownedDraft)?.nextStatus === "Submitted", "Story workflow action should submit writer drafts.");
   console.assert(canUnsubmitOwnStory(writerUser, { ...ownedDraft, status: "Submitted" }), "Writers should be able to unsubmit their own submitted stories.");
   console.assert(storyWorkflowAction({ ...ownedDraft, status: "Submitted" })?.nextStatus === "Drafting", "Submitted stories should show an unsubmit action.");
@@ -2317,6 +2363,8 @@ function runPrototypeTests() {
     { attachments: [{ id: "drive-1", type: "drive", url: "https://docs.google.com/document/d/1", name: "Draft doc", typeLabel: "Doc" }] },
     { attachments: [{ id: "file-1", type: "file", url: "/api/stories/s1/attachments/file-1", name: "photo.png", contentType: "image/png" }] }
   ).attachments.length === 2, "Story attachment updates should merge new work with existing work.");
+  console.assert(drivePermissionText("shared") === "Shared with newsroom editors" && drivePermissionText("manual") === "", "Drive attachments should explain only actionable editor-sharing states.");
+
   console.assert(initialArticles.some((a) => a.status === "Published"), "Prototype needs published article data.");
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
   console.assert(PITCH_STATUSES.every((status) => initialPitches.some((pitch) => pitch.status === status)), "Pitch board needs examples for each status.");
@@ -2328,7 +2376,6 @@ function runPrototypeTests() {
     { ...initialPitches[1], owner: "Alex Lee", ownerEmail: "alex.two@example.com", ownerUserId: "u2" },
   ]).length === 2, "Pitch board should separate owners with matching names and different accounts.");
   console.assert(pitchNoteCount({ notes: "", comments: [] }) === 0, "Pitch note count should allow zero.");
-  console.assert(sectionData.reduce((sum, s) => sum + s.value, 0) === 100, "Section analytics should total 100 percent.");
 }
 runPrototypeTests();
 
@@ -2351,7 +2398,7 @@ function Button({ children, icon, variant = "primary", className = "", onClick, 
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100",
+        "inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090c] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100 motion-reduce:transform-none motion-reduce:transition-none",
         variant === "primary" && "bg-zinc-100 text-black hover:bg-white",
         variant === "ghost" && "border border-white/[0.08] bg-white/[0.035] text-zinc-300 hover:bg-white/[0.07] hover:text-zinc-50",
         variant === "danger" && "border border-rose-400/15 bg-rose-400/10 text-rose-300 hover:bg-rose-400/15",
@@ -2386,19 +2433,19 @@ function PageShell({ title, description, children, right, titleAction, className
   );
 }
 
-function Input({ value, onChange, placeholder, className = "" }) {
+function Input({ value, onChange, placeholder, label = "", className = "" }) {
   return (
-    <div className={cx("flex h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-500", className)}>
+    <div className={cx("flex h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-500 transition focus-within:border-white/[0.18] focus-within:ring-2 focus-within:ring-white/[0.06]", className)}>
       <Icon name="search" className="h-4 w-4" />
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={label || placeholder} className="w-full bg-transparent text-zinc-200 outline-none placeholder:text-zinc-600" />
     </div>
   );
 }
 
-function Select({ value, onChange, options, className = "" }) {
+function Select({ value, onChange, options, label = "", className = "" }) {
   return (
     <div className={cx("relative", className)}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 pr-9 text-sm text-zinc-200 outline-none hover:bg-white/[0.06]">
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label || "Select an option"} className="h-11 w-full appearance-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 pr-9 text-sm text-zinc-200 outline-none transition hover:bg-white/[0.06] focus-visible:border-white/[0.18] focus-visible:ring-2 focus-visible:ring-white/[0.06]">
         {options.map((option) => (
           <option key={option} className="bg-zinc-950" value={option}>
             {option}
@@ -2410,23 +2457,10 @@ function Select({ value, onChange, options, className = "" }) {
   );
 }
 
-function TooltipBox({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-xl border border-white/[0.12] bg-zinc-950/95 p-3 shadow-2xl shadow-black/40">
-      <p className="mb-2 text-xs text-zinc-500">{label}</p>
-      {payload.map((item) => (
-        <div key={item.dataKey || item.name} className="flex min-w-36 items-center justify-between gap-6 text-sm">
-          <span className="capitalize text-zinc-400">{item.dataKey || item.name}</span>
-          <span className="font-medium text-zinc-100">{typeof item.value === "number" ? fmt(item.value) : item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function initialAppPage() {
   const pathPage = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, "");
+  if (pathPage === "admin" || pathPage.startsWith("settings/")) return "settings";
   if (pathPage.startsWith("pitches/")) return "pitches";
   if (pathPage.startsWith("stories/")) return "stories";
   return navItems.some((item) => item.id === pathPage) ? pathPage : "dashboard";
@@ -2457,196 +2491,97 @@ function isLandingRoute() {
   return path === "/" || path === "/landing";
 }
 
-const landingWorkflowSteps = [
-  {
-    label: "Pitch",
-    title: "Start from a real assignment queue.",
-    body: "Editors see what writers are proposing, what needs a decision, and which drafts are ready to move.",
-  },
-  {
-    label: "Draft",
-    title: "Keep the article in Google Docs.",
-    body: "Line edits and comments stay in the Doc, while Falcon keeps the link, status, deadline, and editor context close.",
-  },
-  {
-    label: "Review",
-    title: "Make the next step obvious.",
-    body: "Submitted, in review, needs revision, ready for publish, returned, and published all read as plain workflow states.",
-  },
-  {
-    label: "Publish",
-    title: "Carry records into the archive.",
-    body: "Article metadata, sources, interviewees, and publication details stay connected after the story leaves the draft queue.",
-  },
-];
-
-const landingDeskRows = [
-  ["Senior Parking Rules", "Submitted", "June 2, 2026"],
-  ["Robotics Build Week", "Needs Revision", "May 20"],
-  ["Cafeteria Menu Changes", "Ready for Publish", "May 21"],
-];
-
-function LandingPage() {
+function V3LandingPage() {
   const reduceMotion = useReducedMotion();
-  const revealInitial = reduceMotion ? false : { opacity: 0, y: 18 };
-  const revealAnimate = { opacity: 1, y: 0 };
-  const revealTransition = { duration: 0.7, ease: [0.19, 1, 0.22, 1] };
+  const revealInitial = reduceMotion ? false : { opacity: 0, y: 22 };
+  const revealTransition = { duration: 0.7, ease: [0.16, 1, 0.3, 1] };
+
+  const productScreens = [
+    {
+      id: "workflow",
+      title: "Every story knows what comes next.",
+      body: "Editors can scan active work by review state, open the right draft, and move reporting from assignment through teacher approval.",
+      image: "/landing/product-stories.png",
+      alt: "Inscribe Stories view showing active drafts organized into In Progress, Ready for Review, and Teacher Approval columns.",
+    },
+    {
+      id: "records",
+      title: "Reporting records that outlast the deadline.",
+      body: "Published work stays searchable by title, author, section, tag, and interviewee, giving the next reporter a useful newsroom archive.",
+      image: "/landing/product-articles.png",
+      alt: "Inscribe Articles Database showing searchable publication records and article details.",
+    },
+  ];
 
   return (
-    <main className="landing-page">
-      <section className="landing-hero" aria-labelledby="landing-title">
-        <LandingDeskScene />
-        <nav className="landing-nav" aria-label="Landing navigation">
-          <a href="/" className="landing-mark" aria-label="Falcon Newsroom home">
-            <span>F</span>
-            <strong>Falcon Newsroom</strong>
+    <main className="v3-landing">
+      <header className="v3-landing-header">
+        <nav className="v3-landing-nav" aria-label="Main navigation">
+          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
+            <span aria-hidden="true">I</span>
+            <strong>Inscribe</strong>
           </a>
-          <div className="landing-nav-links">
-            <a href="#workflow">Workflow</a>
-            <a href="#review">Docs review</a>
-            <a href="/dashboard">Open app</a>
+          <div className="v3-nav-sections">
+            <a className="v3-nav-link" href="#product">Product</a>
+            <a className="v3-nav-link" href="#workflow">Workflow</a>
+            <a className="v3-nav-link" href="#records">Records</a>
+          </div>
+          <div className="v3-nav-actions">
+            <a className="v3-login v3-nav-link" href="/login">Log in</a>
+            <a className="v3-signup" href="/signup">Sign up</a>
           </div>
         </nav>
+      </header>
 
-        <div className="landing-hero-copy">
-          <p className="landing-kicker">For student editors and advisers</p>
-          <h1 id="landing-title">Falcon Newsroom</h1>
-          <p className="landing-hero-lede">
-            Move school journalism from scattered Classroom submissions to one live editorial desk.
-          </p>
-          <p className="landing-hero-body">
-            Pitches, Google Doc drafts, deadlines, sources, and publish-ready review stay visible without pulling writers out of the tools they already use.
-          </p>
-          <div className="landing-mobile-queue" aria-hidden="true">
-            <span>Draft queue: 3 ready</span>
-          </div>
-          <div className="landing-actions" aria-label="Primary actions">
-            <a className="landing-action-primary" href="/dashboard">Open newsroom</a>
-            <a className="landing-action-secondary" href="/stories">Review stories</a>
-          </div>
+      <section id="product" className="v3-hero" aria-labelledby="v3-landing-title">
+        <div className="v3-content">
+          <motion.div className="v3-heading-row v3-heading-row--hero" initial={revealInitial} animate={{ opacity: 1, y: 0 }} transition={revealTransition}>
+            <h1 id="v3-landing-title" className="v3-hero-title">
+              <span>The most complete</span>
+              <span>journalism workflow tool.</span>
+            </h1>
+            <p>Everything you need in one unified workspace.</p>
+          </motion.div>
+          <motion.figure className="v3-product-shot" initial={reduceMotion ? false : { opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ ...revealTransition, delay: reduceMotion ? 0 : 0.12 }}>
+            <img src="/landing/product-dashboard.png" alt="Inscribe dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
+          </motion.figure>
         </div>
       </section>
 
-      <section id="workflow" className="landing-section landing-section-flow" aria-labelledby="workflow-title">
-        <div className="landing-section-heading">
-          <p className="landing-kicker">Editorial flow</p>
-          <h2 id="workflow-title">Every draft has a next move.</h2>
-          <p>
-            Falcon gives editors the review queue Google Classroom never quite becomes, while Google Docs remains the place for line edits and detailed feedback.
-          </p>
-        </div>
-        <ol className="landing-workflow-list">
-          {landingWorkflowSteps.map((step, index) => (
-            <motion.li
-              key={step.label}
-              initial={revealInitial}
-              whileInView={revealAnimate}
-              viewport={{ once: true, amount: 0.25 }}
-              transition={{ ...revealTransition, delay: reduceMotion ? 0 : index * 0.06 }}
-            >
-              <span>{step.label}</span>
-              <div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            </motion.li>
-          ))}
-        </ol>
-      </section>
+      {productScreens.map((screen) => (
+        <section id={screen.id} className="v3-landing-section" aria-labelledby={`${screen.id}-title`} key={screen.id}>
+          <div className="v3-content">
+            <motion.div className="v3-heading-row" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.45 }} transition={revealTransition}>
+              <h2 id={`${screen.id}-title`}>{screen.title}</h2>
+              <p>{screen.body}</p>
+            </motion.div>
+            <motion.figure className="v3-product-shot" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.18 }} transition={revealTransition}>
+              <img src={screen.image} alt={screen.alt} loading="lazy" />
+            </motion.figure>
+          </div>
+        </section>
+      ))}
 
-      <section id="review" className="landing-section landing-section-review" aria-labelledby="review-title">
-        <motion.div
-          className="landing-review-copy"
-          initial={revealInitial}
-          whileInView={revealAnimate}
-          viewport={{ once: true, amount: 0.35 }}
-          transition={revealTransition}
-        >
-          <p className="landing-kicker">Docs stay central</p>
-          <h2 id="review-title">Open the draft first. Update the workflow second.</h2>
-          <p>
-            Editors can jump straight into the Google Doc, return a draft, mark it ready, or link a missing Doc without turning review into another inbox.
-          </p>
-        </motion.div>
-        <motion.div
-          className="landing-doc-rail"
-          aria-label="Google Doc workflow preview"
-          initial={revealInitial}
-          whileInView={revealAnimate}
-          viewport={{ once: true, amount: 0.25 }}
-          transition={revealTransition}
-        >
-          <div className="landing-doc-title">Robotics Build Week</div>
-          <div className="landing-doc-meta">By Daniel Wu, editor: Ava Patel</div>
-          <div className="landing-doc-action">Open Google Doc</div>
-          <div className="landing-doc-action landing-doc-action-secondary">Status: Needs Revision</div>
-          <p>Scene detail needed. Clarify the competition stakes before another editor pass.</p>
-        </motion.div>
-      </section>
-
-      <section className="landing-section landing-section-fit" aria-labelledby="fit-title">
-        <div className="landing-section-heading">
-          <p className="landing-kicker">Why it fits a newsroom</p>
-          <h2 id="fit-title">Designed around deadlines, not dashboards.</h2>
-        </div>
-        <div className="landing-fit-grid">
-          <div>
-            <h3>For editors</h3>
-            <p>See which drafts need attention, who owns them, and where the feedback belongs.</p>
-          </div>
-          <div>
-            <h3>For writers</h3>
-            <p>Keep working in Docs while the submission stays visible to the newsroom.</p>
-          </div>
-          <div>
-            <h3>For advisers</h3>
-            <p>Check the publication pipeline without rebuilding the whole class workflow.</p>
-          </div>
+      <section className="v3-school" aria-labelledby="v3-school-title">
+        <div className="v3-content v3-heading-row">
+          <h2 id="v3-school-title">A calmer editorial desk for your school.</h2>
+          <p>Give writers, editors, and advisers one shared view of the work without replacing the tools your publication already trusts.</p>
         </div>
       </section>
 
-      <section className="landing-final" aria-labelledby="final-title">
-        <div>
-          <p className="landing-kicker">Ready for the copy desk</p>
-          <h2 id="final-title">Give every story a visible path from pitch to publish.</h2>
+      <footer className="v3-footer">
+        <div className="v3-content">
+          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
+            <span aria-hidden="true">I</span>
+            <strong>Inscribe</strong>
+          </a>
+          <small>&copy; 2026 Inscribe</small>
         </div>
-        <a className="landing-action-primary" href="/dashboard">Enter Falcon Newsroom</a>
-      </section>
+      </footer>
     </main>
   );
 }
 
-function LandingDeskScene() {
-  return (
-    <div className="landing-desk-scene" aria-hidden="true">
-      <div className="landing-desk-grid" />
-      <div className="landing-paper landing-paper-main">
-        <div className="landing-paper-heading">
-          <span>Draft queue</span>
-          <strong>May issue</strong>
-        </div>
-        {landingDeskRows.map((row) => (
-          <div className="landing-paper-row" key={row[0]}>
-            <span>{row[0]}</span>
-            <span>{row[1]}</span>
-            <span>{formatDisplayDate(row[2]) || row[2]}</span>
-          </div>
-        ))}
-      </div>
-      <div className="landing-paper landing-paper-doc">
-        <div className="landing-doc-lines">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="landing-editor-note">Comment: tighten the nut graf</div>
-      </div>
-      <div className="landing-deadline-strip">Deadline: June 2, 2026</div>
-      <div className="landing-source-strip">Sources confirmed: 5</div>
-    </div>
-  );
-}
 
 function AppShell() {
   const [page, setPage] = useState(initialAppPage);
@@ -2660,11 +2595,17 @@ function AppShell() {
   const [selectedArticleId, setSelectedArticleId] = useState("a1");
   const [toast, setToast] = useState("");
   const [account, setAccount] = useState(null);
+  const [workspace, setWorkspace] = useState(null);
   const [csrfToken, setCsrfToken] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [sessionAttempt, setSessionAttempt] = useState(0);
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
+  const hasWorkspace = accountRole === "owner" ? Boolean(asText(workspace?.id)) : Boolean(asText(account?.workspaceId));
+  const workspaceName = asText(workspace?.name) || "Workspace";
   const availableNavItems = navItemsForRole(accountRole);
   const availableNavSections = navSectionsForItems(availableNavItems);
 
@@ -2686,12 +2627,14 @@ function AppShell() {
     let active = true;
 
     async function loadSession() {
+      setSessionLoading(true);
+      setSessionError("");
       try {
         const response = await fetch(`${API_BASE}/api/auth/session`, {
           headers: { Accept: "application/json" },
           credentials: "include",
         });
-        const payload = await response.json();
+        const payload = await response.json().catch(() => ({}));
         if (!active) return;
         if (!response.ok || payload?.ok === false) {
           throw new Error(payload?.error || "Unable to verify your session.");
@@ -2701,10 +2644,15 @@ function AppShell() {
           return;
         }
         setAccount(normalizeDisplayUser(payload.user || FALLBACK_ACCOUNT));
+        setWorkspace(payload.workspace || null);
         setCsrfToken(payload.csrfToken || "");
       } catch (error) {
         if (!active) return;
-        setToast(error instanceof Error ? error.message : "Unable to verify your session.");
+        const message = error instanceof Error ? error.message : "Unable to verify your session.";
+        setSessionError(message);
+        setToast(message);
+      } finally {
+        if (active) setSessionLoading(false);
       }
     }
 
@@ -2712,20 +2660,31 @@ function AppShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [sessionAttempt]);
 
   useEffect(() => {
     if (!account) return;
+    if (accountRole !== "owner" && isOwnerRoute(locationPath)) {
+      const nextPage = defaultPageForRole(accountRole);
+      setPage(nextPage);
+      pushAppPath(pagePath(nextPage));
+      return;
+    }
+    if (accountRole === "owner" && !hasWorkspace && !isOwnerRoute(locationPath)) {
+      pushAppPath("/owner");
+      return;
+    }
+    if (!hasWorkspace || (accountRole === "owner" && isOwnerRoute(locationPath))) return;
     if (!roleCanAccessPage(accountRole, page)) {
       const nextPage = defaultPageForRole(accountRole);
       setToast(`${accountRoleLabel(accountRole)} access does not include ${navItems.find((item) => item.id === page)?.label || page}.`);
       setPage(nextPage);
       pushAppPath(pagePath(nextPage));
     }
-  }, [account, accountRole, page]);
+  }, [account, accountRole, hasWorkspace, locationPath, page]);
 
   useEffect(() => {
-    if (!account) return undefined;
+    if (!account || !hasWorkspace || (accountRole === "owner" && isOwnerRoute(locationPath))) return undefined;
     const controller = new AbortController();
 
     async function loadStories() {
@@ -2751,16 +2710,16 @@ function AppShell() {
       }
     }
 
-    if (accountRole === "viewer") {
+    if (accountRole === "guest") {
       setStories([]);
-      setStoriesError("Stories are not available to viewers.");
+      setStoriesError("Stories are not available to guests.");
       setStoriesLoading(false);
       return undefined;
     }
 
     loadStories();
     return () => controller.abort();
-  }, [account, accountRole]);
+  }, [account, accountRole, hasWorkspace, locationPath]);
 
   const navigatePage = (nextPage) => {
     if (account && !roleCanAccessPage(accountRole, nextPage)) {
@@ -2777,20 +2736,33 @@ function AppShell() {
     setToast(`Moved story to ${status}.`);
   };
 
-  const updateStoryStatus = async (id, status) => {
+  const updateStoryStatus = async (id, status, options = {}) => {
     const currentStory = stories.find((story) => story.id === id);
     if (status === "Submitted" && canSubmitOwnStory(account, currentStory) && !storyAttachmentItems(currentStory).length) {
       setToast("Attach work before submitting this story.");
-      return;
+      return false;
     }
-    const canReturnStory = canManageEditorialWorkflow(accountRole) && status === "Returned";
-    const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && status === "Ready for Publish";
+    const canStartReview = canManageEditorialWorkflow(accountRole) && currentStory?.status === "Submitted" && status === "In Review";
+    const canReturnStory = canManageEditorialWorkflow(accountRole) && currentStory?.status === "In Review" && status === "Returned";
+    const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && currentStory?.status === "In Review" && status === "Ready for Publish";
+    const publicationUrl = asText(options.publicationUrl);
+    const canPublish =
+      ["owner", "admin"].includes(accountRole) &&
+      currentStory?.status === "Ready for Publish" &&
+      status === "Published" &&
+      isValidHttpUrl(publicationUrl);
     const canUseWriterWorkflow =
       (status === "Submitted" && canSubmitOwnStory(account, currentStory)) ||
       (status === "Drafting" && canUnsubmitOwnStory(account, currentStory));
-    if (!canReturnStory && !canSendToTeacherApproval && !canUseWriterWorkflow) {
-      setToast(canManageEditorialWorkflow(accountRole) ? "Editors can return stories or send them to teacher approval." : "Writers can submit or unsubmit their own stories.");
-      return;
+    if (!canStartReview && !canReturnStory && !canSendToTeacherApproval && !canPublish && !canUseWriterWorkflow) {
+      setToast(
+        status === "Published"
+          ? "Only admins can publish a story from Ready for Publish using a valid http or https URL."
+          : canManageEditorialWorkflow(accountRole)
+            ? "Follow the review sequence before moving this story."
+            : "Writers can submit or unsubmit their own stories."
+      );
+      return false;
     }
     try {
       const response = await fetch(`${API_BASE}/api/stories/${encodeURIComponent(id)}`, {
@@ -2801,7 +2773,7 @@ function AppShell() {
           ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...(canPublish ? { publicationUrl } : {}) }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
@@ -2813,9 +2785,11 @@ function AppShell() {
       }
       const updatedStory = normalizeDisplayStory(payload.story || { id, status, lastEdited: "Updated just now" });
       setStories((prev) => prev.map((story) => (story.id === id ? { ...story, ...updatedStory } : story)));
-      setToast(`Updated story to ${status}.`);
+      setToast(status === "Published" ? "Published story and added it to the article archive." : `Updated story to ${status}.`);
+      return true;
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Story status update failed.");
+      return false;
     }
   };
 
@@ -3011,6 +2985,31 @@ function AppShell() {
     setToast(`Updated task to ${status}.`);
   };
 
+  const joinWorkspace = async (code) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/workspaces/join`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ code }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not join this workspace.");
+      }
+      setAccount(normalizeDisplayUser(payload.user));
+      setWorkspace(payload.workspace || null);
+      setToast(`Joined ${payload.workspace?.name || "workspace"}.`);
+      return true;
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Could not join this workspace.");
+    }
+  };
+
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
@@ -3062,35 +3061,95 @@ function AppShell() {
     if (page === "pitches" && normalizedPath.startsWith("/pitches/")) {
       return "Pitch review";
     }
+    if (page === "settings") {
+      if (normalizedPath === "/admin" || normalizedPath.includes("/administration")) return "Administration";
+      if (normalizedPath.includes("/names")) return "Names database";
+    }
     return "";
   }, [locationPath, page, stories]);
 
   const pages = {
-    dashboard: <DashboardPage articles={articles} tasks={tasks} setPage={setPage} setSelectedArticleId={setSelectedArticleId} />,
+    dashboard: <DashboardPage currentUser={account} csrfToken={csrfToken} setPage={setPage} setToast={setToast} onStoryAccepted={handleStoryCreatedFromPitch} />,
     pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
     stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
-    articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} />,
+    articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} csrfToken={csrfToken} />,
     interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
     calendar: <CalendarPage stories={stories} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
     analytics: <AnalyticsPage />,
-    admin: <AdminPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} />,
-    settings: <SettingsPage />,
+    settings: <SettingsPage workspace={workspace} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} onWorkspaceUpdated={setWorkspace} locationPath={locationPath} />,
   };
+
+  if (!account && sessionLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100" aria-label="Loading Inscribe">
+        <div className="w-full max-w-sm" role="status">
+          <div className="h-2 w-24 animate-pulse rounded bg-white/[0.12]" />
+          <div className="mt-5 h-7 w-64 animate-pulse rounded bg-white/[0.08]" />
+          <div className="mt-3 h-4 w-full animate-pulse rounded bg-white/[0.05]" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!account && sessionError) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100">
+        <section className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-white/[0.025] p-6" aria-labelledby="session-error-title">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-300/20 bg-rose-300/[0.06] text-rose-200">
+            <Icon name="x" className="h-4 w-4" />
+          </div>
+          <h1 id="session-error-title" className="mt-5 text-xl font-semibold text-zinc-50">Could not open your newsroom</h1>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">{sessionError}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">Check that the newsroom server is running, then try again. You can also return to login and start a new session.</p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Retry</Button>
+            <Button variant="ghost" onClick={() => window.location.assign(loginRedirectForCurrentPath())}>Go to login</Button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!account) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-sm text-zinc-400" role="status">
+        Taking you to login...
+      </div>
+    );
+  }
+
+  if (accountRole === "owner" && (isOwnerRoute(locationPath) || !hasWorkspace)) {
+    return (
+      <OwnerWorkspacesPage
+        user={account}
+        csrfToken={csrfToken}
+        signingOut={signingOut}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (!hasWorkspace) {
+    return <WorkspaceJoinShell user={account} signingOut={signingOut} onJoin={joinWorkspace} onSignOut={handleSignOut} />;
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-[#08090c] text-zinc-100">
       <div className="relative flex h-screen overflow-hidden">
         <aside className="hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-white/[0.08] bg-[#08090c]/80 p-4 backdrop-blur-xl lg:flex">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            <button onClick={() => navigatePage("dashboard")} className="mb-7 flex w-full items-center gap-3 rounded-xl px-2 py-1 text-left hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-500 text-sm font-bold text-black">F</div>
-              <div>
-                <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
-                <div className="text-xs text-zinc-500">Poolesville Pulse</div>
-              </div>
+            <button type="button" onClick={() => accountRole === "owner" ? pushAppPath("/owner") : navigatePage("dashboard")} className="group mb-7 flex w-full items-center gap-2 rounded-xl border-0 bg-transparent px-2 py-1 text-left outline-none focus:outline-none focus-visible:outline-none">
+              <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+              <div className="min-w-0 truncate text-sm font-medium text-zinc-100 group-focus-visible:underline group-focus-visible:underline-offset-4">{workspaceName}</div>
             </button>
+            {accountRole === "owner" ? (
+              <button type="button" onClick={() => pushAppPath("/owner")} className="mb-5 flex items-center gap-2 px-3 text-xs text-zinc-500 transition hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+                <Icon name="dashboard" className="h-3.5 w-3.5" />
+                All workspaces
+              </button>
+            ) : null}
 
             <nav className="space-y-5" aria-label="Primary navigation">
               {availableNavSections.map((section) => (
@@ -3114,11 +3173,18 @@ function AppShell() {
         <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
           <header className="relative z-[100] shrink-0 border-b border-white/[0.08] bg-[#08090c]/75 px-5 py-4 backdrop-blur-2xl md:px-8">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 lg:hidden">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-black">F</div>
-                <span className="font-medium">Falcon</span>
+              <div className="flex items-center gap-2 lg:hidden">
+                <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+                <span className="max-w-[55vw] truncate font-medium">{workspaceName}</span>
               </div>
-              <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
+              <div className="flex items-center gap-3">
+                <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
+                {accountRole === "owner" ? (
+                  <button type="button" onClick={() => pushAppPath("/owner")} className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/[0.04] hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 lg:hidden">
+                    Workspaces
+                  </button>
+                ) : null}
+              </div>
             </div>
           </header>
 
@@ -3146,16 +3212,423 @@ function AppShell() {
   );
 }
 
-function AccountMenu({ user, signingOut, onSignOut }) {
+function OwnerWorkspacesPage({ user, csrfToken = "", signingOut = false, onSignOut = () => {} }) {
+  const [workspaces, setWorkspaces] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [surfaceError, setSurfaceError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ name: "", publicationUrl: "" });
+  const [editingId, setEditingId] = useState("");
+  const [editDraft, setEditDraft] = useState({ name: "", publicationUrl: "" });
+  const [busyId, setBusyId] = useState("");
+  const [rotateConfirmId, setRotateConfirmId] = useState("");
+
+  const requestHeaders = (json = false) => ({
+    Accept: "application/json",
+    ...(json ? { "Content-Type": "application/json" } : {}),
+    ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+  });
+
+  const sortWorkspaces = (items) => [...items].sort((left, right) => asText(left.name).localeCompare(asText(right.name)));
+
+  const loadWorkspaces = async (signal) => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load workspaces.");
+      setWorkspaces(sortWorkspaces(Array.isArray(payload.workspaces) ? payload.workspaces : []));
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      setLoadError(error instanceof Error ? error.message : "Could not load workspaces.");
+      setWorkspaces([]);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadWorkspaces(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const replaceWorkspace = (workspace) => {
+    setWorkspaces((current) => sortWorkspaces(current.map((item) => item.id === workspace.id ? { ...item, ...workspace } : item)));
+  };
+
+  const createWorkspace = async () => {
+    if (creating) return;
+    if (!createDraft.name.trim()) {
+      setSurfaceError("Workspace name is required.");
+      return;
+    }
+    setCreating(true);
+    setSurfaceError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces`, {
+        method: "POST",
+        headers: requestHeaders(true),
+        credentials: "include",
+        body: JSON.stringify(createDraft),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not create workspace.");
+      setWorkspaces((current) => sortWorkspaces([...current, payload.workspace]));
+      setCreateDraft({ name: "", publicationUrl: "" });
+      setCreateOpen(false);
+      setNotice(`${payload.workspace?.name || "Workspace"} created. Its join code is ready to share.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not create workspace.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const openWorkspace = async (workspace) => {
+    if (busyId) return;
+    setBusyId(`open:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}/open`, {
+        method: "POST",
+        headers: requestHeaders(),
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not open workspace.");
+      window.location.assign(payload.redirect || "/dashboard");
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not open workspace.");
+      setBusyId("");
+    }
+  };
+
+  const beginEditing = (workspace) => {
+    setEditingId(workspace.id);
+    setEditDraft({ name: asText(workspace.name), publicationUrl: asText(workspace.publicationUrl) });
+    setRotateConfirmId("");
+    setSurfaceError("");
+    setNotice("");
+  };
+
+  const saveWorkspace = async (workspace) => {
+    if (busyId) return;
+    if (!editDraft.name.trim()) {
+      setSurfaceError("Workspace name is required.");
+      return;
+    }
+    setBusyId(`save:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}`, {
+        method: "PATCH",
+        headers: requestHeaders(true),
+        credentials: "include",
+        body: JSON.stringify(editDraft),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not save workspace.");
+      replaceWorkspace(payload.workspace);
+      setEditingId("");
+      setNotice(`${payload.workspace?.name || "Workspace"} updated.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not save workspace.");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const rotateJoinCode = async (workspace) => {
+    if (rotateConfirmId !== workspace.id) {
+      setRotateConfirmId(workspace.id);
+      return;
+    }
+    if (busyId) return;
+    setBusyId(`rotate:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}/join-code/rotate`, {
+        method: "POST",
+        headers: requestHeaders(),
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not rotate join code.");
+      replaceWorkspace(payload.workspace);
+      setRotateConfirmId("");
+      setNotice(`New join code created for ${payload.workspace?.name || "workspace"}.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not rotate join code.");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const copyJoinCode = async (workspace) => {
+    if (!workspace.joinCode) return;
+    try {
+      await navigator.clipboard.writeText(workspace.joinCode);
+      setNotice(`Copied the join code for ${workspace.name}.`);
+      setSurfaceError("");
+    } catch {
+      setSurfaceError("Could not copy the join code. Select it and copy it manually.");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#08090c] text-zinc-100">
+      <header className="border-b border-white/[0.08]">
+        <div className="mx-auto flex max-w-[1240px] items-center justify-between gap-4 px-5 py-4 md:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-zinc-100">Inscribe</div>
+
+            </div>
+          </div>
+          <AccountMenu variant="header" user={user} signingOut={signingOut} onSignOut={onSignOut} />
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[1240px] px-5 py-10 md:px-8 md:py-14">
+        <div className="flex flex-col gap-5 border-b border-white/[0.1] pb-7 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">Workspaces</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Open a newsroom, update its settings, or create a new workspace.</p>
+          </div>
+          <Button icon="plus" onClick={() => { setCreateOpen((open) => !open); setSurfaceError(""); setNotice(""); }}>
+            {createOpen ? "Cancel" : "New workspace"}
+          </Button>
+        </div>
+
+        {createOpen ? (
+          <section className="border-b border-white/[0.1] py-7" aria-labelledby="create-workspace-title">
+            <div className="max-w-2xl">
+              <h2 id="create-workspace-title" className="text-lg font-semibold text-zinc-100">Create workspace</h2>
+              <p className="mt-1 text-sm text-zinc-500">A unique join code is generated automatically.</p>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <SettingsField id="owner-create-name" label="Workspace name" value={createDraft.name} onChange={(name) => setCreateDraft((draft) => ({ ...draft, name }))} autoComplete="organization" />
+                <SettingsField id="owner-create-url" label="Publication website (optional)" value={createDraft.publicationUrl} onChange={(publicationUrl) => setCreateDraft((draft) => ({ ...draft, publicationUrl }))} type="url" autoComplete="url" />
+              </div>
+              <div className="mt-5">
+                <Button onClick={createWorkspace} disabled={creating}>{creating ? "Creating" : "Create workspace"}</Button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {surfaceError ? <div className="mt-5 border border-rose-300/20 bg-rose-300/[0.05] px-4 py-3 text-sm text-rose-200" role="alert">{surfaceError}</div> : null}
+        {notice ? <div className="mt-5 border border-white/[0.1] bg-white/[0.025] px-4 py-3 text-sm text-zinc-300" role="status">{notice}</div> : null}
+
+        <section className="pt-7" aria-labelledby="workspace-list-title">
+          <div className="mb-3 hidden grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] gap-4 px-3 text-xs uppercase tracking-[0.14em] text-zinc-600 md:grid">
+            <span id="workspace-list-title">Workspace</span>
+            <span className="text-center">Date created</span>
+            <span className="text-center">Members</span>
+            <span className="text-center">Join code</span>
+            <span aria-hidden="true" />
+          </div>
+
+          {loading ? (
+            <div className="divide-y divide-white/[0.08] border-y border-white/[0.08]" role="status" aria-label="Loading workspaces">
+              {Array.from({ length: 3 }, (_, index) => (
+                <div key={index} className="grid animate-pulse gap-4 px-3 py-6 md:grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] md:items-center md:gap-4">
+                  <div><div className="h-4 w-44 rounded bg-white/[0.09]" /><div className="mt-3 h-3 w-64 max-w-full rounded bg-white/[0.05]" /></div>
+                  <div className="h-3 w-24 rounded bg-white/[0.05]" />
+                  <div className="h-3 w-20 rounded bg-white/[0.05]" />
+                  <div className="h-4 w-24 rounded bg-white/[0.06]" />
+                  <div className="h-9 w-40 rounded bg-white/[0.06]" />
+                </div>
+              ))}
+            </div>
+          ) : loadError ? (
+            <StateMessage icon="x" title="Could not load workspaces" body={loadError} action={<Button variant="ghost" onClick={() => loadWorkspaces()}>Try again</Button>} />
+          ) : workspaces.length === 0 ? (
+            <StateMessage icon="dashboard" title="No workspaces yet" body="Create the first workspace to generate its join code." action={<Button onClick={() => setCreateOpen(true)}>Create workspace</Button>} />
+          ) : (
+            <div className="border-y border-white/[0.1]">
+              {workspaces.map((workspace) => {
+                const editing = editingId === workspace.id;
+                const opening = busyId === `open:${workspace.id}`;
+                const saving = busyId === `save:${workspace.id}`;
+                const rotating = busyId === `rotate:${workspace.id}`;
+                return (
+                  <article key={workspace.id} className="border-b border-white/[0.08] last:border-b-0">
+                    <div className="grid gap-4 px-3 py-5 md:grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] md:items-center md:gap-4">
+                      <div className="min-w-0">
+                        <h2 className="truncate text-sm font-semibold text-zinc-100">{workspace.name}</h2>
+                        <p className="mt-1 truncate text-xs text-zinc-500">{workspace.publicationUrl || "Publication website not set"}</p>
+
+                      </div>
+                      <div className="text-sm text-zinc-400 md:text-center"><span className="md:hidden">Date created: </span>{workspace.createdAt ? formatDisplayDate(workspace.createdAt) : "Unavailable"}</div>
+                      <div className="text-sm text-zinc-400 md:text-center"><span className="md:hidden">Members: </span>{workspace.memberCount || 0}</div>
+                      <button type="button" onClick={() => copyJoinCode(workspace)} className="w-fit justify-self-start font-mono text-sm tracking-[0.12em] text-zinc-300 underline-offset-4 hover:text-zinc-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:justify-self-center" aria-label={`Copy join code ${workspace.joinCode} for ${workspace.name}`}>
+                        {workspace.joinCode || "Unavailable"}
+                      </button>
+                      <div className="flex flex-wrap justify-start gap-2 md:flex-nowrap md:justify-end">
+                        <Button onClick={() => openWorkspace(workspace)} disabled={Boolean(busyId)}>{opening ? "Opening" : "Open"}</Button>
+                        <Button variant="ghost" icon="settings" onClick={() => editing ? setEditingId("") : beginEditing(workspace)} disabled={Boolean(busyId)}>{editing ? "Close" : "Settings"}</Button>
+                      </div>
+                    </div>
+
+                    {editing ? (
+                      <div className="border-t border-white/[0.08] bg-white/[0.018] px-3 py-6">
+                        <div className="max-w-3xl">
+                          <h3 className="text-sm font-semibold text-zinc-200">Workspace settings</h3>
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                            <SettingsField id={`owner-edit-name-${workspace.id}`} label="Workspace name" value={editDraft.name} onChange={(name) => setEditDraft((draft) => ({ ...draft, name }))} autoComplete="organization" />
+                            <SettingsField id={`owner-edit-url-${workspace.id}`} label="Publication website (optional)" value={editDraft.publicationUrl} onChange={(publicationUrl) => setEditDraft((draft) => ({ ...draft, publicationUrl }))} type="url" autoComplete="url" />
+                          </div>
+                          <div className="mt-5 flex flex-col gap-4 border-t border-white/[0.08] pt-5 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-xs text-zinc-600">Workspace join code</div>
+                              <div className="mt-1 font-mono text-sm tracking-[0.12em] text-zinc-300">{workspace.joinCode}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="ghost" onClick={() => rotateJoinCode(workspace)} disabled={Boolean(busyId)}>
+                                {rotating ? "Rotating" : rotateConfirmId === workspace.id ? "Confirm rotation" : "Rotate code"}
+                              </Button>
+                              <Button onClick={() => saveWorkspace(workspace)} disabled={Boolean(busyId)}>{saving ? "Saving" : "Save changes"}</Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
+  const reduceMotion = useReducedMotion();
+  const [code, setCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const cleanCode = code.replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (!cleanCode) {
+      setError("Enter the code shared by your newsroom.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await onJoin(cleanCode);
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : "Could not join this workspace.");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="h-screen overflow-hidden bg-[#08090c] text-zinc-100">
+      <div className="flex h-full">
+        <aside className="hidden h-full w-72 shrink-0 flex-col border-r border-white/[0.08] bg-[#08090c] p-4 lg:flex">
+          <div className="flex items-center gap-3 px-2 py-1">
+            <img src="/app-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-xl object-cover" />
+            <div className="text-sm font-medium text-zinc-100">Inscribe</div>
+          </div>
+          <div className="flex-1" aria-hidden="true" />
+          <AccountMenu user={user} signingOut={signingOut} onSignOut={onSignOut} />
+        </aside>
+
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.08] px-5 py-4 lg:hidden">
+            <img src="/app-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-xl object-cover" />
+            <span className="text-sm font-medium">Inscribe</span>
+          </header>
+
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-12">
+            <motion.section
+              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-md"
+              aria-labelledby="join-workspace-title"
+            >
+              <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.045] text-zinc-300">
+                <Icon name="people" className="h-5 w-5" />
+              </div>
+              <h1 id="join-workspace-title" className="text-2xl font-semibold tracking-tight text-zinc-50">Join a newsroom</h1>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">Enter the workspace code from your adviser or editor. You will join as a guest.</p>
+
+              <form onSubmit={submit} className="mt-8 border-y border-white/[0.09] py-6">
+                <label htmlFor="workspace-code" className="mb-2 block text-sm font-medium text-zinc-300">Workspace code</label>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <input
+                    id="workspace-code"
+                    autoFocus
+                    autoComplete="off"
+                    spellCheck="false"
+                    value={code}
+                    onChange={(event) => {
+                      setCode(event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 12));
+                      if (error) setError("");
+                    }}
+                    placeholder="ABC2345"
+                    aria-describedby={error ? "workspace-code-error" : "workspace-code-help"}
+                    aria-invalid={Boolean(error)}
+                    className="h-11 min-w-0 flex-1 rounded-xl border border-white/[0.12] bg-black/25 px-3 font-mono text-sm uppercase tracking-[0.16em] text-zinc-100 outline-none transition placeholder:tracking-[0.12em] placeholder:text-zinc-700 focus:border-white/[0.28] focus:ring-2 focus:ring-white/[0.06]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={submitting || !code}
+                    className="h-11 shrink-0 rounded-xl bg-zinc-100 px-5 text-sm font-medium text-zinc-950 transition hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-100/30 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
+                  >
+                    {submitting ? "Joining..." : "Join workspace"}
+                  </button>
+                </div>
+                {error ? <p id="workspace-code-error" className="mt-3 text-sm text-rose-300" role="alert">{error}</p> : <p id="workspace-code-help" className="mt-3 text-xs leading-5 text-zinc-600">Codes are not case-sensitive.</p>}
+              </form>
+            </motion.section>
+          </div>
+
+          <div className="border-t border-white/[0.08] p-4 lg:hidden">
+            <AccountMenu user={user} signingOut={signingOut} onSignOut={onSignOut} />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AccountMenu({ user, signingOut, onSignOut, variant = "sidebar" }) {
+  const reduceMotion = useReducedMotion();
+  const menuId = useId();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const menuItemRef = useRef(null);
   const displayName = accountDisplayName(user);
   const email = asText(user?.email);
   const initials = accountInitials(user);
   const roleLabel = accountRoleLabel(user?.role);
+  const headerVariant = variant === "header";
 
   useEffect(() => {
     if (!open) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (!signingOut) menuItemRef.current?.focus();
+    });
 
     const handlePointerDown = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -3163,49 +3636,63 @@ function AccountMenu({ user, signingOut, onSignOut }) {
       }
     };
     const handleKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        window.requestAnimationFrame(() => triggerRef.current?.focus());
+      }
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open]);
+  }, [open, signingOut]);
 
   return (
-    <div ref={menuRef} className="relative border-t border-white/[0.08] pt-3">
+    <div ref={menuRef} className={headerVariant ? "relative" : "relative border-t border-white/[0.08] pt-3"}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Open user menu"
+        aria-controls={open ? menuId : undefined}
+        aria-label={open ? "Close user menu" : "Open user menu"}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/15"
+        className={`${headerVariant ? "justify-center p-1.5" : "w-full px-2 py-2 text-left"} flex items-center gap-3 rounded-lg transition hover:bg-white/[0.035] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 motion-reduce:transition-none`}
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-xs font-semibold text-zinc-100">
           {initials}
         </span>
-        <span className="min-w-0 flex-1">
+        {!headerVariant ? <span className="block min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-zinc-100">{displayName}</span>
-          <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span>
-        </span>
+          {roleLabel ? <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span> : null}
+        </span> : null}
       </button>
       <AnimatePresence>
         {open && (
           <motion.div
+            id={menuId}
             role="menu"
             aria-label="User account"
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.98 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
-            className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[1000] w-full min-w-64 overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
+            exit={reduceMotion ? undefined : { opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
+            className={`${headerVariant ? "right-0 top-[calc(100%+0.5rem)] w-56" : "bottom-[calc(100%+0.5rem)] left-0 w-full min-w-64"} absolute z-[1000] overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50`}
           >
-            {email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
+            {headerVariant ? (
+              <div className="px-3 py-3">
+                <div className="truncate text-sm font-medium text-zinc-100">{displayName}</div>
+                {email ? <div className="mt-0.5 truncate text-xs text-zinc-500">{email}</div> : null}
+              </div>
+            ) : email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
             <div className="h-px bg-white/[0.08]" />
             <button
+              ref={menuItemRef}
               type="button"
               role="menuitem"
               disabled={signingOut}
@@ -3213,7 +3700,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
                 setOpen(false);
                 onSignOut();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/15 disabled:cursor-not-allowed disabled:text-zinc-600"
+              className={`${headerVariant ? "py-2 text-xs" : "py-2.5 text-sm"} flex w-full items-center gap-2 px-3 text-left text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:text-zinc-600 motion-reduce:transition-none`}
             >
               <Icon name="logout" className="h-4 w-4" />
               {signingOut ? "Signing out" : "Sign out"}
@@ -3250,14 +3737,23 @@ function HeaderBreadcrumb({ page, detailLabel, navigatePage }) {
 }
 
 function Toast({ message, onDismiss }) {
+  const reduceMotion = useReducedMotion();
   if (!message) return null;
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur">
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.18 }}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border border-white/[0.08] bg-zinc-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur"
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm text-zinc-200">{message}</p>
         </div>
-        <button type="button" onClick={onDismiss} className="text-xs text-zinc-600 hover:text-zinc-300">
+        <button type="button" onClick={onDismiss} className="rounded text-xs text-zinc-600 hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
           Dismiss
         </button>
       </div>
@@ -3269,209 +3765,224 @@ function QuickCreateModal() {
   return null;
 }
 
-function DashboardPage({ articles, tasks, setPage, setSelectedArticleId }) {
-  const [databaseStats, setDatabaseStats] = useState({
-    articles: null,
-    interviews: null,
-    loading: true,
-    error: "",
-  });
+function DashboardPage({ currentUser, csrfToken = "", setPage, setToast, onStoryAccepted }) {
+  const [dashboard, setDashboard] = useState({ tasks: [], activity: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [respondingTo, setRespondingTo] = useState("");
+  const [showAllActivity, setShowAllActivity] = useState(false);
+  const firstName = asText(currentUser?.firstName) || accountDisplayName(currentUser).split(/\s+/)[0] || "there";
+
+  const loadDashboard = async (signal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/dashboard`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Your dashboard is unavailable.");
+      setDashboard({
+        tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+        activity: Array.isArray(payload.activity) ? sortActivitiesNewestFirst(payload.activity.map(normalizeDisplayActivity)) : [],
+      });
+    } catch (err) {
+      if (err.name !== "AbortError") setError(err instanceof Error ? err.message : "Your dashboard is unavailable.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
 
   useEffect(() => {
+    if (!currentUser) return undefined;
     const controller = new AbortController();
-
-    const loadDatabaseStats = async () => {
-      try {
-        const [articlesResponse, interviewsResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/article-records?page=1&limit=1`, {
-            headers: { Accept: "application/json" },
-            credentials: "include",
-            signal: controller.signal,
-          }),
-          fetch(`${API_BASE}/api/interview-records`, {
-            headers: { Accept: "application/json" },
-            credentials: "include",
-            signal: controller.signal,
-          }),
-        ]);
-        const [articlesPayload, interviewsPayload] = await Promise.all([
-          articlesResponse.json().catch(() => ({})),
-          interviewsResponse.json().catch(() => ({})),
-        ]);
-
-        if (!articlesResponse.ok || articlesPayload.ok !== true) {
-          throw new Error(articlesPayload.error || "Article records unavailable.");
-        }
-        if (!interviewsResponse.ok || interviewsPayload.ok !== true) {
-          throw new Error(interviewsPayload.error || "Interview records unavailable.");
-        }
-
-        setDatabaseStats({
-          articles: Number(articlesPayload.total) || 0,
-          interviews: Number(interviewsPayload.total) || (Array.isArray(interviewsPayload.people) ? interviewsPayload.people.length : 0),
-          loading: false,
-          error: "",
-        });
-      } catch (err) {
-        if (err.name === "AbortError") return;
-        setDatabaseStats({
-          articles: null,
-          interviews: null,
-          loading: false,
-          error: err.message || "Database totals unavailable.",
-        });
-      }
-    };
-
-    loadDatabaseStats();
+    loadDashboard(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [currentUser?.id]);
 
-  const articleTotal = databaseStats.loading ? "..." : databaseStats.error ? "-" : fmt(databaseStats.articles || 0);
-  const interviewTotal = databaseStats.loading ? "..." : databaseStats.error ? "-" : fmt(databaseStats.interviews || 0);
+  const openItem = (item) => {
+    if (!item?.entityId) return;
+    if (item.entityType === "pitch") {
+      setPage("pitches");
+      pushAppPath(pitchDetailPath(item.entityId));
+    } else {
+      setPage("stories");
+      pushAppPath(storyDetailPath(item.entityId));
+    }
+  };
+
+  const respondToInvitation = async (item, decision) => {
+    if (!item?.entityId || respondingTo) return;
+    setRespondingTo(`${item.entityId}:${decision}`);
+    try {
+      const response = await fetch(`${API_BASE}/api/story-invitations/${encodeURIComponent(item.entityId)}/${decision}`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not respond to the invitation.");
+      if (payload.story) onStoryAccepted?.(payload.story);
+      setToast(decision === "accept" ? "Invitation accepted. You can now edit this story." : "Invitation declined.");
+      await loadDashboard();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Could not respond to the invitation.");
+    } finally {
+      setRespondingTo("");
+    }
+  };
+
+  const emptyMessage = (kind) => kind === "tasks"
+    ? "You are caught up. New assignments and review requests will appear here."
+    : "Status decisions, feedback, and invitations that need your attention will appear here.";
+  const visibleActivity = showAllActivity ? dashboard.activity : dashboard.activity.slice(0, 6);
+  const hasHiddenActivity = dashboard.activity.length > 6;
+  const dashboardErrorMessage = error === "Failed to fetch"
+    ? "Some dashboard data couldn't be loaded."
+    : error;
 
   return (
-    <PageShell title="Newsroom dashboard" eyebrow="Home / Command center">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Metric icon="article" label="Articles active" value={articleTotal} />
-        <Metric icon="eye" label="Views this week" value="16,460" delta="+18.4%" />
-        <Metric icon="people" label="Interviews logged" value={interviewTotal} />
-        <Metric icon="task" label="Tasks due" value={tasks.filter((t) => t.status !== "Done").length} delta="2 high priority" warn />
-      </section>
+    <PageShell
+      title={`Hi ${firstName}`}
+      description="Here's what needs your attention today."
+      className="max-w-[1440px]"
+    >
+      {error ? (
+        <div className="mb-6 flex">
+          <div role="alert" className="inline-flex w-full max-w-xl items-start gap-3 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-3.5 py-2.5 sm:w-auto sm:items-center">
+            <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-rose-300/20 bg-rose-300/[0.08] text-xs font-semibold text-rose-300">!</span>
+            <p className="min-w-0 flex-1 break-words text-sm leading-5 text-rose-100">{dashboardErrorMessage}</p>
+            <button type="button" onClick={() => loadDashboard()} disabled={loading} className="shrink-0 rounded-md px-1.5 py-1 text-xs font-semibold text-rose-200 transition hover:bg-rose-300/[0.08] hover:text-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/30 disabled:cursor-not-allowed disabled:opacity-50">
+              Retry
+            </button>
+          </div>
+        </div>
+      ) : null}
 
-      <section className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card className="p-5">
-          <div className="mb-5 flex items-start justify-between">
-            <div>
-              <h2 className="font-medium text-zinc-50">This week in traffic</h2>
-              <p className="mt-1 text-sm text-zinc-500">Views and visitors across published stories.</p>
-            </div>
-            <StatusBadge tone="green">Live mock data</StatusBadge>
+      <div className="grid min-h-[560px] gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] lg:gap-0">
+        <section aria-labelledby="dashboard-tasks" className="min-w-0 lg:pr-10">
+          <div className="flex items-baseline justify-between border-b border-white/[0.14] pb-3">
+            <h2 id="dashboard-tasks" className="text-base font-semibold text-zinc-100">Tasks</h2>
+            <span className="text-xs tabular-nums text-zinc-500">{dashboard.tasks.length} open</span>
           </div>
-          <div className="h-[320px]">
-            <TrafficChart />
+          <div>
+            {loading ? (
+              <DashboardSkeleton rows={5} />
+            ) : dashboard.tasks.length ? dashboard.tasks.map((item) => (
+              <DashboardTaskRow
+                key={item.id}
+                item={item}
+                busy={respondingTo.startsWith(`${item.entityId}:`)}
+                onOpen={() => openItem(item)}
+                onRespond={(decision) => respondToInvitation(item, decision)}
+              />
+            )) : (
+              <DashboardEmpty icon="task" text={emptyMessage("tasks")} />
+            )}
           </div>
-        </Card>
-        <Card className="p-5">
-          <div className="mb-5">
-            <h2 className="font-medium text-zinc-50">Top performing articles</h2>
-            <p className="mt-1 text-sm text-zinc-500">Click any story to inspect details.</p>
-          </div>
-          <div className="space-y-2">
-            {articles
-              .slice()
-              .sort((a, b) => b.views - a.views)
-              .slice(0, 5)
-              .map((article, idx) => (
-                <button key={article.id} type="button" onClick={() => { setSelectedArticleId(article.id); setPage("articles"); }} className="group flex w-full items-center justify-between gap-4 rounded-xl border border-transparent px-3 py-3 text-left transition hover:border-white/[0.08] hover:bg-white/[0.04]">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-xs text-zinc-500">{idx + 1}</div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-zinc-300 group-hover:text-zinc-50">{article.title}</p>
-                      <p className="text-xs text-zinc-600">{article.section}</p>
-                    </div>
-                  </div>
-                  <span className="text-sm text-zinc-400">{fmt(article.views)}</span>
-                </button>
-              ))}
-          </div>
-        </Card>
-      </section>
+        </section>
 
-      <section className="mt-5 grid gap-5 xl:grid-cols-3">
-        <Card className="p-5 xl:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-medium">Editorial activity</h2>
-            <Button variant="ghost" onClick={() => setPage("tasks")}>
-              View all
-            </Button>
+        <section aria-labelledby="dashboard-activity" className="min-w-0 lg:border-l lg:border-white/[0.1] lg:pl-10">
+          <div className="flex items-baseline justify-between border-b border-white/[0.14] pb-3">
+            <h2 id="dashboard-activity" className="text-base font-semibold text-zinc-100">Recent activity</h2>
+            {hasHiddenActivity ? (
+              <button type="button" onClick={() => setShowAllActivity((current) => !current)} className="text-xs font-medium text-zinc-400 transition hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+                {showAllActivity ? "Show less" : "See all"}
+              </button>
+            ) : null}
           </div>
-          <ActivityFeed />
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-4 font-medium">AI suggestions</h2>
-          <div className="space-y-3">
-            <Insight title="Follow-up opportunity" body="The Snapchat article has high search traffic. Assign an explainer about exporting memories." />
-            <Insight title="Source diversity" body="Current tech coverage leans upperclassmen. Add freshman and sophomore interviews." />
-            <Insight title="Publishing rhythm" body="Thursday afternoon had peak engagement. Schedule social posts then." />
+          <div className={cx(showAllActivity && "lg:max-h-[calc(100vh-230px)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2")}>
+            {loading ? (
+              <DashboardSkeleton rows={6} />
+            ) : visibleActivity.length ? visibleActivity.map((item) => (
+              <DashboardActivityRow
+                key={item.id}
+                item={item}
+                busy={respondingTo.startsWith(`${item.entityId}:`)}
+                onOpen={() => openItem(item)}
+                onRespond={(decision) => respondToInvitation(item, decision)}
+              />
+            )) : (
+              <DashboardEmpty icon="mail" text={emptyMessage("activity")} />
+            )}
           </div>
-        </Card>
-      </section>
+        </section>
+      </div>
     </PageShell>
   );
 }
 
-function Metric({ icon, label, value, delta, warn }) {
+function DashboardTaskRow({ item, busy, onOpen, onRespond }) {
+  const invitation = item.kind === "invitation";
   return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.045]">
-          <Icon name={icon} />
-        </div>
-        {delta && <StatusBadge tone={warn ? "amber" : "green"}>{delta}</StatusBadge>}
+    <div className="border-b border-white/[0.08] py-4">
+      <div className="flex items-start gap-3">
+        <span className={cx("mt-1.5 h-2 w-2 shrink-0 rounded-full", item.priority === "high" ? "bg-amber-300" : "bg-zinc-500")} />
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+          <span className="block truncate text-sm font-medium text-zinc-100">{item.title}</span>
+          <span className="mt-1 block text-sm leading-5 text-zinc-500">{item.detail}</span>
+          <span className="mt-1.5 block text-xs text-zinc-600">{item.dueDate ? `Due ${formatDisplayDate(item.dueDate)}` : formatDisplayDate(item.time)}</span>
+        </button>
       </div>
-      <p className="mt-5 text-sm text-zinc-500">{label}</p>
-      <h3 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-50">{value}</h3>
-    </Card>
-  );
-}
-
-function TrafficChart() {
-  return (
-    <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-      <AreaChart data={trafficData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-        <defs>
-          <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#fafafa" stopOpacity={0.22} />
-            <stop offset="95%" stopColor="#fafafa" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-        <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-        <YAxis axisLine={false} tickLine={false} tick={{ fill: "#71717a", fontSize: 12 }} />
-        <Tooltip content={<TooltipBox />} />
-        <Area type="monotone" dataKey="views" stroke="#fafafa" strokeWidth={2} fill="url(#g)" />
-        <Line type="monotone" dataKey="visitors" stroke="#a1a1aa" strokeWidth={2} dot={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-function ActivityFeed() {
-  const feed = [
-    "Sofia submitted Snapchat story for final review",
-    "Marcus added two athlete interviews",
-    "Ava moved parking article into Editing",
-    "Daniel uploaded robotics build notes",
-    "Maya approved the weekly publishing plan",
-  ];
-  const feedDate = monthDayYear(new Date());
-  return (
-    <div className="space-y-3">
-      {feed.map((item, index) => (
-        <div key={item} className="flex items-start gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] p-3">
-          <div className="mt-1 h-2 w-2 rounded-full bg-zinc-300" />
-          <div>
-            <p className="text-sm text-zinc-300">{item}</p>
-            <p className="mt-1 text-xs text-zinc-600">{feedDate}</p>
-          </div>
+      {invitation ? (
+        <div className="mt-3 flex gap-2 pl-5">
+          <Button onClick={() => onRespond("accept")} disabled={busy} className="h-8 px-3 text-xs">Accept</Button>
+          <Button variant="ghost" onClick={() => onRespond("decline")} disabled={busy} className="h-8 px-3 text-xs">Decline</Button>
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
 
-function Insight({ title, body }) {
+function DashboardActivityRow({ item, busy, onOpen, onRespond }) {
+  const invitation = item.kind === "invitation";
   return (
-    <div className="rounded-xl border border-violet-400/15 bg-violet-400/[0.055] p-4">
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-100">
-        <Icon name="sparkles" className="h-4 w-4 text-violet-300" />
-        {title}
+    <div className="border-b border-white/[0.08] py-3.5">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.055] text-zinc-400">
+          <Icon name={invitation ? "mail" : item.kind === "comment" ? "edit" : "clock"} className="h-3.5 w-3.5" />
+        </span>
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+          <span className="flex min-w-0 items-baseline justify-between gap-3">
+            {item.title ? <span className="min-w-0 truncate text-xs font-medium text-zinc-300">{item.title}</span> : <span />}
+            <span className="shrink-0 text-xs text-zinc-500">{formatDisplayDate(item.time)}</span>
+          </span>
+          <span className="mt-0.5 block text-sm leading-5 text-zinc-500">{item.text}</span>
+        </button>
       </div>
-      <p className="text-xs leading-5 text-zinc-500">{body}</p>
+      {invitation ? (
+        <div className="mt-2 flex gap-2 pl-10">
+          <button type="button" disabled={busy} onClick={() => onRespond("accept")} className="text-xs font-medium text-zinc-200 hover:text-white disabled:text-zinc-600">Accept</button>
+          <button type="button" disabled={busy} onClick={() => onRespond("decline")} className="text-xs text-zinc-500 hover:text-zinc-200 disabled:text-zinc-700">Decline</button>
+        </div>
+      ) : null}
     </div>
   );
 }
+
+function DashboardSkeleton({ rows }) {
+  return Array.from({ length: rows }, (_, index) => (
+    <div key={index} className="border-b border-white/[0.08] py-4" aria-hidden="true">
+      <div className="h-3 w-2/5 animate-pulse rounded bg-white/[0.07]" />
+      <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-white/[0.04]" />
+    </div>
+  ));
+}
+
+function DashboardEmpty({ icon, text }) {
+  return (
+    <div className="flex items-start gap-3 py-8 text-zinc-600">
+      <Icon name={icon} className="mt-0.5 h-4 w-4" />
+      <p className="max-w-md text-sm leading-6">{text}</p>
+    </div>
+  );
+}
+
 
 function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated = () => {} }) {
   const [pitches, setPitches] = useState([]);
@@ -3554,8 +4065,10 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   const nextIdAfter = (id) => nextActivePitchId(activePitches.filter((pitch) => pitch.id !== id), id);
 
   const updatePitchStatus = async (id, status, message, approval = {}) => {
-    if (!canManagePitches) {
-      setToast("Only admins and editors can change pitch status.");
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    const ownerCanSubmit = status === "Ready for Review" && pitchBelongsToUser(targetPitch, currentUser);
+    if (!canManagePitches && !ownerCanSubmit) {
+      setToast("Only the pitch owner can submit it for review.");
       return null;
     }
     const approvedDueDate = status === "Approved" ? dueDateValue(approval) : "";
@@ -3597,17 +4110,79 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     return result;
   };
 
-  const deletePitch = (id) => {
-    const nextId = nextIdAfter(id);
-    setPitches((previous) => previous.filter((pitch) => pitch.id !== id));
-    if (nextId) navigateToPitch(nextId);
-    else navigateToBoard();
-    setToast("Deleted pitch.");
+  const updatePitchDetails = async (id, draft) => {
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    if (!pitchBelongsToUser(targetPitch, currentUser) || targetPitch?.status !== "In Progress") {
+      setToast("Only the pitch owner can edit an in-progress pitch.");
+      return false;
+    }
+    const updates = {
+      title: asText(draft.title),
+      angle: asText(draft.angle),
+      section: asText(draft.section),
+      notes: asText(draft.notes),
+    };
+    if (!updates.title || !updates.angle || !PITCH_SECTIONS.includes(updates.section) || updates.section === "All sections") {
+      setToast("Add a title, angle, and valid section before saving.");
+      return false;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(updates),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not update pitch.");
+      }
+      const updatedPitch = normalizeDisplayPitch(payload.pitch || { ...targetPitch, ...updates, updatedAt: "Just now" });
+      setPitches((previous) => previous.map((pitch) => (pitch.id === id ? { ...pitch, ...updatedPitch } : pitch)));
+      setToast("Updated pitch.");
+      return true;
+    } catch (updateError) {
+      setToast(updateError instanceof Error ? updateError.message : "Could not update pitch.");
+      return false;
+    }
   };
 
-  const selectNextPitch = (currentId) => {
-    const nextId = nextActivePitchId(activePitches, currentId);
-    if (nextId) navigateToPitch(nextId);
+  const deletePitch = async (id) => {
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    const ownerCanDelete = pitchBelongsToUser(targetPitch, currentUser) && targetPitch?.status === "In Progress";
+    if (!canManagePitches && !ownerCanDelete) {
+      setToast("Only editors, admins, or the owner of an in-progress pitch can delete it.");
+      return false;
+    }
+    const confirmed = window.confirm(`Delete “${targetPitch?.title || "this pitch"}”? This cannot be undone.`);
+    if (!confirmed) return false;
+    const nextId = nextIdAfter(id);
+    try {
+      const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not delete pitch.");
+      }
+      setPitches((previous) => previous.filter((pitch) => pitch.id !== id));
+      if (nextId) navigateToPitch(nextId);
+      else navigateToBoard();
+      setToast("Deleted pitch.");
+      return true;
+    } catch (deleteError) {
+      setToast(deleteError instanceof Error ? deleteError.message : "Could not delete pitch.");
+      return false;
+    }
   };
 
   const createPitch = async (draft) => {
@@ -3646,8 +4221,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     }
   };
 
-  const markNeedsReview = (id, message) => {
-    return updatePitchStatus(id, "Needs Review", message || "Marked pitch as needs review.");
+  const submitForReview = (id, message) => {
+    return updatePitchStatus(id, "Ready for Review", message || "Submitted pitch for review.");
+  };
+
+  const markInProgress = (id, message) => {
+    return updatePitchStatus(id, "In Progress", message || "Returned pitch to in progress.");
   };
 
   const addComment = (id, text) => {
@@ -3692,21 +4271,42 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   const expandAll = () => setExpandedWriters(new Set(writerGroups.map((group) => group.key)));
   const collapseAll = () => setExpandedWriters(new Set());
 
+  if (detailPitchId && loading) {
+    return (
+      <PageShell title="Loading pitch" eyebrow="Pitches" right={<Button variant="ghost" onClick={navigateToBoard}>Back to board</Button>}>
+        <StateMessage icon="edit" title="Loading pitch" body="Pulling the latest pitch and feedback from the newsroom." />
+      </PageShell>
+    );
+  }
+
+  if (detailPitchId && error) {
+    return (
+      <PageShell title="Pitch unavailable" eyebrow="Pitches" right={<Button variant="ghost" onClick={navigateToBoard}>Back to board</Button>}>
+        <StateMessage icon="edit" title="Could not load pitch" body={error} />
+      </PageShell>
+    );
+  }
+
   if (detailPitchId) {
+    const ownsEditablePitch = pitchBelongsToUser(detailPitch, currentUser) && detailPitch?.status === "In Progress";
     return (
       <PitchDetailPage
         pitch={detailPitch}
         activePitches={activePitches}
         onBack={navigateToBoard}
-        onNeedsReview={markNeedsReview}
+        onSubmitForReview={submitForReview}
+        onMarkInProgress={markInProgress}
         onApprove={(id, approval) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.", approval)}
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
+        onUpdate={updatePitchDetails}
         onDelete={deletePitch}
-        onNext={selectNextPitch}
         onAddComment={addComment}
         onEditComment={editComment}
         onDeleteComment={deleteComment}
         canManagePitches={canManagePitches}
+        canSubmitForReview={pitchBelongsToUser(detailPitch, currentUser)}
+        canEditPitch={ownsEditablePitch}
+        canDeletePitch={canManagePitches || ownsEditablePitch}
         csrfToken={csrfToken}
         setToast={setToast}
       />
@@ -3718,24 +4318,16 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
       title="Pitch Board"
       right={<Button icon="plus" onClick={() => setCreateOpen(true)}>New pitch</Button>}
     >
-      {loading ? (
-        <StateMessage icon="edit" title="Loading pitches" body="Pulling pitch records from MongoDB." />
-      ) : error ? (
-        <StateMessage icon="edit" title="Pitch board unavailable" body={error} />
-      ) : null}
-      <Card className="min-w-0 p-5">
+
+      <div className="min-w-0">
         <div className="mb-5 flex flex-col gap-4">
-          <div>
-            <h2 className="font-medium text-zinc-50">Active editor queue</h2>
-            <p className="mt-1 text-sm text-zinc-500">Only new and needs-review pitches appear here.</p>
-          </div>
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
             <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, section, or feedback" />
-            <Select value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} />
+            <Select value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} label="Filter pitches by section" />
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
-              {["All Active", "Needs Review", "New"].map((filter) => (
+              {["All Active", "Ready for Review", "In Progress"].map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -3760,7 +4352,16 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08]" aria-busy={loading}>
+          {loading ? <PitchBoardSkeleton /> : null}
+          {!loading && error && (
+            <StateMessage
+              icon="edit"
+              title="Could not load pitches"
+              body={error}
+              action={<Button variant="ghost" onClick={() => loadPitches()}>Try again</Button>}
+            />
+          )}
           {!loading && !error && writerGroups.map((group) => (
             <PitchWriterRow
               key={group.key}
@@ -3778,7 +4379,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
             </div>
           )}
         </div>
-      </Card>
+      </div>
 
       <AnimatePresence>
         {createOpen && (
@@ -3792,9 +4393,31 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   );
 }
 
+function PitchBoardSkeleton() {
+  return (
+    <div role="status" aria-label="Loading pitches">
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} className="border-b border-white/[0.06] px-4 py-4 last:border-b-0" aria-hidden="true">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="h-4 w-4 shrink-0 animate-pulse rounded bg-white/[0.06]" />
+              <div className="h-4 w-full max-w-48 animate-pulse rounded bg-white/[0.08]" />
+            </div>
+            <div className="hidden shrink-0 gap-2 sm:flex">
+              <div className="h-7 w-20 animate-pulse rounded-lg bg-white/[0.05]" />
+              <div className="h-7 w-24 animate-pulse rounded-lg bg-white/[0.05]" />
+              <div className="h-7 w-28 animate-pulse rounded-lg bg-white/[0.05]" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
-  const newCount = group.pitches.filter((pitch) => pitch.status === "New").length;
-  const reviewCount = group.pitches.filter((pitch) => pitch.status === "Needs Review").length;
+  const progressCount = group.pitches.filter((pitch) => pitch.status === "In Progress").length;
+  const reviewCount = group.pitches.filter((pitch) => pitch.status === "Ready for Review").length;
 
   return (
     <div className="border-b border-white/[0.06] last:border-b-0">
@@ -3815,8 +4438,8 @@ function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <PitchCountLabel label="Active" count={group.pitches.length} />
-          <PitchCountLabel label="New" count={newCount} />
-          <PitchCountLabel label="Needs Review" count={reviewCount} />
+          <PitchCountLabel label="In Progress" count={progressCount} />
+          <PitchCountLabel label="Ready for Review" count={reviewCount} />
         </div>
       </button>
 
@@ -3883,14 +4506,17 @@ function PitchQueueRow({ pitch, onSelect }) {
 
 function PitchDetailPage({
   pitch,
-  activePitches,
   onBack,
-  onNeedsReview,
+  onSubmitForReview,
+  onMarkInProgress,
   onApprove,
   onHold,
+  onUpdate,
   onDelete,
-  onNext,
   canManagePitches = false,
+  canSubmitForReview = false,
+  canEditPitch = false,
+  canDeletePitch = false,
   csrfToken = "",
   setToast = () => {},
 }) {
@@ -3900,6 +4526,8 @@ function PitchDetailPage({
   const [openItemMenu, setOpenItemMenu] = useState(null);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   useEffect(() => {
     setFeedbackDraft("");
@@ -3908,6 +4536,8 @@ function PitchDetailPage({
     setOpenItemMenu(null);
     setApprovalOpen(false);
     setApprovalSubmitting(false);
+    setEditOpen(false);
+    setEditSubmitting(false);
   }, [pitch?.id]);
 
   useEffect(() => {
@@ -3980,11 +4610,7 @@ function PitchDetailPage({
       const nextFeedback = normalizeDisplayFeedback(payload.feedback || { id: `feedback-${Date.now()}`, text, author: "Editor", time: "Just now" });
       pitchFeedback.setFeedback((previous) => [nextFeedback, ...previous]);
       setFeedbackDraft("");
-      if (pitch.status === "New") {
-        await onNeedsReview(pitch.id, "Added feedback and marked pitch as needs review.");
-      } else {
-        setToast("Added feedback.");
-      }
+      setToast("Added feedback.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Could not add feedback.");
     }
@@ -3995,6 +4621,14 @@ function PitchDetailPage({
     setApprovalSubmitting(true);
     const result = await onApprove(pitch.id, approval);
     if (!result) setApprovalSubmitting(false);
+  };
+
+  const savePitchEdits = async (draft) => {
+    if (editSubmitting) return;
+    setEditSubmitting(true);
+    const saved = await onUpdate(pitch.id, draft);
+    setEditSubmitting(false);
+    if (saved) setEditOpen(false);
   };
   const startEditingFeedback = (feedback) => {
     setEditingFeedbackId(feedback.id);
@@ -4062,31 +4696,27 @@ function PitchDetailPage({
       className="mx-auto min-h-full max-w-[1640px] px-5 py-8 md:px-8"
     >
       <div className="grid gap-10 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start">
-        <main className="mx-auto w-full max-w-[940px] space-y-10">
-          <div className="relative border-b border-white/[0.16] pb-8">
-            <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">Pitch review</h1>
-          </div>
-
+        <section className="mx-auto w-full max-w-[940px] space-y-10" aria-label="Pitch review details">
           <section className="border-b border-white/[0.16] pb-10">
-            <PitchStatusText status={pitch.status} />
-            <h2 className="mt-8 text-4xl font-semibold leading-[1.12] tracking-tight text-zinc-50 md:text-5xl">
+            <p className="mb-4 text-sm font-semibold text-zinc-400">Pitch review</p>
+            <h1 className="max-w-[24ch] text-3xl font-semibold leading-[1.16] tracking-tight text-zinc-50 md:text-4xl">
               {pitch.title}
-            </h2>
-            <p className="mt-6 text-lg leading-8 text-zinc-400">
+            </h1>
+            <p className="mt-5 max-w-[70ch] text-base leading-7 text-zinc-400 md:text-[1.0625rem]">
               {pitch.angle}
             </p>
             {pitch.notes ? (
-              <div className="mt-8">
-                <h3 className="text-sm font-medium text-zinc-300">Additional notes</h3>
-                <p className="mt-2 text-sm leading-7 text-zinc-500">{pitch.notes}</p>
+              <div className="mt-7 max-w-[70ch]">
+                <h2 className="text-sm font-semibold text-zinc-300">Additional notes</h2>
+                <p className="mt-2 text-[0.9375rem] leading-6 text-zinc-500">{pitch.notes}</p>
               </div>
             ) : null}
           </section>
 
           <section className="border-b border-white/[0.16] pb-10">
             <div className="mb-5">
-              <h3 className="text-lg font-semibold tracking-tight text-zinc-50">Editor feedback</h3>
-              <p className="mt-1 text-sm text-zinc-500">Direction for revision, reporting focus, and next steps.</p>
+              <h2 className="text-xl font-semibold tracking-tight text-zinc-50">Editor feedback</h2>
+              <p className="mt-1.5 text-[0.9375rem] leading-6 text-zinc-500">Direction for revision, reporting focus, and next steps.</p>
             </div>
             <div className="space-y-4">
               {feedbackItems.map((feedback) => {
@@ -4095,7 +4725,7 @@ function PitchDetailPage({
                   <div key={feedback.id} className="group border-b border-white/[0.1] pb-4 last:border-b-0 last:pb-0">
                     <div className="mb-2 flex items-start justify-between gap-4">
                       <div>
-                        <span className="text-sm font-medium text-zinc-300">{feedback.author}</span>
+                        <span className="text-sm font-semibold text-zinc-300">{feedback.author}</span>
                         <span className="ml-2 text-xs text-zinc-600">{feedback.time}</span>
                       </div>
                       {editingFeedbackId === feedback.id ? (
@@ -4124,7 +4754,7 @@ function PitchDetailPage({
                         className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-sm leading-6 text-zinc-300 outline-none focus:border-white/[0.18]"
                       />
                     ) : (
-                      <p className="text-sm leading-7 text-zinc-500">{feedback.text}</p>
+                      <p className="max-w-[70ch] text-[0.9375rem] leading-6 text-zinc-500">{feedback.text}</p>
                     )}
                   </div>
                 );
@@ -4154,7 +4784,7 @@ function PitchDetailPage({
           </section>
 
           <section>
-            <h3 className="text-lg font-semibold tracking-tight text-zinc-50">Activity</h3>
+            <h2 className="text-xl font-semibold tracking-tight text-zinc-50">Activity</h2>
             <div className="mt-5 space-y-4">
               {activityLoading ? (
                 <p className="text-sm text-zinc-600">Loading workflow activity...</p>
@@ -4173,11 +4803,11 @@ function PitchDetailPage({
               )}
             </div>
           </section>
-        </main>
+        </section>
 
         <aside className="mx-auto w-full max-w-[940px] space-y-3 2xl:sticky 2xl:top-8 2xl:max-w-none">
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Properties</h3>
+            <h2 className="text-base font-semibold text-zinc-100">Properties</h2>
             <div className="mt-4 divide-y divide-white/[0.1]">
               <PitchProperty label="Status">
                 <PitchStatusText status={pitch.status} />
@@ -4186,31 +4816,43 @@ function PitchDetailPage({
               <PitchProperty label="Section">{pitch.section}</PitchProperty>
               <PitchProperty label="Submitted">{pitch.submittedAt}</PitchProperty>
             </div>
+            {canSubmitForReview ? (
+              <div className="mt-5 border-t border-white/[0.1] pt-5">
+                <p className="text-sm leading-6 text-zinc-500">
+                  {pitch.status === "Ready for Review"
+                    ? "Submitted. An editor or admin can now approve it or return it for more work."
+                    : "Send this pitch to an editor or admin when the angle and reporting plan are ready."}
+                </p>
+                <Button className="mt-4 w-full" disabled={pitch.status === "Ready for Review"} onClick={() => onSubmitForReview(pitch.id)}>
+                  {pitch.status === "Ready for Review" ? "Submitted for review" : "Submit for review"}
+                </Button>
+                {canEditPitch ? (
+                  <div className="mt-2 grid gap-2">
+                    <Button variant="ghost" onClick={() => setEditOpen(true)} className="w-full">Edit pitch</Button>
+                    {!canManagePitches && canDeletePitch ? (
+                      <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {canManagePitches ? (
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
-            <h3 className="text-sm font-medium text-zinc-300">Actions</h3>
+            <h2 className="text-base font-semibold text-zinc-100">Actions</h2>
             <div className="mt-4 space-y-2">
               <Button onClick={() => setApprovalOpen(true)} className="w-full">Approve</Button>
               <Button
                 variant="ghost"
-                disabled={pitch.status === "Needs Review"}
-                onClick={() => onNeedsReview(pitch.id)}
+                disabled={pitch.status === "In Progress"}
+                onClick={() => onMarkInProgress(pitch.id)}
                 className="w-full"
               >
-                Mark needs review
+                Mark in progress
               </Button>
               <Button variant="ghost" onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
-              <Button
-                variant="ghost"
-                disabled={activePitches.length <= 1}
-                onClick={() => onNext(pitch.id)}
-                className="w-full"
-              >
-                Next active pitch
-              </Button>
-              <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button>
+              {canDeletePitch ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
             </div>
           </div>
           ) : null}
@@ -4225,6 +4867,18 @@ function PitchDetailPage({
         }}
         onApprove={approvePitch}
       />
+      <AnimatePresence>
+        {editOpen && pitch ? (
+          <PitchEditModal
+            pitch={pitch}
+            submitting={editSubmitting}
+            onClose={() => {
+              if (!editSubmitting) setEditOpen(false);
+            }}
+            onSave={savePitchEdits}
+          />
+        ) : null}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -4403,7 +5057,6 @@ function PitchCreateModal({ onClose, onCreate }) {
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-zinc-50">New pitch</h2>
-            <p className="mt-1 text-sm text-zinc-500">Capture the angle before it becomes an assignment.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200">x</button>
         </div>
@@ -4426,6 +5079,118 @@ function PitchCreateModal({ onClose, onCreate }) {
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
             <input
               required
+              value={draft.title}
+              onChange={(event) => updateDraft("title", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+              placeholder="Title"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Description</span>
+            <textarea
+              required
+              rows={4}
+              value={draft.angle}
+              onChange={(event) => updateDraft("angle", event.target.value)}
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+              placeholder="What is the story?"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Additional notes</span>
+            <textarea
+              rows={3}
+              value={draft.notes}
+              onChange={(event) => updateDraft("notes", event.target.value)}
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <button type="submit" className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white">
+            Create pitch
+          </button>
+        </div>
+      </motion.form>
+    </motion.div>
+  );
+}
+
+function PitchEditModal({ pitch, submitting = false, onClose, onSave }) {
+  const [draft, setDraft] = useState({
+    title: pitch?.title || "",
+    angle: pitch?.angle || "",
+    notes: pitch?.notes || "",
+    section: pitch?.section || "News",
+  });
+
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !submitting) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, submitting]);
+
+  const updateDraft = (field, value) => {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-pitch-title"
+    >
+      <motion.form
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/[0.1] bg-[#0b0c10] p-5 shadow-2xl shadow-black"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(draft);
+        }}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 id="edit-pitch-title" className="text-lg font-semibold text-zinc-50">Edit pitch</h2>
+            <p className="mt-1 text-sm text-zinc-500">Revise the reporting plan before submitting it for review.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close pitch editor" className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-45">x</button>
+        </div>
+
+        <div className="grid gap-4">
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
+            <select
+              value={draft.section}
+              onChange={(event) => updateDraft("section", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+            >
+              {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
+                <option key={option} value={option} className="bg-zinc-950">{option}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
+            <input
+              required
+              autoFocus
               value={draft.title}
               onChange={(event) => updateDraft("title", event.target.value)}
               className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
@@ -4452,15 +5217,15 @@ function PitchCreateModal({ onClose, onCreate }) {
               value={draft.notes}
               onChange={(event) => updateDraft("notes", event.target.value)}
               className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
-              placeholder="Interview ideas, possible sources, photo ideas, visuals, or questions to check before assigning."
+              placeholder="Interview ideas, possible sources, visuals, or questions to check."
             />
           </label>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <button type="submit" className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white">
-            Create pitch
+          <Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button>
+          <button type="submit" disabled={submitting} className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white disabled:cursor-wait disabled:opacity-45">
+            {submitting ? "Saving..." : "Save changes"}
           </button>
         </div>
       </motion.form>
@@ -4506,7 +5271,7 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
           <span>{article.authors.join(", ")}</span>
         </div>
       </button>
-      <Select value={article.status} onChange={(status) => updateArticleStatus(article.id, status)} options={columns} className="mt-3" />
+      <Select value={article.status} onChange={(status) => updateArticleStatus(article.id, status)} options={columns} label={`Change status for ${article.title}`} className="mt-3" />
     </Card>
   );
 }
@@ -4561,6 +5326,22 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
     pushAppPath(storyDetailPath(story.id));
   };
 
+  if (detailStoryId && loading) {
+    return (
+      <PageShell title="Loading story" eyebrow="Stories" titleAction={<Button variant="ghost" onClick={navigateToStories}>Back</Button>}>
+        <StateMessage icon="article" title="Loading story" body="Pulling the latest draft, comments, and workflow state." />
+      </PageShell>
+    );
+  }
+
+  if (detailStoryId && error) {
+    return (
+      <PageShell title="Story unavailable" eyebrow="Stories" titleAction={<Button variant="ghost" onClick={navigateToStories}>Back</Button>}>
+        <StateMessage icon="article" title="Could not load story" body={error} />
+      </PageShell>
+    );
+  }
+
   if (detailStoryId) {
     return (
       <StoryDetailPage
@@ -4584,13 +5365,11 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
   return (
     <PageShell
       title="Stories"
-      eyebrow="Editorial workflow"
-      description="Scan active drafts by review state, then open a story for notes, source checks, and approval actions."
-      className="max-w-[1280px]"
+      className="max-w-[1380px]"
     >
       <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
         <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
-        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="h-10" />
+        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} label="Filter stories by section" className="h-10" />
       </section>
 
       {loading ? (
@@ -4642,7 +5421,7 @@ function StoryKanbanColumn({ column, stories, total, onOpenStory }) {
 }
 
 function StoryOverviewCard({ story, onOpen }) {
-  const dueDateLabel = storyDueDateLabel(story);
+  const authorNames = storyAuthorNames(story);
   return (
     <button
       type="button"
@@ -4652,10 +5431,9 @@ function StoryOverviewCard({ story, onOpen }) {
     >
       <div className="min-w-0">
         <h3 className="line-clamp-2 text-sm font-medium leading-5 text-zinc-100">{story.title}</h3>
-        <p className="mt-1 truncate text-xs text-zinc-500">By {story.writer}</p>
-        <p className={cx("mt-2 text-xs", dueDateLabel ? "text-zinc-500" : "text-zinc-600")}>{dueDateLabel ? `Due ${dueDateLabel}` : "No due date set"}</p>
+        <p className="mt-1 break-words text-xs leading-5 text-zinc-500">By {authorNames.length ? authorNames.join(", ") : "Unassigned"}</p>
       </div>
-      <div className="flex h-full min-h-16 items-center">
+      <div className="flex h-full items-center">
         <span className="inline-flex h-8 w-8 items-center justify-center text-zinc-500 transition group-hover:text-zinc-100">
           <Icon name="chevron" className="h-4 w-4 -rotate-90" />
         </span>
@@ -4672,6 +5450,10 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [openingDrivePicker, setOpeningDrivePicker] = useState(false);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
+  const [publicationUrl, setPublicationUrl] = useState("");
+  const [publicationError, setPublicationError] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const attachmentMenuRef = useRef(null);
 
   useEffect(() => {
@@ -4682,6 +5464,10 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     setUploadingAttachment(false);
     setOpeningDrivePicker(false);
     setInviteDialogOpen(false);
+    setPublicationOpen(false);
+    setPublicationUrl(asText(story?.publicationUrl));
+    setPublicationError("");
+    setPublishing(false);
   }, [story?.id]);
 
   useEffect(() => {
@@ -4720,8 +5506,11 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
   const hasSubmissionWork = attachments.length > 0;
   const canUseWriterSubmission = canUpdateOwnStorySubmission(currentUser, story) && Boolean(workflowAction);
   const canClickSubmitStory = canUseWriterSubmission && (workflowAction.nextStatus !== "Submitted" || hasSubmissionWork);
-  const canReturnStory = canManageStory && ["Submitted", "In Review", "Ready for Publish"].includes(story.status);
-  const canSendToTeacherApproval = canManageStory && ["Submitted", "In Review"].includes(story.status);
+  const currentRole = normalizeAppRole(currentUser?.role);
+  const canStartReview = canManageStory && story.status === "Submitted";
+  const canReturnStory = canManageStory && story.status === "In Review";
+  const canSendToTeacherApproval = canManageStory && story.status === "In Review";
+  const canPublishStory = currentRole === "admin" && story.status === "Ready for Publish";
   const commentItems = [
     ...storyFeedbackItems(story),
     ...(Array.isArray(story.comments) ? story.comments : []),
@@ -4881,15 +5670,28 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
     }
   };
 
+  const publishStory = async () => {
+    const nextUrl = publicationUrl.trim();
+    if (!isValidHttpUrl(nextUrl)) {
+      setPublicationError("Enter the published story’s full http or https URL.");
+      return;
+    }
+    setPublishing(true);
+    setPublicationError("");
+    const saved = await updateStoryStatus(story.id, "Published", { publicationUrl: nextUrl });
+    setPublishing(false);
+    if (saved) setPublicationOpen(false);
+  };
+
   return (
-    <div className="mx-auto max-w-[1280px] px-5 py-6 md:px-8">
+    <div className="mx-auto max-w-[1380px] px-5 py-6 md:px-8">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-        <main className="min-w-0">
+        <article className="min-w-0" aria-labelledby="story-detail-title">
           <header className="border-b border-white/[0.14] pb-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h1 className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
-                <p className="mt-3 text-sm font-medium text-zinc-300">{story.writer} / {story.section}</p>
+                <h1 id="story-detail-title" className="break-words text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">{story.title}</h1>
+                <p className="mt-3 text-sm font-medium text-zinc-300">{storyAuthorNames(story).join(", ") || "Unassigned"} | {story.section}</p>
                 {dueDateLabel ? <p className="mt-2 text-sm text-zinc-500">Due {dueDateLabel}</p> : null}
               </div>
               {canManageCollaborators ? (
@@ -4925,7 +5727,7 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
               )}
             </div>
           </section>
-        </main>
+        </article>
 
         <aside className="min-w-0 space-y-4">
           <section className="min-w-0 rounded-xl border border-white/[0.12] bg-white/[0.025] p-4 shadow-xl shadow-black/15">
@@ -4977,11 +5779,41 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
             ) : null}
 
             <div className="mt-4 space-y-2">
+              {canStartReview ? (
+                <Button onClick={() => updateStoryStatus(story.id, "In Review")} className="w-full rounded-full">Start editor review</Button>
+              ) : null}
               {canReturnStory ? (
                 <Button onClick={() => updateStoryStatus(story.id, "Returned")} className="w-full rounded-full">Return to writer</Button>
               ) : null}
               {canSendToTeacherApproval ? (
                 <Button variant="ghost" onClick={() => updateStoryStatus(story.id, "Ready for Publish")} className="w-full rounded-full">Send to teacher approval</Button>
+              ) : null}
+              {canPublishStory ? (
+                <Button onClick={() => setPublicationOpen((open) => !open)} className="w-full rounded-full">
+                  {publicationOpen ? "Cancel publishing" : "Publish story"}
+                </Button>
+              ) : null}
+              {canPublishStory && publicationOpen ? (
+                <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+                  <label htmlFor={`publication-url-${story.id}`} className="block text-sm font-medium text-zinc-300">Published story URL</label>
+                  <input
+                    id={`publication-url-${story.id}`}
+                    type="url"
+                    value={publicationUrl}
+                    onChange={(event) => {
+                      setPublicationUrl(event.target.value);
+                      if (publicationError) setPublicationError("");
+                    }}
+                    placeholder="https://publication.example/story"
+                    autoComplete="url"
+                    aria-describedby={publicationError ? `publication-error-${story.id}` : undefined}
+                    className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+                  />
+                  {publicationError ? <p id={`publication-error-${story.id}`} className="mt-2 text-sm text-rose-300">{publicationError}</p> : null}
+                  <Button disabled={publishing} onClick={publishStory} className="mt-3 w-full rounded-full">
+                    {publishing ? "Publishing..." : "Confirm publication"}
+                  </Button>
+                </div>
               ) : null}
               {canUseWriterSubmission ? (
                 <Button
@@ -5063,12 +5895,11 @@ function StoryDetailPage({ story, onBack, currentUser, csrfToken = "", updateSto
 
 function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRemove }) {
   const [emails, setEmails] = useState("");
-  const [role, setRole] = useState("comment");
+  const [role] = useState("edit");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [removingEmail, setRemovingEmail] = useState("");
   const [error, setError] = useState("");
-  const selectedRole = STORY_COLLABORATOR_ROLE_OPTIONS.find((option) => option.id === role) || STORY_COLLABORATOR_ROLE_OPTIONS[0];
   const inviteCount = Array.isArray(collaborators) ? collaborators.length : 0;
 
   const submitInvite = async (event) => {
@@ -5139,23 +5970,6 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
           </label>
 
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-zinc-300">Role</span>
-            <div className="relative">
-              <select
-                value={role}
-                onChange={(event) => setRole(event.target.value)}
-                className="h-12 w-full appearance-none rounded-xl border border-white/[0.14] bg-black/20 px-4 pr-10 text-sm font-medium text-zinc-100 outline-none focus:border-white/[0.28]"
-              >
-                {STORY_COLLABORATOR_ROLE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id} className="bg-zinc-950">{option.label}</option>
-                ))}
-              </select>
-              <Icon name="chevron" className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-            </div>
-            <p className="mt-2 text-sm text-zinc-500">{selectedRole.description}</p>
-          </label>
-
-          <label className="block">
             <span className="mb-2 block text-sm font-medium text-zinc-300">Message (optional)</span>
             <div className="relative">
               <textarea
@@ -5171,7 +5985,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
         </div>
 
         <div className="mt-6">
-          <h3 className="text-sm font-medium text-zinc-300">Currently invited ({inviteCount})</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Collaborators</h3>
           <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.12]">
             {inviteCount ? collaborators.map((collaborator) => (
               <div key={collaborator.email || collaborator.id} className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3 last:border-b-0">
@@ -5180,7 +5994,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-zinc-100">{collaborator.email}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">{storyCollaboratorRoleLabel(collaborator.role)}</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">{collaborator.status === "pending" ? "Invitation pending" : storyCollaboratorRoleLabel(collaborator.role)}</p>
                 </div>
                 <button
                   type="button"
@@ -5193,7 +6007,7 @@ function StoryInviteDialog({ story, collaborators = [], onClose, onInvite, onRem
                 </button>
               </div>
             )) : (
-              <p className="px-4 py-5 text-sm text-zinc-600">No collaborators invited yet.</p>
+              <p className="px-4 py-5 text-sm text-zinc-600">No additional authors yet.</p>
             )}
           </div>
         </div>
@@ -5304,59 +6118,73 @@ function StoryAttachment({ story, attachment: providedAttachment = null, onCopy,
   const showTrailingIcon = !compact || attachment.type === "file";
   const showRemove = compact && Boolean(onRemove);
   const compactGridClass = showTrailingIcon ? "min-h-14 grid-cols-[minmax(0,1fr)_54px]" : "min-h-14 grid-cols-1";
-  const compactPaddingClass = showRemove ? (showTrailingIcon ? "pr-9" : "pr-12") : "";
+
+  const attachmentDetails = (
+    <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
+      <div className="truncate text-sm font-medium text-zinc-100">{attachment.name}</div>
+      <div className="mt-1 text-xs text-zinc-500">{attachment.detail}</div>
+      {attachment.type === "drive" && drivePermissionText(attachment.permissionStatus) ? (
+        <div className={cx(
+          "mt-1 text-xs",
+          attachment.permissionStatus === "failed" ? "text-amber-300" : "text-zinc-600"
+        )}>
+          {drivePermissionText(attachment.permissionStatus)}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const trailingIcon = showTrailingIcon ? (
+    <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
+      <Icon name={attachment.type === "file" ? "upload" : "link"} className="h-5 w-5" />
+    </div>
+  ) : null;
+
+  if (showRemove) {
+    return (
+      <div className="grid min-h-14 min-w-0 grid-cols-[minmax(0,1fr)_44px] overflow-hidden rounded-xl border border-white/[0.16] bg-black/20">
+        <a
+          href={attachment.url}
+          target="_blank"
+          rel="noreferrer"
+          className={cx(
+            "grid min-w-0 text-left transition hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
+            showTrailingIcon ? "grid-cols-[minmax(0,1fr)_54px]" : "grid-cols-1"
+          )}
+        >
+          {attachmentDetails}
+          {trailingIcon}
+        </a>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove attached work"
+          className="grid h-full w-11 place-items-center border-l border-white/[0.16] bg-white/[0.015] text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20"
+        >
+          <Icon name="x" className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className={cx("relative grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
+    <div className={cx("grid min-w-0 gap-3", compact ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]")}>
       <a
         href={attachment.url}
         target="_blank"
         rel="noreferrer"
         className={cx(
           "grid overflow-hidden rounded-xl border border-white/[0.16] bg-black/20 text-left transition hover:border-white/[0.26] hover:bg-white/[0.035] focus:outline-none focus:ring-2 focus:ring-white/20",
-          compact ? cx(compactGridClass, compactPaddingClass) : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
+          compact ? compactGridClass : "min-h-16 grid-cols-[minmax(0,1fr)_64px]"
         )}
       >
-        <div className={cx("min-w-0", compact ? "px-3 py-2.5" : "px-4 py-3")}>
-          <div className="truncate text-sm font-medium text-zinc-100">{attachment.name}</div>
-          <div className="mt-1 text-xs text-zinc-500">{attachment.detail}</div>
-          {attachment.type === "drive" && drivePermissionText(attachment.permissionStatus) ? (
-            <div className={cx(
-              "mt-1 text-xs",
-              attachment.permissionStatus === "failed" ? "text-amber-300" : "text-zinc-600"
-            )}>
-              {drivePermissionText(attachment.permissionStatus)}
-            </div>
-          ) : null}
-        </div>
-        {showTrailingIcon ? (
-          <div className="grid place-items-center border-l border-white/[0.16] bg-white/[0.03] text-zinc-300">
-            <Icon name={attachment.type === "file" ? "upload" : "link"} className="h-5 w-5" />
-          </div>
-        ) : null}
+        {attachmentDetails}
+        {trailingIcon}
       </a>
-      {showRemove ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onRemove();
-          }}
-          aria-label="Remove attached work"
-          className={cx(
-            "absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-white/20",
-            showTrailingIcon ? "right-12" : "right-2"
-          )}
-        >
-          <Icon name="x" className="h-4 w-4" />
-        </button>
-      ) : null}
       {compact || !attachment.copyable ? null : <Button variant="ghost" icon="link" onClick={onCopy} className="self-center">Copy link</Button>}
     </div>
   );
 }
-
 function StoryTextBlock({ label, children }) {
   return (
     <div>
@@ -5375,7 +6203,7 @@ function StorySideLine({ label, value }) {
   );
 }
 
-function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setToast = () => {} }) {
+function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setToast = () => {}, csrfToken = "" }) {
   const [articles, setArticles] = useState([]);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [query, setQuery] = useState("");
@@ -5496,7 +6324,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
       <div className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
         <div>
           <div className="mb-4 flex flex-col gap-3 md:flex-row">
-            <Input value={query} onChange={handleSearchChange} placeholder="Search title, author, section, tag, or interviewee" className="flex-1" />
+            <Input value={query} onChange={handleSearchChange} placeholder="Search title, author, section, or tag" className="flex-1" />
             <AnimatedDropdown
               text={section}
               items={sections.map((name) => ({ name, link: "#" }))}
@@ -5538,8 +6366,17 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
                   <tr
                     key={article.id}
                     onClick={() => handleArticleClick(article)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleArticleClick(article);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View article details for ${article.title}`}
                     className={cx(
-                      "cursor-pointer border-t border-white/[0.06] hover:bg-white/[0.04]",
+                      "cursor-pointer border-t border-white/[0.06] hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                       selectedArticle?.id === article.id && "bg-white/[0.055]"
                     )}
                   >
@@ -5564,7 +6401,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
               <StateMessage
                 icon={hasActiveArticleFilter ? "search" : "article"}
                 title={hasActiveArticleFilter ? "No matching articles" : "No articles found"}
-                body={hasActiveArticleFilter ? "Try a different title, author, section, tag, or interviewee search." : "No article records were returned by the database yet."}
+                body={hasActiveArticleFilter ? "Try a different title, author, section, or tag search." : "No article records were returned by the database yet."}
               />
             )}
           </div>
@@ -5622,6 +6459,7 @@ function ArticlesPage({ extractorOpen = false, setExtractorOpen = () => {}, setT
           <ArticleExtractorOverlay
             onClose={() => setExtractorOpen(false)}
             onSaved={handleExtractorSaved}
+            csrfToken={csrfToken}
           />
         )}
       </AnimatePresence>
@@ -6041,8 +6879,17 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
                   <tr
                     key={record.id}
                     onClick={() => handleRecordSelect(record)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleRecordSelect(record);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View source record for ${record.name}`}
                     className={cx(
-                      "cursor-pointer border-t border-white/[0.06] transition hover:bg-white/[0.04]",
+                      "cursor-pointer border-t border-white/[0.06] transition hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                       selectedRecord?.id === record.id && "bg-white/[0.055]"
                     )}
                   >
@@ -6160,7 +7007,7 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
 function ReadOnlyField({ label, value }) {
   return (
     <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-5">
-      <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</p>
+      <p className="text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">{label}</p>
       <p className="min-w-0 truncate text-sm text-zinc-200">{value || "Unknown"}</p>
     </div>
   );
@@ -6186,8 +7033,8 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
       <Card className="flex min-h-[560px] items-center justify-center p-5">
         <div className="max-w-sm text-center">
           <div className="mx-auto mb-5 h-px w-16 bg-white/20" />
-          <h3 className="text-lg font-semibold tracking-tight text-zinc-100">Select a source</h3>
-          <p className="mt-3 text-sm leading-6 text-zinc-500">
+          <h3 className="text-[0.95rem] font-semibold tracking-tight text-zinc-100">Select a source</h3>
+          <p className="mt-3 text-xs leading-5 text-zinc-500">
             Record details, article context, and editable source fields will appear here.
           </p>
         </div>
@@ -6198,35 +7045,34 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
   return (
     <Card className="flex min-h-[560px] flex-col p-5">
       <div>
-        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Selected record</p>
-        <h2 className="break-words text-2xl font-semibold tracking-tight text-zinc-50">{record.name}</h2>
+        <h2 className="break-words text-[1.7rem] font-semibold tracking-tight text-zinc-50">{record.name}</h2>
       </div>
 
-      {saveError ? <p className="mt-4 text-sm text-rose-300">{saveError}</p> : null}
+      {saveError ? <p className="mt-4 text-xs text-rose-300">{saveError}</p> : null}
 
       {editing ? (
         <div className="mt-8 space-y-5 border-t border-white/[0.08] pt-5">
           <div className="grid gap-3 2xl:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">First name</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">First name</span>
               <input
                 value={draft?.firstName || ""}
                 onChange={(event) => setDraft((previous) => ({ ...(previous || {}), firstName: event.target.value }))}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-xs text-zinc-200 outline-none focus:border-white/[0.18]"
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Last name</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">Last name</span>
               <input
                 value={draft?.lastName || ""}
                 onChange={(event) => setDraft((previous) => ({ ...(previous || {}), lastName: event.target.value }))}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-xs text-zinc-200 outline-none focus:border-white/[0.18]"
               />
             </label>
           </div>
           <div className="grid gap-3 2xl:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Grade</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">Grade</span>
               <AnimatedDropdown
                 text={draft?.grade || "Unknown"}
                 items={sourceEditGradeOptions(draft?.grade).map((name) => ({ name, link: "#" }))}
@@ -6234,7 +7080,7 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">House</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">House</span>
               <AnimatedDropdown
                 text={draft?.house || "Unknown"}
                 items={sourceEditHouseOptions(draft?.house).map((name) => ({ name, link: "#" }))}
@@ -6250,23 +7096,23 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
         </div>
       )}
 
-      <div className="mt-8 border-t border-white/[0.08] pt-7">
-        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Article</p>
+      <div className="mt-8 pt-7">
+        <p className="mb-3 text-[0.65rem] uppercase tracking-[0.18em] text-zinc-600">Article</p>
         {isValidHttpUrl(record.article?.url) ? (
           <a
             href={record.article.url}
             target="_blank"
             rel="noreferrer"
-            className="block break-words text-base font-semibold leading-7 text-zinc-100 transition hover:text-white"
+            className="block break-words text-[1rem] font-semibold leading-6 text-zinc-100 transition hover:text-white"
           >
             {record.article?.title || "Article title unavailable"}
           </a>
         ) : (
-          <p className="break-words text-base font-semibold leading-7 text-zinc-100">
+          <p className="break-words text-[0.85rem] font-semibold leading-6 text-zinc-100">
             {record.article?.title || "Article title unavailable"}
           </p>
         )}
-        <p className="mt-3 text-sm text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
+        <p className="mt-3 text-xs text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
       </div>
 
       {canManage ? (
@@ -6312,9 +7158,9 @@ function Progress({ label, value }) {
 }
 
 function makeExtractorRow(person = {}, articleUrl = "") {
-  const fullName = firstText(person.name, person.fullName, person.full_name);
-  let firstName = firstText(person.firstName, person.first_name);
-  let lastName = firstText(person.lastName, person.last_name);
+  const fullName = extractorSafeText(firstText(person.name, person.fullName, person.full_name), 200);
+  let firstName = extractorSafeText(firstText(person.firstName, person.first_name), 100);
+  let lastName = extractorSafeText(firstText(person.lastName, person.last_name), 100);
 
   if ((!firstName || !lastName) && fullName) {
     const parts = fullName.split(/\s+/).filter(Boolean);
@@ -6326,39 +7172,184 @@ function makeExtractorRow(person = {}, articleUrl = "") {
     id: firstText(person.id, person._id) || `extractor-row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     firstName,
     lastName,
-    grade: firstText(person.grade),
-    house: firstText(person.house),
+    grade: extractorSafeText(firstText(person.grade), 40),
+    house: extractorSafeText(firstText(person.house), 80),
     url: articleUrl,
-    dateAdded: firstText(person.dateAdded) || new Date().toISOString().slice(0, 10),
+    dateAdded: extractorSafeText(firstText(person.dateAdded), 40) || new Date().toISOString().slice(0, 10),
   };
 }
 
-function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
+function extractorSafeText(value, maxLength = 500) {
+  return asText(value).replace(/\s+/g, " ").slice(0, maxLength);
+}
+
+function extractorSafeList(value, maxItems = 12, maxLength = 120) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? [value]
+      : toList(value);
+  return uniqueTextValues(rawValues.map((item) => (
+    item && typeof item === "object"
+      ? extractorSafeText(firstText(item.name, item.fullName, item.full_name), maxLength)
+      : extractorSafeText(item, maxLength)
+  ))).slice(0, maxItems);
+}
+
+function absoluteHttpUrl(value) {
+  try {
+    const parsed = new URL(asText(value));
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeExtractorWarnings(...sources) {
+  const warnings = [];
+  sources.forEach((source) => {
+    const items = Array.isArray(source) ? source : source ? [source] : [];
+    items.forEach((item) => {
+      const value = item && typeof item === "object"
+        ? firstText(item.message, item.warning, item.detail, item.code)
+        : item;
+      const text = extractorSafeText(value, 500);
+      if (text) warnings.push(text);
+    });
+  });
+  return uniqueTextValues(warnings).slice(0, 10);
+}
+
+function normalizeExtractorMetadata(payload, fallbackUrl) {
+  const candidate = payload?.articleMetadata || payload?.article_metadata || payload?.article;
+  const metadata = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+  const canonicalUrl = absoluteHttpUrl(firstText(
+    metadata.canonicalUrl,
+    metadata.canonical_url,
+    metadata.url,
+    payload?.canonicalUrl,
+    payload?.canonical_url,
+    payload?.articleUrl,
+    payload?.article_url,
+  )) || fallbackUrl;
+  return {
+    url: canonicalUrl,
+    title: extractorSafeText(firstText(metadata.title, payload?.articleTitle, payload?.title), 300),
+    authors: extractorSafeList(metadata.authors ?? metadata.author ?? payload?.authors ?? payload?.author, 12, 120),
+    publishedAt: extractorSafeText(firstText(
+      metadata.datePublished,
+      metadata.date_published,
+      metadata.publishedAt,
+      metadata.published_at,
+      metadata.date,
+      payload?.datePublished,
+      payload?.publishedAt,
+    ), 100),
+    tags: extractorSafeList(metadata.tags ?? metadata.categories ?? payload?.tags ?? payload?.categories, 16, 80),
+  };
+}
+
+function normalizeIntervieweeExtraction(payload) {
+  const candidate = payload?.intervieweeExtraction || payload?.interviewee_extraction;
+  const extraction = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : {};
+  const people = [extraction.people, extraction.interviewees, payload?.people, payload?.interviewees]
+    .find((value) => Array.isArray(value)) || [];
+  return {
+    people: people.filter((person) => person && typeof person === "object"),
+    mode: extractorSafeText(firstText(extraction.mode, extraction.method, payload?.extractionMode), 80),
+    message: extractorSafeText(firstText(extraction.message, extraction.note, extraction.warning), 500),
+    warnings: normalizeExtractorWarnings(extraction.warnings, extraction.warning),
+  };
+}
+
+function ArticleExtractorOverlay({ onClose, onSaved = async () => {}, csrfToken = "" }) {
   const [url, setUrl] = useState("");
   const [articleUrl, setArticleUrl] = useState("");
+  const [extractionToken, setExtractionToken] = useState("");
+  const [articleMetadata, setArticleMetadata] = useState(null);
+  const [warnings, setWarnings] = useState([]);
+  const [intervieweeExtraction, setIntervieweeExtraction] = useState(null);
   const [rows, setRows] = useState([]);
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const reduceMotion = useReducedMotion();
+  const dialogRef = useRef(null);
+  const urlInputRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const canCloseRef = useRef(true);
+  const returnFocusRef = useRef(typeof document !== "undefined" ? document.activeElement : null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const urlInputId = useId();
+  const errorId = useId();
 
   const canClose = !extracting && !saving;
-  const hasReviewRows = Boolean(articleUrl);
+  const hasReviewRows = Boolean(articleUrl && extractionToken);
+  const hasValidNamedRows = rows.length > 0 && rows.every((row) => asText(row.firstName) && asText(row.lastName));
+  const canSave = Boolean(extractionToken && articleUrl && hasValidNamedRows) && !extracting && !saving;
 
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape" && canClose) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    onCloseRef.current = onClose;
+    canCloseRef.current = canClose;
   }, [canClose, onClose]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => urlInputRef.current?.focus());
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && canCloseRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...(dialogRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [])].filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      returnFocusRef.current?.focus?.();
+    };
+  }, []);
+
+  const clearExtractionResult = () => {
+    setArticleUrl("");
+    setExtractionToken("");
+    setArticleMetadata(null);
+    setWarnings([]);
+    setIntervieweeExtraction(null);
+    setRows([]);
+  };
+
   const requestClose = () => {
-    if (canClose) onClose();
+    if (!canClose) return;
+    clearExtractionResult();
+    setUrl("");
+    setError("");
+    onClose();
   };
 
   const validateUrl = () => {
     const nextUrl = url.trim();
     if (!nextUrl) return "Enter an article URL.";
+    if (!absoluteHttpUrl(nextUrl)) return "Enter a complete article URL beginning with http:// or https://.";
     return "";
   };
 
@@ -6369,16 +7360,18 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
       return;
     }
 
+    clearExtractionResult();
     setExtracting(true);
     setError("");
 
     try {
-      const nextUrl = url.trim();
+      const nextUrl = absoluteHttpUrl(url);
       const response = await fetch(`${API_BASE}/api/extract`, {
         method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
         body: JSON.stringify({ url: nextUrl }),
@@ -6394,12 +7387,34 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         throw new Error(payload.error || `Extraction failed (${response.status})`);
       }
 
-      const resolvedArticleUrl = firstText(payload.article_url, payload.articleUrl, nextUrl);
-      const nextRows = Array.isArray(payload.people)
-        ? payload.people.map((person) => makeExtractorRow(person, resolvedArticleUrl))
-        : [];
+      const rawToken = payload.extractionToken ?? payload.extraction_token;
+      const token = typeof rawToken === "string" ? rawToken.trim().slice(0, 8192) : "";
+      if (!token) {
+        throw new Error("Extraction completed without a save token. Run the extraction again.");
+      }
+
+      const metadata = normalizeExtractorMetadata(payload, nextUrl);
+      const extraction = normalizeIntervieweeExtraction(payload);
+      const resolvedArticleUrl = metadata.url || nextUrl;
+      const extractedRows = extraction.people.map((person) => makeExtractorRow(person, resolvedArticleUrl));
+      const manualMode = extractedRows.length === 0;
+      const nextRows = manualMode ? [makeExtractorRow({}, resolvedArticleUrl)] : extractedRows;
 
       setArticleUrl(resolvedArticleUrl);
+      setExtractionToken(token);
+      setArticleMetadata(metadata);
+      setWarnings(normalizeExtractorWarnings(
+        payload.warnings,
+        payload.warning,
+        payload.articleMetadata?.warnings,
+        payload.article_metadata?.warnings,
+        extraction.warnings,
+      ));
+      setIntervieweeExtraction({
+        mode: extraction.mode,
+        message: extraction.message,
+        manualMode,
+      });
       setRows(nextRows);
     } catch (err) {
       setError(err.message || "Extraction failed.");
@@ -6413,9 +7428,8 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   };
 
   const addRow = () => {
-    const rowArticleUrl = articleUrl || url.trim();
-    setRows((currentRows) => [...currentRows, makeExtractorRow({}, rowArticleUrl)]);
-    if (!articleUrl && rowArticleUrl) setArticleUrl(rowArticleUrl);
+    if (!articleUrl || !extractionToken) return;
+    setRows((currentRows) => [...currentRows, makeExtractorRow({}, articleUrl)]);
   };
 
   const deleteRow = (id) => {
@@ -6423,7 +7437,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   };
 
   const validateRows = () => {
-    if (!articleUrl) return "Run extraction or add a row before saving.";
+    if (!extractionToken || !articleUrl) return "Run extraction before saving.";
     if (!rows.length) return "Add at least one row before saving.";
     for (const row of rows) {
       if (!row.firstName.trim() || !row.lastName.trim()) {
@@ -6449,9 +7463,11 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
         },
         credentials: "include",
         body: JSON.stringify({
+          extractionToken,
           articleUrl,
           addedBy: EXTRACTOR_ADDED_BY,
           people: rows.map((row) => ({
@@ -6474,7 +7490,10 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
         throw new Error(payload.error || `Save failed (${response.status})`);
       }
 
-      await onSaved(payload.message ? `Saved. ${payload.message}` : "Saved interviewees.");
+      const saveMessage = extractorSafeText(payload.message, 300);
+      await onSaved(saveMessage ? `Saved. ${saveMessage}` : "Saved interviewees.");
+      clearExtractionResult();
+      setUrl("");
       onClose();
     } catch (err) {
       setError(err.message || "Save failed.");
@@ -6486,24 +7505,32 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
   return (
     <motion.div
       className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
-      initial={{ opacity: 0 }}
+      initial={reduceMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestClose();
       }}
     >
       <motion.div
         className="mx-auto flex min-h-full w-full max-w-6xl items-center py-6"
-        initial={{ opacity: 0, scale: 0.97, y: 18 }}
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.97, y: 18 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.97, y: 18 }}
-        transition={{ duration: 0.2 }}
+        exit={reduceMotion ? undefined : { opacity: 0, scale: 0.97, y: 18 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.2 }}
       >
-        <div className="w-full overflow-hidden rounded-3xl border border-white/[0.22] bg-[#0b0c10] shadow-2xl shadow-black ring-1 ring-white/[0.06]">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={descriptionId}
+          aria-busy={extracting || saving}
+          className="w-full overflow-hidden rounded-3xl border border-white/[0.22] bg-[#0b0c10] shadow-2xl shadow-black ring-1 ring-white/[0.06]"
+        >
           <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] px-5 py-4">
             <div>
-              <h2 className="text-xl font-semibold tracking-tight text-zinc-50">AI article extractor</h2>
+              <h2 id={titleId} className="text-xl font-semibold tracking-tight text-zinc-50">AI article extractor</h2>
             </div>
             <button
               type="button"
@@ -6519,38 +7546,93 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
           <div className="px-5 py-5">
             <div className="mx-auto max-w-3xl py-4 text-center">
               <h3 className="text-2xl font-semibold tracking-tight text-zinc-50">Paste a published article URL</h3>
-              <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Find interviewees, review the fields, then save them to the live article database.</p>
+              <p id={descriptionId} className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Find interviewees, review the fields, then save them to the live article database.</p>
               <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-white/[0.18] bg-black/25 p-2 transition focus-within:border-white/[0.32] md:flex-row">
+                <label htmlFor={urlInputId} className="sr-only">Published article URL</label>
                 <input
+                  ref={urlInputRef}
+                  id={urlInputId}
+                  type="url"
+                  inputMode="url"
+                  autoComplete="url"
+                  required
                   value={url}
                   onChange={(event) => {
                     setUrl(event.target.value);
+                    clearExtractionResult();
                     if (error) setError("");
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") runExtract();
+                    if (event.key === "Enter" && !extracting && !saving) runExtract();
                   }}
+                  disabled={extracting || saving}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : descriptionId}
                   className="min-w-0 flex-1 rounded-xl bg-transparent px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
-                  placeholder="Paste an article URL..."
+                  placeholder="https://example.com/article"
                 />
                 <Button onClick={runExtract} disabled={extracting || saving}>
                   {extracting ? "Extracting..." : "Extract"}
                 </Button>
               </div>
-              {error && <p className="mt-3 text-sm font-medium text-rose-300">{error}</p>}
+              {error && <p id={errorId} role="alert" className="mt-3 text-sm font-medium text-rose-300">{error}</p>}
             </div>
 
             {hasReviewRows && (
               <div className="mt-5">
-                <div className="mb-5">
+                <div className="mb-5 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-600">Article metadata</p>
+                      <h3 className="mt-2 text-lg font-semibold text-zinc-50">{articleMetadata?.title || "Title unavailable"}</h3>
+                      <p className="mt-2 break-all text-sm text-zinc-500">{articleUrl}</p>
+                    </div>
+                    <dl className="grid shrink-0 gap-3 text-sm sm:grid-cols-2 lg:w-[28rem]">
+                      <div>
+                        <dt className="text-xs text-zinc-600">Authors</dt>
+                        <dd className="mt-1 text-zinc-300">{articleMetadata?.authors?.length ? articleMetadata.authors.join(", ") : "Unavailable"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-zinc-600">Published</dt>
+                        <dd className="mt-1 text-zinc-300">{articleMetadata?.publishedAt || "Unavailable"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  {articleMetadata?.tags?.length ? (
+                    <div className="mt-4 flex flex-wrap gap-2" aria-label="Article tags">
+                      {articleMetadata.tags.map((tag) => <span key={tag} className="rounded-full border border-white/[0.08] bg-black/20 px-2.5 py-1 text-xs text-zinc-400">{tag}</span>)}
+                    </div>
+                  ) : null}
+                  {warnings.length ? (
+                    <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-left" role="status">
+                      <p className="text-sm font-medium text-amber-200">Review notes</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-5 text-amber-100/75">
+                        {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {intervieweeExtraction?.manualMode ? (
+                    <p className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm leading-6 text-zinc-400" role="status">
+                      No interviewees were detected. A blank source row is ready for manual entry.
+                      {intervieweeExtraction.message ? ` ${intervieweeExtraction.message}` : ""}
+                    </p>
+                  ) : intervieweeExtraction?.message ? (
+                    <p className="mt-4 text-sm leading-6 text-zinc-500" role="status">{intervieweeExtraction.message}</p>
+                  ) : null}
+                </div>
+
+                <div className="mb-3">
                   <div>
                     <h3 className="font-medium text-zinc-50">Review interviewees</h3>
-                    <p className="mt-1 break-all text-sm text-zinc-500">{articleUrl}</p>
+                    {intervieweeExtraction?.manualMode ? (
+                      <p className="mt-1 text-sm text-zinc-500">Add the source name before saving.</p>
+                    ) : null}
                   </div>
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-white/[0.08]">
                   <table className="w-full min-w-[680px] text-left text-sm">
+                    <caption className="sr-only">Interviewees to save for this article</caption>
                     <thead className="bg-white/[0.035] text-xs uppercase tracking-[0.14em] text-zinc-600">
                       <tr>
                         <th className="px-4 py-3">First name</th>
@@ -6561,12 +7643,13 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((row) => (
+                      {rows.map((row, rowIndex) => (
                         <tr key={row.id} className="border-t border-white/[0.06]">
                           <td className="px-4 py-4">
                             <input
                               value={row.firstName}
                               onChange={(event) => updateRow(row.id, "firstName", event.target.value)}
+                              aria-label={`First name for source row ${rowIndex + 1}`}
                               className="w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                               placeholder="First"
                             />
@@ -6575,6 +7658,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <input
                               value={row.lastName}
                               onChange={(event) => updateRow(row.id, "lastName", event.target.value)}
+                              aria-label={`Last name for source row ${rowIndex + 1}`}
                               className="w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 py-2 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                               placeholder="Last"
                             />
@@ -6583,6 +7667,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <select
                               value={row.grade}
                               onChange={(event) => updateRow(row.id, "grade", event.target.value)}
+                              aria-label={`Grade for source row ${rowIndex + 1}`}
                               className="h-10 w-full rounded-xl border border-white/[0.08] bg-zinc-950 px-3 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                             >
                               {optionsWithCurrent(EXTRACTOR_GRADE_OPTIONS, row.grade).map((option) => (
@@ -6594,6 +7679,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                             <select
                               value={row.house}
                               onChange={(event) => updateRow(row.id, "house", event.target.value)}
+                              aria-label={`House for source row ${rowIndex + 1}`}
                               className="h-10 w-full rounded-xl border border-white/[0.08] bg-zinc-950 px-3 text-zinc-200 outline-none transition focus:border-white/[0.18]"
                             >
                               {optionsWithCurrent(EXTRACTOR_HOUSE_OPTIONS, row.house).map((option) => (
@@ -6606,8 +7692,8 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
                               type="button"
                               onClick={() => deleteRow(row.id)}
                               className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-400/15 bg-rose-400/10 text-rose-300 transition hover:bg-rose-400/15"
-                              aria-label="Delete row"
-                              title="Delete row"
+                              aria-label={`Delete source row ${rowIndex + 1}`}
+                              title={`Delete source row ${rowIndex + 1}`}
                             >
                               <Icon name="trash" className="h-4 w-4" />
                             </button>
@@ -6632,7 +7718,7 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {} }) {
 
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <Button variant="ghost" onClick={requestClose} disabled={!canClose}>Cancel</Button>
-                  <Button icon="task" onClick={saveRows} disabled={saving || extracting}>
+                  <Button icon="task" onClick={saveRows} disabled={!canSave} title={!extractionToken ? "Run extraction before saving" : !hasValidNamedRows ? "Add first and last names for every source" : undefined}>
                     {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
@@ -6666,7 +7752,7 @@ function TasksPage({ tasks, updateTaskStatus }) {
                   <h3 className="text-sm font-medium leading-5">{task.title}</h3>
                   <p className="mt-2 text-xs text-zinc-500">{task.article}</p>
                   <p className="mt-3 text-xs text-zinc-600">Owner: {task.owner}</p>
-                  <Select value={task.status} onChange={(next) => updateTaskStatus(task.id, next)} options={statuses} className="mt-3" />
+                  <Select value={task.status} onChange={(next) => updateTaskStatus(task.id, next)} options={statuses} label={`Change status for ${task.title}`} className="mt-3" />
                 </div>
               ))}
             </div>
@@ -6698,6 +7784,7 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
   const calendarEvents = useMemo(() => buildCalendarEvents(stories), [stories]);
   const firstEventDate = calendarEvents[0]?.date;
   const [hasNavigatedMonth, setHasNavigatedMonth] = useState(false);
+  const [expandedDays, setExpandedDays] = useState(() => new Set());
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const base = firstEventDate || new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
@@ -6710,7 +7797,17 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
 
   const navigateCalendarMonth = (nextMonth) => {
     setHasNavigatedMonth(true);
+    setExpandedDays(new Set());
     setVisibleMonth(nextMonth);
+  };
+
+  const toggleExpandedDay = (dayKey) => {
+    setExpandedDays((current) => {
+      const next = new Set(current);
+      if (next.has(dayKey)) next.delete(dayKey);
+      else next.add(dayKey);
+      return next;
+    });
   };
 
   const cells = useMemo(() => buildCalendarCells(visibleMonth), [visibleMonth]);
@@ -6723,9 +7820,8 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     });
     return grouped;
   }, [calendarEvents]);
-
   return (
-    <PageShell title="Publishing calendar">
+    <PageShell title="Calendar">
       <section className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-white/[0.12] pb-4 lg:flex-row lg:items-end lg:justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-zinc-50">{monthYearLabel(visibleMonth)}</h2>
@@ -6746,6 +7842,9 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
             <div className="grid grid-cols-7">
               {cells.map((cell, index) => {
                 const items = eventsByDay.get(cell.key) || [];
+                const expanded = expandedDays.has(cell.key);
+                const visibleItems = expanded ? items : items.slice(0, 4);
+                const eventListId = `calendar-events-${cell.key}`;
                 return (
                   <div
                     key={cell.key}
@@ -6758,19 +7857,30 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
                     <div className="mb-2 flex items-center justify-between">
                       <span className={cx("flex h-7 w-7 items-center justify-center rounded-full text-xs", cell.isToday ? "bg-zinc-100 text-black" : cell.inMonth ? "text-zinc-300" : "text-zinc-700")}>{cell.day}</span>
                     </div>
-                    <div className="space-y-1.5">
-                      {items.slice(0, 4).map((item) => (
+                    <div id={eventListId} className="space-y-1.5">
+                      {visibleItems.map((item) => (
                         <button
                           key={item.id}
                           type="button"
                           onClick={() => onOpenStory(item.story)}
                           title={item.title}
-                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus:ring-2 focus:ring-white/15"
+                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
                         >
                           {item.title}
                         </button>
                       ))}
-                      {items.length > 4 ? <p className="px-1 text-[10px] text-zinc-500">+{items.length - 4} more</p> : null}
+                      {items.length > 4 ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandedDay(cell.key)}
+                          aria-expanded={expanded}
+                          aria-controls={eventListId}
+                          aria-label={expanded ? `Show fewer deadlines for ${monthDayYear(cell.date)}` : `Show ${items.length - 4} more deadlines for ${monthDayYear(cell.date)}`}
+                          className="rounded px-1 py-0.5 text-[10px] font-medium text-zinc-500 transition hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+                        >
+                          {expanded ? "Show fewer" : `+${items.length - 4} more`}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -6782,16 +7892,16 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     </PageShell>
   );
 }
+
 function AnalyticsPage() {
   return (
-    <PageShell title="Analytics" className="flex min-h-[calc(100vh-5rem)] max-w-[1640px] flex-col">
-      <div className="flex flex-1 items-center justify-center text-center">
-        <h2 className="text-lg font-semibold text-zinc-100">Analytics are under construction</h2>
-      </div>
+    <PageShell title="Analytics">
+      <p className="pt-2 text-sm text-zinc-500">Coming soon.</p>
     </PageShell>
   );
 }
-function AdminPage({ setToast, csrfToken = "", currentUser }) {
+
+function AdministrationSettings({ setToast, csrfToken = "", currentUser = FALLBACK_ACCOUNT }) {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -6861,24 +7971,46 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
     }
   };
 
+  const removeUserMembership = async (userId) => {
+    const user = staff.find((item) => item.id === userId);
+    if (!user || accountsReferToSameUser(user, currentUser)) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}/membership`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Membership removal failed.");
+      setStaff((previous) => previous.filter((item) => item.id !== userId));
+      setToast(`${user.name} was removed from this workspace.`);
+    } catch (removeError) {
+      setToast(removeError instanceof Error ? removeError.message : "Membership removal failed.");
+    }
+  };
+
   const toggleRole = (roleId) => {
     setCollapsedRoles((previous) => ({ ...previous, [roleId]: !previous[roleId] }));
   };
 
   return (
-    <PageShell
-      title="Admin"
-      description="Manage staff access and roles for the newsroom."
-      className="max-w-7xl"
-      right={<Button icon="mail" onClick={() => setToast("Invite staff is ready for backend wiring.")}>Invite staff</Button>}
-    >
+    <div>
+      <p className="mb-5 text-sm leading-6 text-zinc-500">Manage newsroom access and assign workspace roles.</p>
       <section className="space-y-5">
-        <Input value={search} onChange={setSearch} placeholder="Search staff" className="h-11 max-w-xl" />
+        <Input value={search} onChange={setSearch} placeholder="Search staff" label="Search staff by name" className="h-11 w-full" />
 
         {loading ? (
-          <AdminSurfaceMessage icon="admin" title="Loading users" body="Pulling users and roles from MongoDB." />
+          <AdminSettingsSkeleton />
         ) : error ? (
-          <AdminSurfaceMessage icon="admin" title="Admin users unavailable" body={error} />
+          <AdminSurfaceMessage
+            icon="admin"
+            title="Could not load staff"
+            body={error}
+            action={<Button variant="ghost" onClick={() => loadStaff()}>Try again</Button>}
+          />
         ) : visibleCount === 0 ? (
           <AdminSurfaceMessage icon="search" title="No matching staff" body="Try a different staff name." />
         ) : (
@@ -6890,34 +8022,235 @@ function AdminPage({ setToast, csrfToken = "", currentUser }) {
                 collapsed={Boolean(collapsedRoles[group.id])}
                 onToggle={() => toggleRole(group.id)}
                 onRoleChange={updateUserRole}
+                onRemove={removeUserMembership}
+                currentUser={currentUser}
               />
             ))}
           </div>
         )}
       </section>
-    </PageShell>
-  );
-}
-
-function AdminSurfaceMessage({ icon, title, body }) {
-  return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025]">
-      <StateMessage icon={icon} title={title} body={body} />
     </div>
   );
 }
 
-function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
+function InviteStaffModal({ workspace, setToast, onRotate, onClose }) {
+  const reduceMotion = useReducedMotion();
+  const closeButtonRef = useRef(null);
+  const returnFocusRef = useRef(document.activeElement);
+  const onCloseRef = useRef(onClose);
+  const [copyError, setCopyError] = useState("");
+  const [copied, setCopied] = useState("");
+  const [rotationPending, setRotationPending] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const workspaceName = asText(workspace?.name) || "your newsroom";
+  const joinCode = asText(workspace?.joinCode);
+  const signupUrl = `${window.location.origin}/signup`;
+  const inviteMessage = joinCode
+    ? `Join ${workspaceName} on Inscribe. Sign up at ${signupUrl}, then enter workspace code ${joinCode}.`
+    : "The workspace join code is currently unavailable. Close this dialog and reload Administration before inviting staff.";
+  const mailtoHref = joinCode
+    ? `mailto:?subject=${encodeURIComponent(`Join ${workspaceName} on Inscribe`)}&body=${encodeURIComponent(inviteMessage)}`
+    : "";
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = closeButtonRef.current?.closest('[role="dialog"]');
+      const focusable = [...(dialog?.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+        .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      returnFocusRef.current?.focus?.();
+    };
+  }, []);
+
+  const copyText = async (value, copiedLabel, toastMessage) => {
+    if (!value) return;
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(copiedLabel);
+      setToast(toastMessage);
+      window.setTimeout(() => setCopied(""), 1800);
+    } catch {
+      setCopyError("Copy failed. Select the text in this dialog and copy it manually.");
+    }
+  };
+
+  const rotateCode = async () => {
+    if (rotating) return;
+    if (!rotationPending) {
+      setRotationPending(true);
+      window.setTimeout(() => setRotationPending(false), 6000);
+      return;
+    }
+    setRotating(true);
+    setCopyError("");
+    try {
+      await onRotate();
+      setRotationPending(false);
+    } catch (error) {
+      setCopyError(error instanceof Error ? error.message : "Join code rotation failed.");
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  return createPortal(
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={reduceMotion ? undefined : { opacity: 0 }}
+      transition={{ duration: reduceMotion ? 0 : 0.16 }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-staff-title"
+      aria-describedby="invite-staff-description"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <motion.section
+        initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={reduceMotion ? undefined : { opacity: 0, y: 8, scale: 0.98 }}
+        transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-xl rounded-2xl border border-white/[0.12] bg-[#0b0c10] p-5 shadow-2xl shadow-black/60 sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-5">
+          <div>
+            <h2 id="invite-staff-title" className="text-xl font-semibold text-zinc-50">Invite staff</h2>
+            <p id="invite-staff-description" className="mt-2 max-w-md text-sm leading-6 text-zinc-500">
+              Share the code or send a ready-to-use email. New members join as guests until an admin assigns a role.
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close invite staff dialog"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+          >
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-white/[0.1] bg-black/25 p-4">
+          <p className="text-xs font-medium text-zinc-500">Workspace join code</p>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <code className="select-all break-all text-xl font-semibold tracking-[0.16em] text-zinc-100">{joinCode || "Unavailable"}</code>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" onClick={() => copyText(joinCode, "code", "Copied workspace join code.")} disabled={!joinCode}>
+                {copied === "code" ? "Copied" : "Copy code"}
+              </Button>
+              <Button variant="ghost" onClick={rotateCode} disabled={rotating}>
+                {rotating ? "Rotating..." : rotationPending ? "Confirm rotation" : "Rotate code"}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label htmlFor="staff-invite-message" className="text-xs font-medium text-zinc-500">Invite message</label>
+          <textarea
+            id="staff-invite-message"
+            readOnly
+            rows={4}
+            value={inviteMessage}
+            className="mt-2 w-full resize-none rounded-xl border border-white/[0.1] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-300 outline-none focus:border-white/[0.2]"
+          />
+        </div>
+
+        {copyError ? <p className="mt-3 text-sm text-rose-300" role="alert">{copyError}</p> : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <Button variant="ghost" onClick={() => copyText(inviteMessage, "message", "Copied staff invite message.")} disabled={!joinCode}>
+            {copied === "message" ? "Copied message" : "Copy message"}
+          </Button>
+          {mailtoHref ? (
+            <a
+              href={mailtoHref}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 motion-reduce:transition-none"
+            >
+              <Icon name="mail" className="h-4 w-4" />
+              Open email
+            </a>
+          ) : (
+            <span className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black opacity-45" aria-disabled="true">
+              <Icon name="mail" className="h-4 w-4" />
+              Open email
+            </span>
+          )}
+        </div>
+      </motion.section>
+    </motion.div>,
+    document.body
+  );
+}
+
+function AdminSettingsSkeleton() {
+  return (
+    <div role="status" aria-live="polite">
+      <span className="sr-only">Loading staff</span>
+      <div className="space-y-3 animate-pulse" aria-hidden="true">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-4">
+            <div className="h-4 w-4 shrink-0 rounded bg-white/[0.07]" />
+            <div className="h-4 w-24 shrink-0 rounded bg-white/[0.08]" />
+            <div className="h-3 w-full max-w-72 rounded bg-white/[0.045]" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminSurfaceMessage({ icon, title, body, action }) {
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.025]">
+      <StateMessage icon={icon} title={title} body={body} action={action} />
+    </div>
+  );
+}
+
+function AdminRoleSection({ group, collapsed, onToggle, onRoleChange, onRemove, currentUser }) {
+  const reduceMotion = useReducedMotion();
   return (
     <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:bg-white/[0.035]"
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:bg-white/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20"
       >
         <span className="flex min-w-0 items-center gap-3">
-          <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", collapsed ? "-rotate-90" : "rotate-0")} />
+          <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition motion-reduce:transition-none", collapsed ? "-rotate-90" : "rotate-0")} />
           <span className="min-w-0">
             <span className="text-sm font-semibold text-zinc-100">{group.label}</span>{" "}
             <span className="ml-3 text-sm text-zinc-500">{group.description}</span>
@@ -6927,14 +8260,14 @@ function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
       <AnimatePresence initial={false}>
         {!collapsed && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
+            initial={reduceMotion ? false : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
+            exit={reduceMotion ? undefined : { opacity: 0, height: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.16, ease: "easeOut" }}
             className="overflow-hidden border-t border-white/[0.08]"
           >
             {group.users.length ? (
-              <AdminStaffTable staff={group.users} onRoleChange={onRoleChange} />
+              <AdminStaffTable staff={group.users} onRoleChange={onRoleChange} onRemove={onRemove} currentUser={currentUser} />
             ) : (
               <div className="px-4 py-6 text-sm text-zinc-600">No staff in this role.</div>
             )}
@@ -6945,7 +8278,16 @@ function AdminRoleSection({ group, collapsed, onToggle, onRoleChange }) {
   );
 }
 
-function AdminStaffTable({ staff, onRoleChange }) {
+function accountsReferToSameUser(left, right) {
+  const leftIds = [left?.id, left?._id].map((value) => asText(value).toLowerCase()).filter(Boolean);
+  const rightIds = [right?.id, right?._id].map((value) => asText(value).toLowerCase()).filter(Boolean);
+  if (leftIds.some((id) => rightIds.includes(id))) return true;
+  const leftEmail = asText(left?.email).toLowerCase();
+  const rightEmail = asText(right?.email).toLowerCase();
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
+function AdminStaffTable({ staff, onRoleChange, onRemove, currentUser }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-left text-sm">
@@ -6954,11 +8296,12 @@ function AdminStaffTable({ staff, onRoleChange }) {
             <th className="px-4 py-3 font-medium">Staff member</th>
             <th className="w-44 px-4 py-3 font-medium">Role</th>
             <th className="w-44 px-4 py-3 font-medium">Last seen</th>
+            <th className="w-36 px-4 py-3 font-medium">Access</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06]">
           {staff.map((user) => (
-            <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} />
+            <AdminUserRow key={user.id} user={user} onRoleChange={onRoleChange} onRemove={onRemove} isCurrentUser={accountsReferToSameUser(user, currentUser)} />
           ))}
         </tbody>
       </table>
@@ -6966,7 +8309,17 @@ function AdminStaffTable({ staff, onRoleChange }) {
   );
 }
 
-function AdminUserRow({ user, onRoleChange }) {
+function AdminUserRow({ user, onRoleChange, onRemove, isCurrentUser = false }) {
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const requestRemoval = () => {
+    if (!confirmingRemoval) {
+      setConfirmingRemoval(true);
+      window.setTimeout(() => setConfirmingRemoval(false), 6000);
+      return;
+    }
+    setConfirmingRemoval(false);
+    onRemove(user.id);
+  };
   return (
     <tr className="transition hover:bg-white/[0.025]">
       <td className="px-4 py-3">
@@ -6981,14 +8334,36 @@ function AdminUserRow({ user, onRoleChange }) {
         </div>
       </td>
       <td className="px-4 py-3">
-        <AdminRoleDropdown value={user.role} onChange={(nextRole) => onRoleChange(user.id, nextRole)} label={`${user.name} role`} />
+        {isCurrentUser ? (
+          <div>
+            <span className="text-sm text-zinc-300">{accountRoleLabel(user.role)}</span>
+            <span className="mt-1 block text-xs text-zinc-600">Current account</span>
+          </div>
+        ) : (
+          <AdminRoleDropdown value={user.role} onChange={(nextRole) => onRoleChange(user.id, nextRole)} label={`${user.name} role`} />
+        )}
       </td>
       <td className="px-4 py-3 text-zinc-500">{user.lastSeen || "Not recorded"}</td>
+      <td className="px-4 py-3">
+        {isCurrentUser ? (
+          <span className="text-xs text-zinc-600">Protected</span>
+        ) : (
+          <button
+            type="button"
+            onClick={requestRemoval}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/30"
+            aria-label={`${confirmingRemoval ? "Confirm removal of" : "Remove"} ${user.name} from workspace`}
+          >
+            {confirmingRemoval ? "Confirm remove" : "Remove"}
+          </button>
+        )}
+      </td>
     </tr>
   );
 }
 
 function AdminRoleDropdown({ value, onChange, label }) {
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
   const buttonRef = useRef(null);
@@ -7023,7 +8398,24 @@ function AdminRoleDropdown({ value, onChange, label }) {
       setOpen(false);
     };
     const handleKeyDown = (event) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || !menuRef.current) return;
+      const options = [...menuRef.current.querySelectorAll('[role="option"]')];
+      if (!options.length) return;
+      event.preventDefault();
+      const currentIndex = Math.max(0, options.indexOf(document.activeElement));
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? options.length - 1
+          : event.key === "ArrowDown"
+            ? (currentIndex + 1) % options.length
+            : (currentIndex - 1 + options.length) % options.length;
+      options[nextIndex].focus();
     };
 
     updatePosition();
@@ -7040,16 +8432,24 @@ function AdminRoleDropdown({ value, onChange, label }) {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !menuStyle) return;
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector('[role="option"][aria-selected="true"]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [menuStyle, open]);
+
   const menu = open && menuStyle
     ? createPortal(
         <motion.div
           ref={menuRef}
           role="listbox"
           aria-label={label}
-          initial={{ opacity: 0, scale: 0.96, y: -4 }}
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: -4 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: -4 }}
-          transition={{ duration: 0.14, ease: "easeOut" }}
+          exit={reduceMotion ? undefined : { opacity: 0, scale: 0.96, y: -4 }}
+          transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
           style={menuStyle}
           className="fixed z-[100] overflow-hidden rounded-xl bg-zinc-950 p-1 shadow-2xl shadow-black/60"
         >
@@ -7062,9 +8462,10 @@ function AdminRoleDropdown({ value, onChange, label }) {
               onClick={() => {
                 if (option !== value) onChange(option);
                 setOpen(false);
+                buttonRef.current?.focus();
               }}
               className={cx(
-                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:outline-none",
+                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20",
                 option === value ? "bg-white/[0.08] text-zinc-50" : "text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
               )}
             >
@@ -7087,49 +8488,464 @@ function AdminRoleDropdown({ value, onChange, label }) {
         aria-label={label}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-transparent bg-black/25 px-3 text-sm text-zinc-100 transition hover:bg-white/[0.05] focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 active:border-transparent active:outline-none active:ring-0"
+        className="inline-flex h-10 w-32 items-center justify-between gap-2 rounded-xl border border-transparent bg-black/25 px-3 text-sm text-zinc-100 transition hover:bg-white/[0.05] focus:outline-none focus-visible:border-white/[0.16] focus-visible:ring-2 focus-visible:ring-white/15 active:border-transparent active:outline-none"
       >
         <span className="truncate">{accountRoleLabel(value)}</span>
-        <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition", open && "rotate-180")} />
+        <Icon name="chevron" className={cx("h-4 w-4 shrink-0 text-zinc-500 transition motion-reduce:transition-none", open && "rotate-180")} />
       </button>
       {menu}
     </>
   );
 }
 
-function SettingsPage() {
-  return (
-    <PageShell title="Workspace settings" right={<Button>Save changes</Button>}>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Card className="p-5">
-          <h2 className="font-medium">Publication settings</h2>
-          <p className="mt-1 text-sm text-zinc-500">Configure the school newspaper workspace.</p>
-          <div className="mt-5 space-y-4">
-            <Field label="Publication name" value="Poolesville Pulse" />
-            <Field label="Website URL" value="https://poolesvillepulse.org" />
-            <Field label="Allowed article domain" value="poolesvillepulse.org" />
-            <Field label="Platform type" value="SNO Sites / WordPress" />
-          </div>
-        </Card>
-        <Card className="p-5">
-          <h2 className="font-medium">Multi-school readiness</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">The future version should add workspace IDs to every article, source, task, analytics snapshot, and user record so another school can connect its own newspaper site without sharing data with Poolesville Pulse.</p>
-        </Card>
-      </div>
-    </PageShell>
-  );
+export default function FalconNewsroomFullInteractiveUI() {
+  return isLandingRoute() ? <V4LandingPage /> : <AppShell />;
+}
+function workspaceSettingsDraft(workspace = {}) {
+  return {
+    name: asText(workspace?.name),
+    publicationUrl: asText(workspace?.publicationUrl),
+  };
 }
 
-function Field({ label, value }) {
+function SettingsField({ id, label, hint, value, onChange, disabled = false, type = "text", autoComplete = "off" }) {
+  const hintId = hint ? `${id}-hint` : undefined;
   return (
-    <label className="block">
-      <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</span>
-      <input defaultValue={value} className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]" />
+    <label htmlFor={id} className="block">
+      <span className="mb-2 block text-sm font-medium text-zinc-200">{label}</span>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        autoComplete={autoComplete}
+        aria-describedby={hintId}
+        className="h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 hover:border-white/[0.15] focus:border-white/[0.24] focus:ring-2 focus:ring-white/[0.06] disabled:cursor-not-allowed disabled:bg-black/10 disabled:text-zinc-500 disabled:hover:border-white/[0.1]"
+      />
+      {hint ? <span id={hintId} className="mt-2 block text-xs leading-5 text-zinc-500">{hint}</span> : null}
     </label>
   );
 }
 
+const SETTINGS_SECTIONS = [
+  { id: "workspace", label: "Workspace", icon: "settings", path: "/settings" },
+  { id: "names", label: "Names database", icon: "people", path: "/settings/names", adminOnly: true },
+  { id: "administration", label: "Administration", icon: "admin", path: "/settings/administration", adminOnly: true },
+];
 
-export default function FalconNewsroomFullInteractiveUI() {
-  return isLandingRoute() ? <LandingPage /> : <AppShell />;
+function settingsSectionForPath(pathname = "") {
+  const path = pathname.toLowerCase().replace(/\/+$/, "") || "/settings";
+  if (path === "/admin" || path.includes("/administration")) return "administration";
+  if (path.includes("/names")) return "names";
+  return "workspace";
+}
+
+function SettingsNavigation({ activeSection, canManageWorkspace }) {
+  const sections = SETTINGS_SECTIONS.filter((section) => canManageWorkspace || !section.adminOnly);
+  return (
+    <nav className="flex w-full flex-wrap gap-x-6 gap-y-1 overflow-visible border-b border-white/[0.08]" aria-label="Settings sections">
+      {sections.map((section) => (
+        <button
+          key={section.id}
+          type="button"
+          onClick={() => pushAppPath(section.path)}
+          aria-current={activeSection === section.id ? "page" : undefined}
+          className={cx(
+            "-mb-px flex shrink-0 items-center gap-2.5 border-b-2 px-1 pb-3 pt-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20",
+            activeSection === section.id ? "border-zinc-100 text-zinc-50" : "border-transparent text-zinc-500 hover:border-white/[0.18] hover:text-zinc-200"
+          )}
+        >
+          <Icon name={section.icon} className="h-4 w-4 shrink-0" />
+          <span>{section.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function WorkspaceSettings({ draft, updateDraft, loading, saving, canManageWorkspace, isDirty, loadError, saveError, saveSettings, joinCode, copied, copyCode }) {
+  return (
+    <div>
+      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-50">Workspace</h2>
+        </div>
+        {canManageWorkspace ? (
+          <div className="flex items-center gap-3">
+            {isDirty && !saving ? <span className="hidden text-xs text-zinc-500 sm:inline">Unsaved changes</span> : null}
+            <Button onClick={saveSettings} disabled={loading || saving || !isDirty}>{saving ? "Saving..." : "Save changes"}</Button>
+          </div>
+        ) : <StatusBadge>Admin managed</StatusBadge>}
+      </div>
+
+      {loadError ? <div className="mt-5 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-300" role="alert">{loadError}</div> : null}
+      {saveError ? <div className="mt-5 rounded-xl border border-amber-400/15 bg-amber-400/[0.07] px-4 py-3 text-sm text-amber-200" role="alert">{saveError}</div> : null}
+
+      <section className="py-7" aria-labelledby="workspace-details-title">
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
+          <SettingsField id="workspace-name" label="Workspace name" value={draft.name} onChange={(value) => updateDraft("name", value)} disabled={loading || !canManageWorkspace} autoComplete="organization" />
+          <SettingsField id="publication-url" label="Publication website" value={draft.publicationUrl} onChange={(value) => updateDraft("publicationUrl", value)} disabled={loading || !canManageWorkspace} type="url" autoComplete="url" />
+        </div>
+      </section>
+
+      {canManageWorkspace ? <section className="border-t border-white/[0.08] pt-7" aria-labelledby="workspace-access-title">
+        <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px] md:items-center">
+          <div>
+            <h3 id="workspace-access-title" className="text-sm font-semibold text-zinc-200">Workspace access code</h3>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">Share this with people joining {draft.name || "your newsroom"}. </p>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.09] bg-black/20 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-xs text-zinc-500">Join code</p>
+              <p className="mt-1 truncate font-mono text-lg font-semibold tracking-[0.16em] text-zinc-100">{joinCode || (loadError ? "Unavailable" : "Loading...")}</p>
+            </div>
+            <Button variant="ghost" onClick={copyCode} disabled={!joinCode}>{copied ? "Copied" : "Copy"}</Button>
+          </div>
+        </div>
+      </section> : null}
+    </div>
+  );
+}
+
+function readableFileSize(bytes = 0) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function NamesDatabaseSettings({ csrfToken = "", setToast = () => {} }) {
+  const fileInputRef = useRef(null);
+  const [summary, setSummary] = useState({ count: 0, updatedAt: "", updatedBy: "", sourceFile: "" });
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    fetch(`${API_BASE}/api/admin/names`, {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load names database details.");
+        setSummary(payload);
+      })
+      .catch((loadError) => {
+        if (loadError.name !== "AbortError") setError(loadError instanceof Error ? loadError.message : "Could not load names database details.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  const selectFile = (file) => {
+    setResult(null);
+    setError("");
+    if (!file) return;
+    const extension = file.name.toLowerCase().split(".").pop();
+    if (!["csv", "xlsx"].includes(extension)) {
+      setSelectedFile(null);
+      setError("Choose a CSV or .xlsx Excel file.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setSelectedFile(null);
+      setError("The names file must be 10 MB or smaller.");
+      return;
+    }
+    setSelectedFile(file);
+  };
+
+  const uploadNames = async () => {
+    if (!selectedFile || uploading) return;
+    setUploading(true);
+    setError("");
+    setResult(null);
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/names/upload`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not replace the names database.");
+      setSummary(payload);
+      setResult(payload);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setToast(`Names database replaced with ${Number(payload.count || 0).toLocaleString()} records.`);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not replace the names database.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragActive(false);
+    selectFile(event.dataTransfer.files?.[0]);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-col gap-4 border-b border-white/[0.08] pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-50">Names database</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">Keep the student and staff roster used by the AI extractor current.</p>
+        </div>
+        <div className="text-left sm:text-right">
+          <p className="text-2xl font-semibold tabular-nums text-zinc-100">{loading ? "..." : Number(summary.count || 0).toLocaleString()}</p>
+          <p className="text-xs text-zinc-600">names available</p>
+        </div>
+      </div>
+
+      <section className="py-7" aria-labelledby="replace-roster-title">
+        <div className="mb-5">
+          <h3 id="replace-roster-title" className="text-sm font-semibold text-zinc-200">Replace roster</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">A successful upload overwrites the current names collection. The existing list stays in place if validation fails.</p>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          className="sr-only"
+          onChange={(event) => selectFile(event.target.files?.[0])}
+        />
+        <div
+          onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setDragActive(false); }}
+          onDrop={handleDrop}
+          className={cx(
+            "rounded-2xl border border-dashed px-6 py-10 text-center transition duration-200",
+            dragActive ? "border-zinc-300 bg-white/[0.07]" : "border-white/[0.14] bg-black/15"
+          )}
+        >
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.05] text-zinc-300">
+            <Icon name="upload" className="h-5 w-5" />
+          </div>
+          <p className="mt-4 text-sm font-medium text-zinc-200">Drop a spreadsheet here</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">CSV or Excel .xlsx, up to 10 MB</p>
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="mt-4 text-sm font-medium text-zinc-300 underline decoration-zinc-600 underline-offset-4 transition hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">Choose a file</button>
+        </div>
+
+        {selectedFile ? (
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-white/[0.09] bg-white/[0.03] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <Icon name="article" className="h-5 w-5 shrink-0 text-zinc-400" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-zinc-100">{selectedFile.name}</p>
+                <p className="mt-0.5 text-xs text-zinc-600">{readableFileSize(selectedFile.size)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>Remove</Button>
+              <Button icon="upload" onClick={uploadNames} disabled={uploading}>{uploading ? "Replacing..." : "Replace names database"}</Button>
+            </div>
+          </div>
+        ) : null}
+
+        {error ? <div className="mt-4 rounded-xl border border-rose-400/15 bg-rose-400/[0.07] px-4 py-3 text-sm text-rose-300" role="alert">{error}</div> : null}
+        {result ? (
+          <div className="mt-4 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.07] px-4 py-3 text-sm text-emerald-200" role="status">
+            Replaced with {Number(result.count || 0).toLocaleString()} names. {result.skipped ? `${result.skipped} incomplete or duplicate rows were skipped.` : "Every row was imported."}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="grid gap-6 border-t border-white/[0.08] pt-7 md:grid-cols-[minmax(0,1fr)_240px]" aria-labelledby="file-format-title">
+        <div>
+          <h3 id="file-format-title" className="text-sm font-semibold text-zinc-200">Spreadsheet format</h3>
+          <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">The first row must contain column headers.</p>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08]">
+            <div className="grid min-w-[520px] grid-cols-5 bg-white/[0.04] text-xs text-zinc-400">
+              {["firstName", "lastName", "grade", "house", "type"].map((field) => <span key={field} className="border-r border-white/[0.07] px-3 py-2.5 last:border-r-0">{field}</span>)}
+            </div>
+            <div className="grid min-w-[520px] grid-cols-5 text-xs text-zinc-600">
+              {["Maya", "Johnson", "11", "Global", "Student"].map((value) => <span key={value} className="border-r border-white/[0.07] px-3 py-2.5 last:border-r-0">{value}</span>)}
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-zinc-600">Required: firstName and lastName. Optional: grade, house, type, email, and title.</p>
+        </div>
+        <div className="md:border-l md:border-white/[0.08] md:pl-6">
+          <p className="text-xs font-medium text-zinc-400">Last replacement</p>
+          <p className="mt-2 text-sm text-zinc-300">{summary.updatedAt ? formatDisplayDate(summary.updatedAt) : "No upload recorded"}</p>
+          {summary.updatedBy ? <p className="mt-1 text-xs text-zinc-600">by {summary.updatedBy}</p> : null}
+          {summary.sourceFile ? <p className="mt-3 break-all text-xs text-zinc-600">{summary.sourceFile}</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsPage({ workspace, currentUser, csrfToken = "", setToast = () => {}, onWorkspaceUpdated = () => {}, locationPath = "/settings" }) {
+  const startingSettings = workspaceSettingsDraft(workspace);
+  const [draft, setDraft] = useState(startingSettings);
+  const [savedSettings, setSavedSettings] = useState(startingSettings);
+  const [joinCode, setJoinCode] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const canManageWorkspace = ["owner", "admin"].includes(normalizeAppRole(currentUser?.role));
+  const requestedSection = settingsSectionForPath(locationPath);
+  const activeSection = canManageWorkspace ? requestedSection : "workspace";
+  const isDirty = Object.keys(savedSettings).some((key) => draft[key] !== savedSettings[key]);
+
+  useEffect(() => {
+    if (!canManageWorkspace && requestedSection !== "workspace") {
+      window.history.replaceState(null, "", "/settings");
+      window.dispatchEvent(new Event("falcon-route-change"));
+      return;
+    }
+    if (locationPath.toLowerCase().replace(/\/+$/, "") === "/admin") {
+      window.history.replaceState(null, "", canManageWorkspace ? "/settings/administration" : "/settings");
+      window.dispatchEvent(new Event("falcon-route-change"));
+    }
+  }, [canManageWorkspace, locationPath, requestedSection]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetch(`${API_BASE}/api/workspace`, {
+      headers: { Accept: "application/json" },
+      credentials: "include",
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load workspace settings.");
+        if (!active) return;
+        const nextSettings = workspaceSettingsDraft(payload.workspace);
+        setDraft(nextSettings);
+        setSavedSettings(nextSettings);
+        setJoinCode(asText(payload.workspace?.joinCode));
+        onWorkspaceUpdated(payload.workspace);
+      })
+      .catch((error) => {
+        if (active) setLoadError(error instanceof Error ? error.message : "Could not load workspace settings.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const updateDraft = (key, value) => {
+    setSaveError("");
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const validateSettings = () => {
+    if (!asText(draft.name)) return "Workspace name is required.";
+    try {
+      const publicationUrl = new URL(asText(draft.publicationUrl));
+      if (!publicationUrl.hostname || !["http:", "https:"].includes(publicationUrl.protocol)) throw new Error();
+    } catch {
+      return "Enter a valid publication URL beginning with http:// or https://.";
+    }
+    return "";
+  };
+
+  const saveSettings = async () => {
+    if (!canManageWorkspace || saving || !isDirty) return;
+    const validationError = validateSettings();
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/workspace`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          name: asText(draft.name),
+          publicationUrl: asText(draft.publicationUrl).replace(/\/$/, ""),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not save workspace settings.");
+      const nextSettings = workspaceSettingsDraft(payload.workspace);
+      setDraft(nextSettings);
+      setSavedSettings(nextSettings);
+      setJoinCode(asText(payload.workspace?.joinCode));
+      onWorkspaceUpdated(payload.workspace);
+      setToast("Workspace settings saved.");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save workspace settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyCode = async () => {
+    if (!joinCode) return;
+    try {
+      await navigator.clipboard.writeText(joinCode);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setLoadError("Copy failed. Select the code and copy it manually.");
+    }
+  };
+
+  return (
+    <PageShell title="Settings" description="" className="max-w-[1380px]">
+      <SettingsNavigation activeSection={activeSection} canManageWorkspace={canManageWorkspace} />
+      <section
+        className={cx(
+          "mt-7 min-w-0",
+          activeSection !== "administration" && "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-2xl shadow-black/15 sm:p-7"
+        )}
+      >
+          {activeSection === "workspace" ? (
+            <WorkspaceSettings
+              draft={draft}
+              updateDraft={updateDraft}
+              loading={loading}
+              saving={saving}
+              canManageWorkspace={canManageWorkspace}
+              isDirty={isDirty}
+              loadError={loadError}
+              saveError={saveError}
+              saveSettings={saveSettings}
+              joinCode={joinCode}
+              copied={copied}
+              copyCode={copyCode}
+            />
+          ) : null}
+          {activeSection === "names" ? <NamesDatabaseSettings csrfToken={csrfToken} setToast={setToast} /> : null}
+          {activeSection === "administration" ? (
+            <AdministrationSettings
+              setToast={setToast}
+              csrfToken={csrfToken}
+              currentUser={currentUser}
+            />
+          ) : null}
+      </section>
+    </PageShell>
+  );
 }
