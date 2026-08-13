@@ -17,7 +17,7 @@ import requests
 from bson import ObjectId
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, request, send_file, session, url_for
+from flask import Flask, has_request_context, jsonify, redirect, request, send_file, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -40,6 +40,16 @@ except ImportError:  # Support direct execution during local diagnostics.
         extract_article,
         normalize_publication_host,
     )
+
+
+def _backend_build_id() -> str:
+    digest = hashlib.sha256()
+    for source_path in (Path(__file__), Path(__file__).with_name("article_extractor.py")):
+        digest.update(source_path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+BACKEND_BUILD_ID = _backend_build_id()
 
 
 def _repo_root() -> Path:
@@ -122,7 +132,13 @@ ROLE_GUEST = "guest"
 ROLE_WRITER = "writer"
 ROLE_EDITOR = "editor"
 ROLE_ADMIN = "admin"
+ROLE_OWNER = "owner"
 VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_GUEST}
+OWNER_EMAILS = {
+    email.strip().lower()
+    for email in os.getenv("OWNER_EMAILS", "").split(",")
+    if email.strip()
+}
 ROLE_SCHEMA_CAPABILITY = "guest-role-v1"
 PITCH_SECTIONS = {
     "News",
@@ -170,6 +186,7 @@ ROLE_RANK = {
     ROLE_ADMIN: 4,
 }
 FRONTEND_ROLE_LANDING = {
+    ROLE_OWNER: "/owner",
     ROLE_GUEST: "/interviewees",
     ROLE_WRITER: "/stories",
     ROLE_EDITOR: "/dashboard",
@@ -178,6 +195,7 @@ FRONTEND_ROLE_LANDING = {
 IMPORTANT_ACTIVITY_EVENTS = {"status_change"}
 BACKEND_CAPABILITIES = {
     "admin-users",
+    "article-date-sort-v2",
     ROLE_SCHEMA_CAPABILITY,
     "rbac-v4",
     "stories",
@@ -190,6 +208,7 @@ BACKEND_CAPABILITIES = {
     "multi-workspace",
     "workspace-join-codes",
     "workspace-settings",
+    "owner-workspaces",
     "names-database",
 }
 
@@ -385,6 +404,14 @@ except Exception:
         raise
 
 try:
+    articles_col.create_index(
+        [("workspaceId", ASCENDING), ("datePublishedSort", -1), ("_id", -1)],
+        name="article_published_sort_idx",
+    )
+except Exception:
+    pass
+
+try:
     interviews_col.create_index(
         [
             ("workspaceId", ASCENDING),
@@ -463,6 +490,24 @@ def normalize_role(role_value) -> str:
     return role if role in VALID_ROLES else ROLE_GUEST
 
 
+def _is_owner(user_doc: dict | None) -> bool:
+    if not user_doc:
+        return False
+    platform_role = str(user_doc.get("platformRole") or "").strip().lower()
+    legacy_role = str(user_doc.get("role") or "").strip().lower()
+    return platform_role == ROLE_OWNER or legacy_role == ROLE_OWNER
+
+
+def _account_role(user_doc: dict | None) -> str:
+    if _is_owner(user_doc):
+        return ROLE_OWNER
+    return normalize_role((user_doc or {}).get("role"))
+
+
+def _membership_workspace_id_for_user(user_doc: dict | None) -> str:
+    return str((user_doc or {}).get("workspaceId") or "").strip()
+
+
 def normalize_workspace_code(value) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
@@ -476,6 +521,43 @@ def _new_workspace_code() -> str:
     raise RuntimeError("Could not allocate a unique workspace join code.")
 
 
+def _new_workspace_public_id(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", str(name or "").strip().lower()).strip("-")[:54] or "workspace"
+    for attempt in range(20):
+        candidate = base if attempt == 0 else f"{base}-{secrets.token_hex(2)}"
+        if not workspaces_col.find_one({"publicId": candidate}):
+            return candidate
+    raise RuntimeError("Could not allocate a unique workspace id.")
+
+
+def _workspace_settings_updates(payload: dict) -> tuple[dict, str]:
+    name = str((payload or {}).get("name") or "").strip()
+    publication_url = str((payload or {}).get("publicationUrl") or "").strip().rstrip("/")
+    if not name:
+        return {}, "Workspace name is required."
+    if len(name) > 120:
+        return {}, "Workspace name must be 120 characters or fewer."
+
+    safe_publication_url = ""
+    article_domain = ""
+    if publication_url:
+        safe_publication_url = _safe_http_url(publication_url, max_length=500)
+        parsed_publication_url = urlparse(safe_publication_url) if safe_publication_url else None
+        article_domain = _normalized_publication_hostname(parsed_publication_url.hostname or "") if parsed_publication_url else ""
+        if (
+            not safe_publication_url
+            or not article_domain
+            or (parsed_publication_url.port is not None and parsed_publication_url.port not in {80, 443})
+        ):
+            return {}, "Enter a valid publication URL beginning with http:// or https://."
+    return {
+        "name": name,
+        "publicationUrl": safe_publication_url,
+        "articleDomain": article_domain,
+        "updatedAt": _now_iso(),
+    }, ""
+
+
 def _serialize_workspace(doc: dict | None, include_join_code: bool = False) -> dict | None:
     if not doc:
         return None
@@ -485,31 +567,65 @@ def _serialize_workspace(doc: dict | None, include_join_code: bool = False) -> d
         "publicationUrl": str(doc.get("publicationUrl") or ""),
         "articleDomain": str(doc.get("articleDomain") or ""),
         "platformType": str(doc.get("platformType") or "SNO Sites / WordPress"),
+        "createdAt": str(doc.get("createdAt") or ""),
+        "updatedAt": str(doc.get("updatedAt") or ""),
     }
     if include_join_code:
         workspace["joinCode"] = str(doc.get("joinCode") or "")
     return workspace
 
 
-def _workspace_id_for_user(user_doc: dict | None) -> str:
-    return str((user_doc or {}).get("workspaceId") or "").strip()
-
-
-def _workspace_for_user(user_doc: dict | None):
-    workspace_id = _workspace_id_for_user(user_doc)
-    if not workspace_id:
+def _serialize_owner_workspace(doc: dict | None) -> dict | None:
+    workspace = _serialize_workspace(doc, include_join_code=True)
+    if not workspace:
         return None
-    clauses = [{"publicId": workspace_id}]
+    workspace_id = workspace["id"]
+    workspace["memberCount"] = users_col.count_documents({
+        "workspaceId": workspace_id,
+        "platformRole": {"$ne": ROLE_OWNER},
+        "role": {"$in": sorted(VALID_ROLES)},
+    })
+    return workspace
+
+
+def _workspace_id_for_user(user_doc: dict | None) -> str:
+    if _is_owner(user_doc):
+        if not has_request_context():
+            return ""
+        return str(session.get("owner_workspace_id") or "").strip()
+    return _membership_workspace_id_for_user(user_doc)
+
+
+def _workspace_by_id(workspace_id: str):
+    value = str(workspace_id or "").strip()
+    if not value:
+        return None
+    clauses = [{"publicId": value}]
     try:
-        clauses.append({"_id": ObjectId(workspace_id)})
+        clauses.append({"_id": ObjectId(value)})
     except Exception:
         pass
     return workspaces_col.find_one({"$or": clauses})
 
 
+def _workspace_for_user(user_doc: dict | None):
+    return _workspace_by_id(_workspace_id_for_user(user_doc))
+
+
 def _workspace_query(user_doc: dict | None) -> dict:
     workspace_id = _workspace_id_for_user(user_doc)
     return {"workspaceId": workspace_id} if workspace_id else {"_id": None}
+
+
+def _workspace_members_query(workspace_id: str, extra: dict | None = None) -> dict:
+    query = {
+        "workspaceId": str(workspace_id or "").strip(),
+        "platformRole": {"$ne": ROLE_OWNER},
+        "role": {"$in": sorted(VALID_ROLES)},
+    }
+    if extra:
+        query.update(extra)
+    return query
 
 
 def _scoped_query(user_doc: dict | None, query: dict | None = None) -> dict:
@@ -542,7 +658,14 @@ def _ensure_default_workspace():
             existing = workspaces_col.find_one({"publicId": public_id})
 
     if existing and not existing.get("legacyMembershipMigratedAt"):
-        users_col.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
+        users_col.update_many(
+            {
+                "workspaceId": {"$exists": False},
+                "platformRole": {"$ne": ROLE_OWNER},
+                "role": {"$ne": ROLE_OWNER},
+            },
+            {"$set": {"workspaceId": public_id}},
+        )
         for collection in (interviews_col, articles_col, stories_col, pitches_col, activity_col, feedback_col):
             collection.update_many({"workspaceId": {"$exists": False}}, {"$set": {"workspaceId": public_id}})
         workspaces_col.update_one({"_id": existing["_id"]}, {"$set": {"legacyMembershipMigratedAt": _now_iso()}})
@@ -575,17 +698,55 @@ def _ensure_default_workspace():
         workspaces_col.update_one({"_id": existing["_id"]}, {"$set": workspace_update})
 
 
+def _canonicalize_owner_accounts():
+    owner_queries = [{"role": ROLE_OWNER}]
+    if OWNER_EMAILS:
+        owner_queries.append({"email": {"$in": sorted(OWNER_EMAILS)}})
+    users_col.update_many(
+        {"$or": owner_queries},
+        {
+            "$set": {"platformRole": ROLE_OWNER, "updatedAt": _now_iso()},
+            "$unset": {"workspaceId": "", "role": "", "joinedWorkspaceAt": ""},
+        },
+    )
+
+
+def _ensure_owner_account(user_doc: dict | None):
+    if not user_doc:
+        return user_doc
+    email = normalize_email(user_doc.get("email") or "")
+    should_be_owner = _is_owner(user_doc) or email in OWNER_EMAILS
+    if not should_be_owner:
+        return user_doc
+    if (
+        str(user_doc.get("platformRole") or "").strip().lower() == ROLE_OWNER
+        and not _membership_workspace_id_for_user(user_doc)
+        and str(user_doc.get("role") or "").strip().lower() != ROLE_OWNER
+    ):
+        return user_doc
+    return users_col.find_one_and_update(
+        {"_id": user_doc["_id"]},
+        {
+            "$set": {"platformRole": ROLE_OWNER, "updatedAt": _now_iso()},
+            "$unset": {"workspaceId": "", "role": "", "joinedWorkspaceAt": ""},
+        },
+        return_document=ReturnDocument.AFTER,
+    ) or {**user_doc, "platformRole": ROLE_OWNER}
+
+
 def _canonicalize_workspace_user_roles():
     """Keep every workspace membership on the current v3 role vocabulary."""
     users_col.update_many(
         {
             "workspaceId": {"$exists": True, "$nin": [None, ""]},
+            "platformRole": {"$ne": ROLE_OWNER},
             "role": {"$nin": sorted(VALID_ROLES)},
         },
         {"$set": {"role": ROLE_GUEST}},
     )
 
 
+_canonicalize_owner_accounts()
 _ensure_default_workspace()
 _canonicalize_workspace_user_roles()
 
@@ -617,8 +778,11 @@ def _sanitize_next_url(next_url: str) -> str:
 
 
 def _auth_redirect_for_role(role_value: str) -> str:
+    role = str(role_value or "").strip().lower()
+    if role == ROLE_OWNER:
+        return FRONTEND_ROLE_LANDING[ROLE_OWNER]
     next_url = _sanitize_next_url(request.args.get("next") or "")
-    return next_url or FRONTEND_ROLE_LANDING.get(normalize_role(role_value), "/interviewees")
+    return next_url or FRONTEND_ROLE_LANDING.get(normalize_role(role), "/interviewees")
 
 
 def _request_payload() -> dict:
@@ -961,14 +1125,16 @@ def _serialize_user(doc: dict) -> dict:
     last_name = str(doc.get("lastName", "") or "").strip()
     email = doc.get("email", "")
     name = str(doc.get("name") or f"{first_name} {last_name}".strip() or email).strip()
+    account_role = _account_role(doc)
+    membership_workspace_id = _membership_workspace_id_for_user(doc)
     return {
         "id": str(doc.get("_id")),
         "email": email,
         "firstName": first_name,
         "lastName": last_name,
         "name": name,
-        "role": normalize_role(doc.get("role")) if _workspace_id_for_user(doc) else "",
-        "workspaceId": _workspace_id_for_user(doc),
+        "role": account_role if account_role == ROLE_OWNER or membership_workspace_id else "",
+        "workspaceId": membership_workspace_id if account_role != ROLE_OWNER else "",
         "lastSeen": _month_day_year(doc.get("lastLoginAt") or doc.get("updatedAt") or doc.get("createdAt")),
     }
 
@@ -1020,8 +1186,9 @@ def require_role_at_least(role_name: str):
             if not user_doc:
                 return jsonify({"ok": False, "error": "Unauthorized"}), 401
             if not _workspace_id_for_user(user_doc):
-                return jsonify({"ok": False, "error": "Join a workspace first."}), 403
-            if ROLE_RANK.get(normalize_role(user_doc.get("role")), 1) < ROLE_RANK.get(target, 1):
+                message = "Open a workspace first." if _is_owner(user_doc) else "Join a workspace first."
+                return jsonify({"ok": False, "error": message}), 403
+            if ROLE_RANK.get(_current_user_role(user_doc), 1) < ROLE_RANK.get(target, 1):
                 return jsonify({"ok": False, "error": "Editor access required."}), 403
             return fn(*args, **kwargs)
 
@@ -1040,8 +1207,9 @@ def require_roles(*role_names: str):
             if not user_doc:
                 return jsonify({"ok": False, "error": "Unauthorized"}), 401
             if not _workspace_id_for_user(user_doc):
-                return jsonify({"ok": False, "error": "Join a workspace first."}), 403
-            if normalize_role(user_doc.get("role")) not in allowed:
+                message = "Open a workspace first." if _is_owner(user_doc) else "Join a workspace first."
+                return jsonify({"ok": False, "error": message}), 403
+            if _current_user_role(user_doc) not in allowed:
                 return jsonify({"ok": False, "error": "Access denied."}), 403
             return fn(*args, **kwargs)
 
@@ -1050,7 +1218,22 @@ def require_roles(*role_names: str):
     return decorator
 
 
+def require_owner(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user_doc = _current_user_doc()
+        if not user_doc:
+            return jsonify({"ok": False, "error": "Unauthorized"}), 401
+        if not _is_owner(user_doc):
+            return jsonify({"ok": False, "error": "Owner access required."}), 403
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def _current_user_role(user_doc: dict) -> str:
+    if _is_owner(user_doc):
+        return ROLE_ADMIN if _workspace_id_for_user(user_doc) else ROLE_OWNER
     return normalize_role(user_doc.get("role"))
 
 
@@ -2686,6 +2869,7 @@ def api_health():
         "status": "healthy",
         "service": "falcon-newsroom-v3-auth",
         "version": "v3-rbac-guest-2026-07-20",
+        "buildId": BACKEND_BUILD_ID,
         "capabilities": sorted(BACKEND_CAPABILITIES),
     })
 
@@ -2844,9 +3028,10 @@ def api_register():
     except DuplicateKeyError:
         return jsonify({"ok": False, "error": "Email is already registered."}), 409
 
+    user_doc = _ensure_owner_account(user_doc)
     _login_user_doc(user_doc, remember=False)
     _clear_auth_failures(email)
-    return jsonify({"ok": True, "redirect": _auth_redirect_for_role(user_doc.get("role"))})
+    return jsonify({"ok": True, "redirect": _auth_redirect_for_role(_account_role(user_doc))})
 
 
 @app.post("/api/auth/login")
@@ -2879,10 +3064,11 @@ def api_login():
         password_matches = False
     if not password_hash or not password_matches:
         return jsonify({"ok": False, "error": "Invalid email or password."}), 401
+    user_doc = _ensure_owner_account(user_doc)
     _login_user_doc(user_doc, remember=remember)
     _clear_auth_failures(email)
     users_col.update_one({"_id": user_doc["_id"]}, {"$set": {"lastLoginAt": _now_iso(), "authProviders.password": True}})
-    return jsonify({"ok": True, "redirect": _auth_redirect_for_role(user_doc.get("role"))})
+    return jsonify({"ok": True, "redirect": _auth_redirect_for_role(_account_role(user_doc))})
 
 
 @app.get("/api/auth/session")
@@ -2903,6 +3089,8 @@ def api_session():
 @require_auth
 def api_join_workspace():
     user_doc = _current_user_doc()
+    if _is_owner(user_doc):
+        return jsonify({"ok": False, "error": "Owners open workspaces from the owner workspace page."}), 403
     code = normalize_workspace_code(_request_payload().get("code"))
     if _is_join_rate_limited(user_doc):
         return jsonify({"ok": False, "error": "Too many workspace join attempts. Please wait and try again."}), 429
@@ -2913,7 +3101,7 @@ def api_join_workspace():
         return jsonify({"ok": False, "error": "That workspace code was not found."}), 404
 
     workspace_id = str(workspace.get("publicId") or workspace.get("_id"))
-    current_workspace_id = _workspace_id_for_user(user_doc)
+    current_workspace_id = _membership_workspace_id_for_user(user_doc)
     if current_workspace_id:
         if current_workspace_id != workspace_id:
             return jsonify({"ok": False, "error": "You already belong to a different workspace."}), 409
@@ -2924,25 +3112,49 @@ def api_join_workspace():
             "workspace": _serialize_workspace(workspace),
         })
 
-    result = users_col.update_one({
-        "_id": user_doc["_id"],
-        "$or": [
-            {"workspaceId": {"$exists": False}},
-            {"workspaceId": None},
-            {"workspaceId": ""},
-        ],
-    }, {"$set": {
-        "workspaceId": workspace_id,
-        "role": ROLE_GUEST,
-        "joinedWorkspaceAt": _now_iso(),
-        "updatedAt": _now_iso(),
-    }})
-    updated = users_col.find_one({"_id": user_doc["_id"]}) or user_doc
-    if result.matched_count == 0 and _workspace_id_for_user(updated) != workspace_id:
-        return jsonify({"ok": False, "error": "Your workspace membership changed. Refresh and try again."}), 409
+    lock_token = _acquire_admin_mutation_lock(workspace_id)
+    if not lock_token:
+        return jsonify({"ok": False, "error": "Another workspace join is in progress. Please try again."}), 409
+    try:
+        current = users_col.find_one({"_id": user_doc["_id"]}) or user_doc
+        current_workspace_id = _membership_workspace_id_for_user(current)
+        if current_workspace_id and current_workspace_id != workspace_id:
+            return jsonify({"ok": False, "error": "You already belong to a different workspace."}), 409
+        if current_workspace_id == workspace_id:
+            result = None
+            updated = current
+        else:
+            member_count = users_col.count_documents({
+                "workspaceId": workspace_id,
+                "platformRole": {"$ne": ROLE_OWNER},
+                "role": {"$in": sorted(VALID_ROLES)},
+            })
+            joining_role = ROLE_ADMIN if member_count == 0 else ROLE_GUEST
+            result = users_col.update_one({
+                "_id": user_doc["_id"],
+                "platformRole": {"$ne": ROLE_OWNER},
+                "$or": [
+                    {"workspaceId": {"$exists": False}},
+                    {"workspaceId": None},
+                    {"workspaceId": ""},
+                ],
+            }, {"$set": {
+                "workspaceId": workspace_id,
+                "role": joining_role,
+                "joinedWorkspaceAt": _now_iso(),
+                "updatedAt": _now_iso(),
+            }})
+            updated = users_col.find_one({"_id": user_doc["_id"]}) or current
+            if result.matched_count == 0 and _membership_workspace_id_for_user(updated) != workspace_id:
+                return jsonify({"ok": False, "error": "Your workspace membership changed. Refresh and try again."}), 409
+    finally:
+        try:
+            _release_admin_mutation_lock(workspace_id, lock_token)
+        except Exception:
+            pass
     return jsonify({
         "ok": True,
-        "alreadyMember": result.matched_count == 0,
+        "alreadyMember": result is None or result.matched_count == 0,
         "user": _serialize_user(updated),
         "workspace": _serialize_workspace(workspace),
     })
@@ -2955,7 +3167,7 @@ def api_workspace():
     workspace = _workspace_for_user(current_user)
     if not workspace:
         return jsonify({"ok": False, "error": "Workspace not found."}), 404
-    include_join_code = normalize_role(current_user.get("role")) == ROLE_ADMIN
+    include_join_code = _current_user_role(current_user) == ROLE_ADMIN
     return jsonify({"ok": True, "workspace": _serialize_workspace(workspace, include_join_code=include_join_code)})
 
 
@@ -2967,31 +3179,11 @@ def api_update_workspace():
     if not workspace:
         return jsonify({"ok": False, "error": "Workspace not found."}), 404
 
-    payload = _request_payload()
-    name = str(payload.get("name") or "").strip()
-    publication_url = str(payload.get("publicationUrl") or "").strip().rstrip("/")
+    updates, validation_error = _workspace_settings_updates(_request_payload())
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
 
-    if not name:
-        return jsonify({"ok": False, "error": "Workspace name is required."}), 400
-    if len(name) > 120:
-        return jsonify({"ok": False, "error": "Workspace name must be 120 characters or fewer."}), 400
-
-    safe_publication_url = _safe_http_url(publication_url, max_length=500)
-    parsed_publication_url = urlparse(safe_publication_url) if safe_publication_url else None
-    article_domain = _normalized_publication_hostname(parsed_publication_url.hostname or "") if parsed_publication_url else ""
-    if (
-        not safe_publication_url
-        or not article_domain
-        or (parsed_publication_url.port is not None and parsed_publication_url.port not in {80, 443})
-    ):
-        return jsonify({"ok": False, "error": "Enter a valid publication URL beginning with http:// or https://."}), 400
-
-    workspaces_col.update_one({"_id": workspace["_id"]}, {"$set": {
-        "name": name,
-        "publicationUrl": safe_publication_url,
-        "articleDomain": article_domain,
-        "updatedAt": _now_iso(),
-    }})
+    workspaces_col.update_one({"_id": workspace["_id"]}, {"$set": updates})
     updated = workspaces_col.find_one({"_id": workspace["_id"]}) or workspace
     return jsonify({"ok": True, "workspace": _serialize_workspace(updated, include_join_code=True)})
 
@@ -3037,6 +3229,102 @@ def api_rotate_workspace_join_code():
         pass
     return jsonify({"ok": True, "workspace": _serialize_workspace(updated, include_join_code=True)})
 
+
+@app.get("/api/owner/workspaces")
+@require_owner
+def api_owner_workspaces():
+    docs = list(workspaces_col.find({}).sort([("name", ASCENDING), ("createdAt", ASCENDING)]))
+    return jsonify({
+        "ok": True,
+        "workspaces": [_serialize_owner_workspace(doc) for doc in docs],
+    })
+
+
+@app.post("/api/owner/workspaces")
+@require_owner
+def api_owner_create_workspace():
+    owner = _current_user_doc()
+    updates, validation_error = _workspace_settings_updates(_request_payload())
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
+
+    now_iso = _now_iso()
+    for _attempt in range(5):
+        try:
+            workspace = {
+                **updates,
+                "publicId": _new_workspace_public_id(updates["name"]),
+                "joinCode": _new_workspace_code(),
+                "platformType": "SNO Sites / WordPress",
+                "createdAt": now_iso,
+                "updatedAt": now_iso,
+                "createdByOwnerId": str(owner.get("_id")),
+                "createdByOwnerEmail": normalize_email(owner.get("email") or ""),
+            }
+            result = workspaces_col.insert_one(workspace)
+            workspace["_id"] = result.inserted_id
+            return jsonify({"ok": True, "workspace": _serialize_owner_workspace(workspace)}), 201
+        except DuplicateKeyError:
+            continue
+        except RuntimeError:
+            break
+    return jsonify({"ok": False, "error": "Could not create a unique workspace. Please try again."}), 409
+
+
+@app.patch("/api/owner/workspaces/<workspace_id>")
+@require_owner
+def api_owner_update_workspace(workspace_id: str):
+    workspace = _workspace_by_id(workspace_id)
+    if not workspace:
+        return jsonify({"ok": False, "error": "Workspace not found."}), 404
+    updates, validation_error = _workspace_settings_updates(_request_payload())
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
+    result = workspaces_col.update_one({"_id": workspace["_id"]}, {"$set": updates})
+    if result.matched_count != 1:
+        return jsonify({"ok": False, "error": "Workspace changed in another session. Refresh and try again."}), 409
+    updated = workspaces_col.find_one({"_id": workspace["_id"]}) or {**workspace, **updates}
+    return jsonify({"ok": True, "workspace": _serialize_owner_workspace(updated)})
+
+
+@app.post("/api/owner/workspaces/<workspace_id>/join-code/rotate")
+@require_owner
+def api_owner_rotate_workspace_join_code(workspace_id: str):
+    owner = _current_user_doc()
+    workspace = _workspace_by_id(workspace_id)
+    if not workspace:
+        return jsonify({"ok": False, "error": "Workspace not found."}), 404
+    try:
+        next_code = _new_workspace_code()
+        result = workspaces_col.update_one(
+            {"_id": workspace["_id"], "joinCode": workspace.get("joinCode")},
+            {"$set": {
+                "joinCode": next_code,
+                "joinCodeRotatedAt": _now_iso(),
+                "joinCodeRotatedBy": normalize_email(owner.get("email") or ""),
+                "updatedAt": _now_iso(),
+            }},
+        )
+    except DuplicateKeyError:
+        return jsonify({"ok": False, "error": "Could not rotate the join code. Please try again."}), 409
+    if result.modified_count != 1:
+        return jsonify({"ok": False, "error": "The join code changed in another session. Refresh and try again."}), 409
+    updated = workspaces_col.find_one({"_id": workspace["_id"]}) or {**workspace, "joinCode": next_code}
+    return jsonify({"ok": True, "workspace": _serialize_owner_workspace(updated)})
+
+
+@app.post("/api/owner/workspaces/<workspace_id>/open")
+@require_owner
+def api_owner_open_workspace(workspace_id: str):
+    workspace = _workspace_by_id(workspace_id)
+    if not workspace:
+        return jsonify({"ok": False, "error": "Workspace not found."}), 404
+    session["owner_workspace_id"] = str(workspace.get("publicId") or workspace.get("_id") or "")
+    return jsonify({
+        "ok": True,
+        "redirect": "/dashboard",
+        "workspace": _serialize_owner_workspace(workspace),
+    })
 
 @app.post("/api/auth/logout")
 def api_logout():
@@ -3182,7 +3470,7 @@ def api_google_callback():
     if not email or not profile.get("email_verified"):
         return _google_error_redirect("Google account email is not verified.", frontend_origin)
     if not _google_email_domain_allowed(email):
-        return _google_error_redirect("This Google account is not allowed for Falcon Newsroom.", frontend_origin)
+        return _google_error_redirect("This Google account is not allowed for Inscribe.", frontend_origin)
 
     try:
         user_doc = upsert_google_user(profile, allow_create=intent == GOOGLE_INTENT_SIGNUP)
@@ -3197,11 +3485,12 @@ def api_google_callback():
     except Exception:
         return _google_error_redirect("Could not create a Falcon account from Google.", frontend_origin)
 
+    user_doc = _ensure_owner_account(user_doc)
     _store_google_oauth_tokens(user_doc, token_payload)
     _login_user_doc(user_doc, remember=False)
     _clear_auth_failures(email)
     return redirect(_frontend_redirect_url(
-        next_url or "/dashboard",
+        "/owner" if _is_owner(user_doc) else (next_url or "/dashboard"),
         frontend_origin,
     ))
 
@@ -3210,7 +3499,7 @@ def api_google_callback():
 @require_roles(ROLE_ADMIN)
 def api_admin_users():
     user_doc = _current_user_doc()
-    docs = list(users_col.find(_workspace_query(user_doc)).sort([("role", ASCENDING), ("email", ASCENDING)]))
+    docs = list(users_col.find(_workspace_members_query(_workspace_id_for_user(user_doc))).sort([("role", ASCENDING), ("email", ASCENDING)]))
     return jsonify({"ok": True, "users": [_serialize_user(doc) for doc in docs], "roles": sorted(VALID_ROLES)})
 
 
@@ -3229,7 +3518,7 @@ def api_admin_update_user_role(user_id: str):
     if str(current_user.get("_id")) == str(oid):
         return jsonify({"ok": False, "error": "You cannot change your own role while signed in."}), 400
 
-    target = users_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(current_user)})
+    target = users_col.find_one(_workspace_members_query(_workspace_id_for_user(current_user), {"_id": oid}))
     if not target:
         return jsonify({"ok": False, "error": "User not found."}), 404
     workspace_id = _workspace_id_for_user(current_user)
@@ -3237,7 +3526,7 @@ def api_admin_update_user_role(user_id: str):
     if not lock_token:
         return jsonify({"ok": False, "error": "Another access change is in progress. Please try again."}), 409
     try:
-        target = users_col.find_one({"_id": oid, "workspaceId": workspace_id})
+        target = users_col.find_one(_workspace_members_query(workspace_id, {"_id": oid}))
         if not target:
             return jsonify({"ok": False, "error": "User not found."}), 404
         if normalize_role(target.get("role")) == ROLE_ADMIN and next_role != ROLE_ADMIN:
@@ -3245,7 +3534,7 @@ def api_admin_update_user_role(user_id: str):
             if admin_count <= 1:
                 return jsonify({"ok": False, "error": "At least one admin must remain."}), 400
         result = users_col.update_one(
-            {"_id": oid, "workspaceId": workspace_id},
+            _workspace_members_query(workspace_id, {"_id": oid}),
             {"$set": {"role": next_role, "updatedAt": _now_iso()}},
         )
         if result.matched_count != 1:
@@ -3269,14 +3558,14 @@ def api_admin_remove_user_membership(user_id: str):
     if str(current_user.get("_id")) == str(oid):
         return jsonify({"ok": False, "error": "You cannot remove your own workspace membership."}), 400
     workspace_id = _workspace_id_for_user(current_user)
-    target = users_col.find_one({"_id": oid, "workspaceId": workspace_id})
+    target = users_col.find_one(_workspace_members_query(workspace_id, {"_id": oid}))
     if not target:
         return jsonify({"ok": False, "error": "User not found."}), 404
     lock_token = _acquire_admin_mutation_lock(workspace_id)
     if not lock_token:
         return jsonify({"ok": False, "error": "Another access change is in progress. Please try again."}), 409
     try:
-        target = users_col.find_one({"_id": oid, "workspaceId": workspace_id})
+        target = users_col.find_one(_workspace_members_query(workspace_id, {"_id": oid}))
         if not target:
             return jsonify({"ok": False, "error": "User not found."}), 404
         if normalize_role(target.get("role")) == ROLE_ADMIN:
@@ -3285,7 +3574,7 @@ def api_admin_remove_user_membership(user_id: str):
                 return jsonify({"ok": False, "error": "At least one admin must remain."}), 400
         removed_at = _now_iso()
         result = users_col.update_one(
-            {"_id": oid, "workspaceId": workspace_id},
+            _workspace_members_query(workspace_id, {"_id": oid}),
             [
                 {"$set": {
                     "authVersion": {
@@ -4681,13 +4970,31 @@ def api_article_records():
         query = {"$and": clauses} if len(clauses) > 1 else clauses[0]
 
     query = _scoped_query(user_doc, query)
+    _backfill_article_date_sort(query)
     total = articles_col.count_documents(query)
-    docs = list(
-        articles_col.find(query)
-        .sort([("datePublishedSort", sort_direction), ("_id", sort_direction)])
-        .skip(skip)
-        .limit(limit)
-    )
+    docs = list(articles_col.aggregate([
+        {"$match": query},
+        {
+            "$addFields": {
+                "__dateSortMissing": {
+                    "$cond": [
+                        {"$eq": [{"$type": "$datePublishedSort"}, "date"]},
+                        0,
+                        1,
+                    ]
+                }
+            }
+        },
+        {
+            "$sort": {
+                "__dateSortMissing": ASCENDING,
+                "datePublishedSort": sort_direction,
+                "_id": sort_direction,
+            }
+        },
+        {"$skip": skip},
+        {"$limit": limit},
+    ]))
 
     urls = []
     for doc in docs:
@@ -5055,20 +5362,75 @@ def _extractor_error_status(code: str) -> int:
 
 def _extracted_article_date_sort(value: str):
     raw = str(value or "").strip()
-    if not raw:
+    if not raw or len(raw) > 120:
         return None
+
+    parsed = None
+    if isinstance(value, datetime):
+        parsed = value
+
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    except ValueError:
-        try:
-            return datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
+        if parsed is None:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        parsed = None
+
+    if parsed is None:
+        for fmt in (
+            "%B %d, %Y, %I:%M %p",
+            "%B %d, %Y",
+            "%b %d, %Y, %I:%M %p",
+            "%b %d, %Y",
+        ):
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _article_published_value(doc: dict) -> str:
+    return doc.get("datePublished") or doc.get("publishedAt") or doc.get("date") or ""
+
+
+def _backfill_article_date_sort(query: dict) -> None:
+    """Repair sortable dates written before natural-language parsing was supported."""
+    legacy_query = {
+        "$and": [
+            query,
+            {
+                "$or": [
+                    {"datePublishedSort": {"$exists": False}},
+                    {"datePublishedSort": None},
+                    {"datePublishedSort": {"$type": "string"}},
+                ]
+            },
+        ]
+    }
+    for doc in articles_col.find(
+        legacy_query,
+        {"datePublished": 1, "publishedAt": 1, "date": 1},
+    ):
+        date_sort = _extracted_article_date_sort(_article_published_value(doc))
+        if date_sort:
+            articles_col.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"datePublishedSort": date_sort}},
+            )
 
 
 def _upsert_extracted_article(workspace_id: str, canonical_url: str, article: dict, actor: dict) -> dict:
     now = datetime.now(timezone.utc)
+    published_value = article.get("datePublished") or ""
+    date_sort = _extracted_article_date_sort(published_value)
+    if published_value and date_sort is None:
+        raise ValueError("The article publication date could not be normalized for sorting.")
     candidates = sorted(_article_url_lookup_candidates(canonical_url))
     lookup = {
         "workspaceId": workspace_id,
@@ -5102,9 +5464,9 @@ def _upsert_extracted_article(workspace_id: str, canonical_url: str, article: di
         for field, value in fill_if_empty.items():
             if value and not existing.get(field):
                 updates[field] = value
-        date_sort = _extracted_article_date_sort(article.get("datePublished") or "")
-        if date_sort and not existing.get("datePublishedSort"):
-            updates["datePublishedSort"] = date_sort
+        effective_date_sort = date_sort or _extracted_article_date_sort(_article_published_value(existing))
+        if effective_date_sort and existing.get("datePublishedSort") != effective_date_sort:
+            updates["datePublishedSort"] = effective_date_sort
         articles_col.update_one({"_id": existing["_id"], "workspaceId": workspace_id}, {"$set": updates})
         return articles_col.find_one({"_id": existing["_id"], "workspaceId": workspace_id}) or {**existing, **updates}
 
@@ -5132,7 +5494,6 @@ def _upsert_extracted_article(workspace_id: str, canonical_url: str, article: di
         "createdAt": now,
         "updatedAt": now,
     }
-    date_sort = _extracted_article_date_sort(article.get("datePublished") or "")
     if date_sort:
         insert_doc["datePublishedSort"] = date_sort
     try:
@@ -5251,7 +5612,10 @@ def api_save():
         return jsonify({"ok": False, "error": str(exc)}), 400
 
     article = _sanitized_extracted_article(ticket.get("article"), canonical_url)
-    article_doc = _upsert_extracted_article(workspace_id, canonical_url, article, user_doc)
+    try:
+        article_doc = _upsert_extracted_article(workspace_id, canonical_url, article, user_doc)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 422
     now = datetime.now(timezone.utc)
     created = 0
     updated = 0

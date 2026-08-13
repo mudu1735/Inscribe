@@ -613,7 +613,28 @@ class GeminiFallbackTests(unittest.TestCase):
         )
         call = generate.call_args
         self.assertEqual(call.kwargs["config"]["max_output_tokens"], extractor_module.GEMINI_MAX_OUTPUT_TOKENS)
-        self.assertEqual(call.kwargs["config"]["temperature"], 0)
+        self.assertEqual(call.kwargs["config"]["response_schema"], list[str])
+        self.assertEqual(call.kwargs["config"]["thinking_config"], {"thinking_level": "minimal"})
+        self.assertNotIn("temperature", call.kwargs["config"])
+
+    def test_modern_gemini_rejects_truncated_output(self):
+        response = types.SimpleNamespace(
+            text='[\n  "',
+            candidates=[types.SimpleNamespace(finish_reason="MAX_TOKENS")],
+        )
+        generate = Mock(return_value=response)
+        client = types.SimpleNamespace(models=types.SimpleNamespace(generate_content=generate))
+        fake_genai = types.ModuleType("google.genai")
+        fake_genai.Client = Mock(return_value=client)
+        fake_google = types.ModuleType("google")
+        fake_google.__path__ = []
+        fake_google.genai = fake_genai
+
+        with patch.dict(sys.modules, {"google": fake_google, "google.genai": fake_genai}):
+            with self.assertRaises(extractor_module.GeminiGenerationError) as raised:
+                extractor_module._modern_gemini_generate("prompt", "api-key", "model-name")
+
+        self.assertEqual(raised.exception.code, "max_tokens")
 
     def test_legacy_gemini_has_bounded_timeout_and_output(self):
         generate = Mock(return_value=types.SimpleNamespace(text="[]"))
@@ -684,10 +705,10 @@ class GeminiFallbackTests(unittest.TestCase):
             )
         result_text = repr((people, metadata, warnings))
         self.assertEqual(people, [])
-        self.assertEqual(metadata["status"], "unavailable")
+        self.assertEqual(metadata["status"], "provider_error")
         self.assertTrue(metadata["attempted"])
         self.assertNotIn("SECRET", result_text)
-        self.assertEqual(warnings[0]["code"], "manual_interviewee_review_required")
+        self.assertEqual(warnings[0]["code"], "ai_provider_error")
 
     def test_ai_phase_uses_one_bounded_provider_attempt(self):
         attempts = []
@@ -704,8 +725,39 @@ class GeminiFallbackTests(unittest.TestCase):
             )
         self.assertEqual(attempts, ["first-model"])
         self.assertEqual(people, [])
-        self.assertEqual(metadata["status"], "unavailable")
-        self.assertEqual(warnings[0]["code"], "manual_interviewee_review_required")
+        self.assertEqual(metadata["status"], "provider_error")
+        self.assertEqual(warnings[0]["code"], "ai_provider_error")
+
+    def test_invalid_json_is_reported_without_provider_details(self):
+        def generator(_prompt, _api_key, _model):
+            return '["Ada Lovelace"]\n]'
+
+        with patch.dict(os.environ, {"GEMINI_MODELS": "test-model"}):
+            people, metadata, warnings = extract_interviewees(
+                "Ada said hello.",
+                "configured",
+                generator=generator,
+            )
+
+        self.assertEqual(people, [])
+        self.assertEqual(metadata, {"attempted": True, "status": "invalid_response", "model": "test-model"})
+        self.assertEqual(warnings[0]["code"], "ai_invalid_response")
+        self.assertNotIn("Ada Lovelace", repr((metadata, warnings)))
+
+    def test_max_tokens_is_reported_distinctly(self):
+        def generator(_prompt, _api_key, _model):
+            raise extractor_module.GeminiGenerationError("max_tokens")
+
+        with patch.dict(os.environ, {"GEMINI_MODELS": "test-model"}):
+            people, metadata, warnings = extract_interviewees(
+                "Article body.",
+                "configured",
+                generator=generator,
+            )
+
+        self.assertEqual(people, [])
+        self.assertEqual(metadata, {"attempted": True, "status": "max_tokens", "model": "test-model"})
+        self.assertEqual(warnings[0]["code"], "ai_max_tokens")
 
     @patch("server.article_extractor.fetch_article_html")
     def test_extract_article_returns_metadata_when_gemini_is_absent(self, fetch_mock):

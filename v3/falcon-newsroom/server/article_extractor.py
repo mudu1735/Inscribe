@@ -1,4 +1,4 @@
-"""Hardened article extraction helpers for Falcon Newsroom.
+"""Hardened article extraction helpers for Inscribe.
 
 The network boundary in this module is intentionally independent from Flask,
 MongoDB, authentication, and rate limiting.  Callers are expected to authorize
@@ -22,6 +22,7 @@ import codecs
 import html as html_module
 import ipaddress
 import json
+import logging
 import os
 import queue
 import re
@@ -55,7 +56,7 @@ MAX_INTERVIEWEES = 50
 MAX_INTERVIEWEE_NAME_CHARS = 100
 GEMINI_TIMEOUT_SECONDS = 12
 GEMINI_TIMEOUT_MILLISECONDS = GEMINI_TIMEOUT_SECONDS * 1_000
-GEMINI_MAX_OUTPUT_TOKENS = 512
+GEMINI_MAX_OUTPUT_TOKENS = 1024
 DNS_TIMEOUT_SECONDS = 4.0
 MAX_DNS_RECORDS = 32
 MAX_RESOLVED_IPS = 4
@@ -122,6 +123,15 @@ class FetchedArticle:
 Resolver = Callable[..., Sequence[Any]]
 Clock = Callable[[], float]
 GeminiGenerator = Callable[[str, str, str], str]
+logger = logging.getLogger(__name__)
+
+
+class GeminiGenerationError(RuntimeError):
+    """A sanitized Gemini failure that is safe to classify without exposing provider details."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 def _safe_error(code: str, message: str) -> ArticleExtractionError:
@@ -1056,12 +1066,21 @@ def _modern_gemini_generate(prompt: str, api_key: str, model: str) -> str:
         model=model,
         contents=prompt,
         config={
-            "temperature": 0,
             "response_mime_type": "application/json",
+            "response_schema": list[str],
+            "thinking_config": {"thinking_level": "minimal"},
             "max_output_tokens": GEMINI_MAX_OUTPUT_TOKENS,
         },
     )
-    return str(getattr(response, "text", "") or "")
+    candidates = getattr(response, "candidates", None) or []
+    finish_reason = str(getattr(candidates[0], "finish_reason", "") or "") if candidates else ""
+    if finish_reason and not finish_reason.endswith("STOP"):
+        code = "max_tokens" if finish_reason.endswith("MAX_TOKENS") else "provider_rejected"
+        raise GeminiGenerationError(code)
+    text = str(getattr(response, "text", "") or "").strip()
+    if not text:
+        raise GeminiGenerationError("empty_response")
+    return text
 
 
 def _legacy_gemini_generate(prompt: str, api_key: str, model: str) -> str:
@@ -1161,14 +1180,14 @@ def extract_interviewees(
 ) -> tuple[list[dict[str, str]], dict[str, Any], list[dict[str, str]]]:
     """Optionally extract interviewees without making metadata success depend on AI."""
 
-    warning = {
+    manual_warning = {
         "code": "manual_interviewee_review_required",
         "message": "Interviewees could not be extracted automatically. Add or review them manually.",
     }
     if not clean_text(api_key):
-        return [], {"attempted": False, "status": "not_configured", "model": ""}, [warning]
+        return [], {"attempted": False, "status": "not_configured", "model": ""}, [manual_warning]
     if not clean_text(article_body):
-        return [], {"attempted": False, "status": "no_article_body", "model": ""}, [warning]
+        return [], {"attempted": False, "status": "no_article_body", "model": ""}, [manual_warning]
 
     prompt = _interviewee_prompt(article_body)
     # Keep the entire optional AI phase bounded to one provider attempt. The
@@ -1176,17 +1195,41 @@ def extract_interviewees(
     # but serial provider/model fallbacks can multiply a 12-second timeout into
     # a minute-long request and leave the classroom UI needlessly blocked.
     generators = [generator] if generator else [_modern_gemini_generate]
+    failure_status = "provider_error"
+    failure_model = ""
     for model in _gemini_models()[:1]:
         for current_generator in generators:
             try:
                 raw = current_generator(prompt, str(api_key), model)
                 people = _people_from_names(_model_name_items(raw))
                 status = "complete" if people else "no_people_found"
-                warnings = [] if people else [warning]
+                warnings = [] if people else [manual_warning]
                 return people, {"attempted": True, "status": status, "model": model}, warnings
+            except GeminiGenerationError as exc:
+                failure_status = exc.code
+                failure_model = model
+                logger.warning("Gemini interviewee extraction failed: model=%s status=%s", model, exc.code)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                failure_status = "invalid_response"
+                failure_model = model
+                logger.warning("Gemini interviewee extraction failed: model=%s status=invalid_response", model)
             except Exception:
+                failure_status = "provider_error"
+                failure_model = model
+                logger.warning("Gemini interviewee extraction failed: model=%s status=provider_error", model)
                 continue
-    return [], {"attempted": True, "status": "unavailable", "model": ""}, [warning]
+    warning_messages = {
+        "max_tokens": "AI extraction ran out of response space. Add or review interviewees manually.",
+        "invalid_response": "AI returned an invalid response. Add or review interviewees manually.",
+        "empty_response": "AI returned an empty response. Add or review interviewees manually.",
+        "provider_rejected": "AI could not complete this extraction. Add or review interviewees manually.",
+        "provider_error": "AI extraction is temporarily unavailable. Add or review interviewees manually.",
+    }
+    warning = {
+        "code": f"ai_{failure_status}",
+        "message": warning_messages.get(failure_status, manual_warning["message"]),
+    }
+    return [], {"attempted": True, "status": failure_status, "model": failure_model}, [warning]
 
 
 def extract_article(

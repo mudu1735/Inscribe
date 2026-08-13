@@ -264,8 +264,8 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
 
   const title = isSignup ? "Create your account" : "Welcome back";
   const description = isSignup
-    ? "Start your Falcon Newsroom workspace"
-    : "Sign in to your Falcon Newsroom account";
+    ? "Start your Inscribe workspace"
+    : "Sign in to your Inscribe account";
 
   const showNotice = (message: string, tone: NoticeTone = "error") => {
     setNotice(message);
@@ -389,7 +389,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
 
       <header className="absolute left-0 right-0 top-0 z-10 flex items-center border-b border-zinc-800/80 px-6 py-5">
         <span className="text-xs uppercase tracking-[0.14em] text-zinc-400">
-          Falcon Newsroom
+          Inscribe
         </span>
       </header>
 

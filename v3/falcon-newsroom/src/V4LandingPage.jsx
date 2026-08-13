@@ -1,66 +1,74 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import './landing-v4.css';
 
 const workflowStages = [
   {
     id: 'pitch',
     label: 'Pitch',
-    eyebrow: 'Capture the idea',
-    title: 'Student housing costs rise again',
-    status: 'Awaiting review',
-    owner: 'Maya Chen',
-    meta: 'Submitted 14 minutes ago',
-    note: 'The pitch records the angle, urgency, audience, and first reporting leads before work begins.',
-  },
-  {
-    id: 'assign',
-    label: 'Assign',
-    eyebrow: 'Set the reporting plan',
-    title: 'Inside the spring musical build',
-    status: 'Assigned',
-    owner: 'Eli Brooks',
-    meta: 'Draft due Friday',
-    note: 'Editors set ownership, deadlines, collaborators, and the reporting checklist in one handoff.',
+    note: 'Capture the idea, audience, urgency, and first reporting leads so every assignment starts with direction.',
+    details: ['Angle and audience', 'Reporting leads'],
   },
   {
     id: 'report',
     label: 'Report',
-    eyebrow: 'Keep context attached',
-    title: 'Library redesign: student reactions',
-    status: 'Reporting',
-    owner: 'Maya Chen',
-    meta: '3 sources confirmed',
-    note: 'Interview notes, source details, documents, and editor questions stay connected to the story.',
-  },
-  {
-    id: 'review',
-    label: 'Review',
-    eyebrow: 'Make feedback actionable',
-    title: 'Girls tennis reaches regional final',
-    status: 'Ready for review',
-    owner: 'Jules Park',
-    meta: '2 unresolved comments',
-    note: 'Editors can see what changed, what still needs verification, and who owns the next decision.',
+    note: 'Track ownership, deadlines, source records, interview notes, and editor questions in one shared story workspace.',
+    details: ['Sources and notes', 'Draft and deadline'],
   },
   {
     id: 'publish',
     label: 'Publish',
-    eyebrow: 'Ship with confidence',
-    title: 'Board approves new bell schedule',
-    status: 'Scheduled',
-    owner: 'Avery Cole',
-    meta: 'Publishes tomorrow at 7:00 AM',
-    note: 'Final metadata, credits, section placement, and publishing status are checked before release.',
+    note: 'Make feedback actionable, resolve the open checks, and carry final metadata from review to the next deadline.',
+    details: ['Editor feedback', 'Publish handoff'],
   },
 ];
 
-const archiveRows = [
-  ['Board approves new bell schedule', 'News', 'Avery Cole', 'Jul 10, 2026'],
-  ['What students want from the new library', 'Features', 'Maya Chen', 'Jul 8, 2026'],
-  ['Girls tennis reaches regional final', 'Sports', 'Jules Park', 'Jul 5, 2026'],
-  ['The case for later start times', 'Opinion', 'Eli Brooks', 'Jun 28, 2026'],
-  ['Behind the spring musical set', 'Arts', 'Nia Patel', 'Jun 21, 2026'],
+const archiveRecords = [
+  {
+    id: 'congressional-app-challenge',
+    title: 'Poolesville seniors secure a win in prestigious Congressional App Challenge',
+    author: 'Claire Huang',
+    section: 'School News',
+    published: 'Apr 7, 2026',
+    interviewees: [
+      { name: 'Krish Putta', grade: '12', house: 'SMCS' },
+      { name: 'Shayaan Wadkar', grade: '12', house: 'SMCS' },
+    ],
+  },
+  {
+    id: 'artemis-playlist',
+    title: 'A musical mission: NASA reveals Artemis II playlist',
+    author: 'Sydney Saeed',
+    section: 'Arts & Culture',
+    published: 'Apr 21, 2026',
+    interviewees: [
+      { name: 'Dr. Lena Ortiz', grade: 'Staff', house: 'Science' },
+      { name: 'Maya Thompson', grade: '11', house: 'Humanities' },
+    ],
+  },
+  {
+    id: 'school-board-calendar',
+    title: 'MCPS settles calendar after requesting waiver from Board of Education',
+    author: 'Imani Lovelace',
+    section: 'Local News',
+    published: 'Mar 26, 2026',
+    interviewees: [
+      { name: 'Lauren Kim', grade: 'Staff', house: 'Administration' },
+      { name: 'Marcus Lee', grade: '12', house: 'Humanities' },
+      { name: 'Anika Shah', grade: '10', house: 'Global' },
+    ],
+  },
+  {
+    id: 'hero-club-letters',
+    title: 'HERO Club gives back with staff appreciation letters',
+    author: 'Sydney Saeed',
+    section: 'School News',
+    published: 'Mar 27, 2026',
+    interviewees: [
+      { name: 'Nora Patel', grade: '11', house: 'Humanities' },
+      { name: 'James Walker', grade: 'Staff', house: 'Counseling' },
+    ],
+  },
 ];
 
 function Icon({ name, size = 18 }) {
@@ -110,7 +118,10 @@ function ProductFrame({ activeView }) {
         <div className="archive-toolbar"><div className="fake-search"><Icon name="search" size={15}/>Search articles, authors, tags…</div><button>Filter</button><button>Export</button></div>
         <div className="archive-table">
           <div className="archive-header"><span>Article</span><span>Section</span><span>Author</span><span>Published</span></div>
-          {archiveRows.slice(0, 4).map((row, i) => <div className="archive-row" key={row[0]}>{row.map((cell, j) => <span key={cell} className={j === 0 ? 'primary-cell' : ''}>{cell}</span>)}</div>)}
+          {archiveRecords.map((record) => {
+            const row = [record.title, record.section, record.author, record.published];
+            return <div className="archive-row" key={record.id}>{row.map((cell, j) => <span key={cell} className={j === 0 ? 'primary-cell' : ''}>{cell}</span>)}</div>;
+          })}
         </div>
         <div className="archive-insight"><span className="archive-insight-dot"/><span>Linked reporting context</span><strong>14 related stories · 8 shared interviewees</strong></div>
       </div>
@@ -199,32 +210,29 @@ function AnalyticsFrame() {
 }
 export default function V4LandingPage() {
   const reduceMotion = useReducedMotion();
-  const [activeStageIndex, setActiveStageIndex] = useState(0);
   const [query, setQuery] = useState('');
+  const [selectedRecordId, setSelectedRecordId] = useState(archiveRecords[0].id);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const workflowStepRefs = useRef([]);
-  const activeStage = workflowStages[activeStageIndex];
 
-  const filteredRows = useMemo(() => archiveRows.filter((row) => row.join(' ').toLowerCase().includes(query.toLowerCase())), [query]);
-
-  useEffect(() => {
-    const steps = workflowStepRefs.current.filter(Boolean);
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) setActiveStageIndex(Number(entry.target.dataset.stageIndex));
-      });
-    }, { rootMargin: '-34% 0px -48% 0px', threshold: 0 });
-
-    steps.forEach((step) => observer.observe(step));
-    return () => observer.disconnect();
-  }, []);
+  const filteredRecords = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return archiveRecords;
+    return archiveRecords.filter((record) => [
+      record.title,
+      record.author,
+      record.section,
+      record.published,
+      ...record.interviewees.flatMap((person) => [person.name, person.grade, person.house]),
+    ].join(' ').toLowerCase().includes(normalizedQuery));
+  }, [query]);
+  const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) || filteredRecords[0] || null;
 
 
   return (
     <main className="landing-page">
       <header className="site-header">
         <nav className="nav-shell" aria-label="Main navigation">
-          <a className="brand" href="#top" aria-label="Falcon Newsroom home"><img className="brand-logo" src="/app-logo.png" alt=""/><span>Falcon Newsroom</span></a>
+          <a className="brand" href="#top" aria-label="Inscribe home"><img className="brand-logo" src="/app-logo.png" alt=""/><span>Inscribe</span></a>
           <div className="desktop-nav">
             <a href="#workflow">Workflow</a><a href="#records">Records</a><a href="#analytics">Analytics</a>
           </div>
@@ -239,67 +247,122 @@ export default function V4LandingPage() {
       <section id="top" className="hero-section">
         <div className="page-width hero-content">
           <motion.h1 initial={reduceMotion ? false : { opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}>The most complete<br/>journalism workflow tool.</motion.h1>
-          <motion.p className="hero-subtitle" initial={reduceMotion ? false : { opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}>Manage pitches, assignments, drafts, reviews, publishing, and records all in one place.</motion.p>
-          <motion.div className="hero-actions" initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.75, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}><a className="primary-button" href="/signup">Get newsroom <Icon name="arrow"/></a></motion.div>
+          <motion.p className="hero-subtitle" initial={reduceMotion ? false : { opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}>Manage everything in one place.</motion.p>
+          <motion.div className="hero-actions" initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.75, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}><a className="primary-button" href="/signup">Get Inscribe <Icon name="arrow"/></a></motion.div>
         </div>
 
         <motion.div className="page-width hero-product" initial={reduceMotion ? false : { opacity: 0, y: 42, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 1.05, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}>
-          <ProductFrame activeView="overview"/>
+          <img className="hero-dashboard-image" src="/landing/dashboard-hero.webp" alt="Inscribe dashboard for Poolesville Pulse showing John Doe's editorial tasks and recent newsroom activity." fetchPriority="high" decoding="async"/>
         </motion.div>
       </section>
 
 
 
       <section id="workflow" className="section workflow-section">
-        <div className="page-width workflow-intro"><Reveal><span className="section-kicker">From idea to publication</span><h2>Follow the story as the work moves forward.</h2><p>Scroll through the newsroom process. The working view updates at each handoff, so ownership, context, and the next decision stay visible.</p></Reveal></div>
-        <div className="page-width workflow-scroll">
-          <div className="workflow-sticky">
-            <div className="workflow-stage-frame">
-              <div className="workflow-stage-top"><span>Story workflow</span><small>{String(activeStageIndex + 1).padStart(2, '0')} / {String(workflowStages.length).padStart(2, '0')}</small></div>
-              <div className="workflow-progress" aria-hidden="true">{workflowStages.map((stage, index) => <span key={stage.id} className={index < activeStageIndex ? 'complete' : index === activeStageIndex ? 'active' : ''}/>)}</div>
-              <motion.div className="workflow-story" key={activeStage.id} initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
-                <div className="detail-top"><span className="status-pill">{activeStage.status}</span><span className="workflow-stage-name">{activeStage.label}</span></div>
-                <h3>{activeStage.title}</h3><p>{activeStage.note}</p>
-                <div className="detail-fields"><div><small>Owner</small><span><span className="avatar small">{activeStage.owner[0]}</span>{activeStage.owner}</span></div><div><small>Timeline</small><span>{activeStage.meta}</span></div><div><small>Section</small><span>News</span></div><div><small>Priority</small><span>Normal</span></div></div>
-                <div className="detail-comment"><Icon name="comment"/><span><strong>Context stays with the story.</strong><small>Notes, feedback, approvals, and source history remain connected.</small></span></div>
-              </motion.div>
-            </div>
-          </div>
-          <div className="workflow-steps">
-            {workflowStages.map((stage, index) => <article className={index === activeStageIndex ? 'workflow-step active' : 'workflow-step'} data-stage-index={index} ref={(node) => { workflowStepRefs.current[index] = node; }} key={stage.id} aria-current={index === activeStageIndex ? 'step' : undefined}><span>{String(index + 1).padStart(2, '0')}</span><small>{stage.eyebrow}</small><h3>{stage.label}</h3><p>{stage.note}</p></article>)}
-          </div>
+        <div className="page-width workflow-intro"><Reveal><h2>Three steps to a clearer newsroom.</h2><p>Move every story from pitch to publication with a simple, shared process that keeps the next decision visible.</p></Reveal></div>
+        <div className="page-width workflow-grid">
+          {workflowStages.map((stage, index) => (
+            <Reveal className="workflow-box-reveal" delay={index * 0.08} key={stage.id}>
+              <article className="workflow-box">
+               <h3>{stage.label}</h3>
+                <p>{stage.note}</p>
+                <ul className="workflow-box-details">{stage.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+              </article>
+            </Reveal>
+          ))}
         </div>
       </section>
 
-      <section id="records" className="section archive-section">        <div className="page-width archive-layout">
-          <Reveal className="archive-copy"><span className="section-kicker">Records and institutional memory</span><h2>Past reporting stays useful.</h2><p>Search published work, source history, interview notes, article links, and the editorial decisions behind each story.</p><ul className="feature-points"><li>Find earlier coverage before reporting starts</li><li>See every story connected to a source</li><li>Carry context into the next school year</li></ul></Reveal>
-          <Reveal className="interactive-archive" delay={0.08}>
-            <label className="archive-search"><Icon name="search"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search newsroom records"/></label>
-            <div className="live-table"><div className="live-header"><span>Article</span><span>Section</span><span>Author</span></div>{filteredRows.map((row) => <div className="live-row" key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><span>{row[2]}</span></div>)}{filteredRows.length === 0 && <div className="empty-state">No matching records.</div>}</div>
-            <small className="search-hint">Try “sports”, “Maya”, or “library”.</small>
-          </Reveal>
+      <section id="records" className="section archive-section">
+        <div className="landing-visual-wide">
+          <Reveal className="archive-copy"><h2>Your newspaper records, organized.</h2><p>Find published articles and sources in seconds.</p></Reveal>
         </div>
+          <Reveal className="landing-visual-wide records-preview" delay={0.08} amount={0.12}>
+            <div className="records-app-header">
+              <h3>Articles database</h3>
+            </div>
+            <div className="records-preview-tools">
+              <label className="archive-search"><Icon name="search"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, author, section, or tag" aria-label="Search featured article records"/></label>
+              <div className="records-section-select" aria-hidden="true"><span>All sections</span><span>⌄</span></div>
+            </div>
+            <div className="records-browser">
+              <div className="records-index">
+                <div className="records-list" aria-label="Featured article records">
+                  <div className="records-list-header"><span>Title</span><span>Date published ↓</span></div>
+                  {filteredRecords.map((record) => {
+                    const isSelected = selectedRecord?.id === record.id;
+                    return (
+                      <button
+                        type="button"
+                        className={isSelected ? 'record-row selected' : 'record-row'}
+                        onClick={() => setSelectedRecordId(record.id)}
+                        aria-pressed={isSelected}
+                        key={record.id}
+                      >
+                        <span><strong>{record.title}</strong><small>{record.author}</small></span>
+                        <time>{record.published}</time>
+                      </button>
+                    );
+                  })}
+                  {filteredRecords.length === 0 && <div className="records-empty">No matching records. Try another title, author, source, or section.</div>}
+                </div>
+                <div className="records-pagination" aria-hidden="true">
+                  <span>Showing <strong>1–4</strong> of <strong>958</strong></span>
+                  <div><span className="current">1</span><span>2</span><span>…</span><span>96</span><span>›</span></div>
+                </div>
+              </div>
+              <div className="record-detail-shell">
+                <AnimatePresence mode="wait" initial={false}>
+                  {selectedRecord ? (
+                    <motion.article
+                      className="record-detail"
+                      key={selectedRecord.id}
+                      initial={reduceMotion ? false : { opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={reduceMotion ? undefined : { opacity: 0, x: -6 }}
+                      transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.16, 1, 0.3, 1] }}
+                      aria-live="polite"
+                    >
+                      <header>
+                        <div>
+                          <h3>{selectedRecord.title}</h3>
+                          <p>By {selectedRecord.author}</p>
+                          <time>{selectedRecord.published}</time>
+                        </div>
+                      </header>
+                      <div className="interviewee-heading"><h4>Interviewees</h4></div>
+                      <div className="interviewee-table">
+                        <div className="interviewee-table-head"><span>Name</span><span>Grade</span><span>House</span></div>
+                        {selectedRecord.interviewees.map((person) => <div className="interviewee-row" key={person.name}><strong>{person.name}</strong><span>{person.grade}</span><span>{person.house}</span></div>)}
+                      </div>
+                    </motion.article>
+                  ) : (
+                    <div className="record-detail-empty" role="status"><Icon name="search"/><span>No article selected</span></div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </Reveal>
       </section>
       <section id="analytics" className="section analytics-section">
         <div className="page-width feature-layout analytics-layout">
           <Reveal className="analytics-visual"><AnalyticsFrame/></Reveal>
-          <Reveal className="feature-copy" delay={0.08}><span className="section-kicker">Newsroom analytics</span><h2>See where the work gets stuck.</h2><p>Track publishing pace, section output, deadline health, and review time without turning the newsroom into a wall of metrics.</p><ul className="feature-points"><li>Compare output across desks and sections</li><li>Spot missed deadlines and review bottlenecks</li><li>Use trends to plan the next coverage cycle</li></ul></Reveal>
+          <Reveal className="feature-copy" delay={0.08}><h2>Track and analyze article analytics.</h2><p>Track publishing pace, section output, deadline health, and review time without turning the newsroom into a wall of metrics.</p><ul className="feature-points"><li>Compare output across desks and sections</li><li>Spot missed deadlines and review bottlenecks</li><li>Use trends to plan the next coverage cycle</li></ul></Reveal>
         </div>
       </section>
       <section className="section final-section">
-        <Reveal className="page-width final-content"><span className="section-kicker">Built for the next deadline</span><h2>A better newsroom starts with a clearer system.</h2><p>Bring pitches, stories, people, publishing, and institutional knowledge into one professional workspace.</p><div className="hero-actions"><a className="primary-button light-button" href="/signup">Start your workspace <Icon name="arrow"/></a></div></Reveal>
+        <Reveal className="page-width final-content"><h2>A better newspaper starts with a clearer system.</h2><div className="hero-actions"><a className="primary-button light-button" href="/signup">Start your workspace <Icon name="arrow"/></a></div></Reveal>
       </section>
       <footer className="footer">
-        <div className="page-width footer-top">
-          <div className="footer-brand"><a className="brand" href="#top"><img className="brand-logo" src="/app-logo.png" alt=""/><span>Falcon Newsroom</span></a><p>Editorial operations for modern student newsrooms.</p></div>
+        <div className="landing-visual-wide footer-top">
+          <div className="footer-brand"><a className="brand" href="#top"><img className="brand-logo" src="/app-logo.png" alt=""/><span>Inscribe</span></a></div>
           <div className="footer-links">
             <div><strong>Product</strong><a href="#workflow">Workflow</a><a href="#records">Records</a><a href="#analytics">Analytics</a></div>
-            <div><strong>Company</strong><a href="/about">About</a><a href="/contact">Contact</a><a href="/careers">Careers</a></div>
             <div><strong>Legal</strong><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/accessibility">Accessibility</a></div>
             <div><strong>Connect</strong><a href="https://instagram.com" target="_blank" rel="noreferrer">Instagram ↗</a><a href="https://x.com" target="_blank" rel="noreferrer">X ↗</a><a href="https://linkedin.com" target="_blank" rel="noreferrer">LinkedIn ↗</a></div>
           </div>
         </div>
-        <div className="page-width footer-bottom"><small>© 2026 Falcon Newsroom</small></div>
+        <div className="landing-visual-wide footer-bottom"><small>© 2026 Inscribe</small></div>
       </footer>    </main>
   );
 }

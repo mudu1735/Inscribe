@@ -15,7 +15,7 @@ const devScript = await readFile("scripts/dev.mjs", "utf8");
 const requirements = await readFile("../../requirements.txt", "utf8");
 
 const expectedAppSnippets = [
-  "Falcon Newsroom",
+  "Inscribe",
   "V3LandingPage",
   "product-dashboard.png",
   "journalism workflow tool.",
@@ -59,7 +59,6 @@ const expectedAppSnippets = [
   "PitchStatusText",
   "Expand all",
   "Collapse all",
-  "Next active pitch",
   "Delete pitch",
   "Activity",
   "AI article extractor",
@@ -169,6 +168,11 @@ const expectedAppSnippets = [
   "AdministrationSettings",
   "settingsSectionForPath",
   "workspaceSettingsDraft",
+  "OwnerWorkspacesPage",
+  "APP_ROLE_OPTIONS",
+  "/api/owner/workspaces",
+  "New workspace",
+  "All workspaces",
 ];
 
 for (const snippet of expectedAppSnippets) {
@@ -234,7 +238,7 @@ for (const snippet of ["authRoutes", "\"/login\"", "\"/signup\"", "AuthPages"]) 
   }
 }
 
-for (const snippet of ["window.history.pushState", "/api/auth/session", "SignUpCardSection", "LoginCardSection"]) {
+for (const snippet of ["window.history.pushState", "/api/auth/session", "SignUpCardSection", "LoginCardSection", 'role === "owner"', 'return "/owner"']) {
   if (!authPages.includes(snippet)) {
     throw new Error(`Missing auth page behavior: ${snippet}`);
   }
@@ -252,7 +256,7 @@ for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:a
   }
 }
 
-for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "guest-role-v1", "rbac-v4", "server.auth_app", "npx", "vite", "taskkill", "\"-B\"", "\"--port\", \"5173\", \"--strictPort\""]) {
+for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "article-date-sort-v2", "backendBuildId", "payload?.buildId === backendBuildId", "guest-role-v1", "rbac-v4", "owner-workspaces", "server.auth_app", "npx", "vite", "taskkill", "Could not stop the stale v3 auth backend", "\"-B\"", "\"--port\", \"5173\", \"--strictPort\""]) {
   if (!devScript.includes(snippet)) {
     throw new Error(`Missing combined v3 dev launcher behavior: ${snippet}`);
   }
@@ -262,6 +266,9 @@ for (const snippet of [
   "falcon-newsroom-v3-auth",
   "v3-rbac-guest-2026-07-20",
   "BACKEND_CAPABILITIES",
+  "BACKEND_BUILD_ID",
+  '"buildId": BACKEND_BUILD_ID',
+  '"article-date-sort-v2"',
   "@app.post(\"/api/auth/register\")",
   "@app.post(\"/api/auth/login\")",
   "@app.get(\"/api/auth/session\")",
@@ -324,6 +331,16 @@ for (const snippet of [
   "ROLE_WRITER",
   "ROLE_SCHEMA_CAPABILITY",
   "VALID_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER, ROLE_GUEST}",
+  "ROLE_OWNER",
+  "OWNER_EMAILS",
+  "owner-workspaces",
+  "require_owner",
+  "_workspace_members_query",
+  "joining_role = ROLE_ADMIN if member_count == 0 else ROLE_GUEST",
+  "@app.get(\"/api/owner/workspaces\")",
+  "@app.post(\"/api/owner/workspaces\")",
+  "@app.patch(\"/api/owner/workspaces/<workspace_id>\")",
+  "@app.post(\"/api/owner/workspaces/<workspace_id>/open\")",
   "ACTIVITY_COLLECTION",
   "FEEDBACK_COLLECTION",
   "IMPORTANT_ACTIVITY_EVENTS",
@@ -372,6 +389,8 @@ for (const snippet of [
   "_validated_publication_url",
   "_publication_url_conflicts",
   "_interviewee_search_query",
+  "_extracted_article_date_sort",
+  "The article publication date could not be normalized for sorting.",
 ]) {
   if (!v3Backend.includes(snippet)) {
     throw new Error(`Missing v3 backend auth/API behavior: ${snippet}`);
@@ -408,7 +427,7 @@ for (const snippet of [
   "uploadBatchId",
   "csv.reader(StringIO(decoded), strict=True)",
   "_validate_xlsx_archive",
-  "include_join_code = normalize_role",
+  "include_join_code = _current_user_role",
   "SECURITY_RATE_COLLECTION",
   "ADMIN_MUTATION_LOCK_COLLECTION",
   "_acquire_admin_mutation_lock",

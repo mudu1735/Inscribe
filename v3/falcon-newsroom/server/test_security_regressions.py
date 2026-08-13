@@ -24,6 +24,7 @@ AUTH_APP_PATH = Path(__file__).with_name("auth_app.py")
 AUTH_APP_TREE = ast.parse(AUTH_APP_PATH.read_text(encoding="utf-8"), filename=str(AUTH_APP_PATH))
 V2_APP_PATH = AUTH_APP_PATH.parents[3] / "v2" / "app" / "app.py"
 ROOT_APP_PATH = AUTH_APP_PATH.parents[3] / "app" / "app.py"
+ROOT_APP_INIT_PATH = AUTH_APP_PATH.parents[3] / "app" / "__init__.py"
 
 
 def load_functions(names, namespace=None):
@@ -57,6 +58,7 @@ class SecurityHelperTests(unittest.TestCase):
             {
                 "ROLE_GUEST": "guest",
                 "VALID_ROLES": {"admin", "editor", "writer", "guest"},
+                "ROLE_OWNER": "owner",
             },
         )
 
@@ -72,15 +74,39 @@ class SecurityHelperTests(unittest.TestCase):
         self.assertEqual(users.calls, [(
             {
                 "workspaceId": {"$exists": True, "$nin": [None, ""]},
+                "platformRole": {"$ne": "owner"},
                 "role": {"$nin": ["admin", "editor", "guest", "writer"]},
             },
             {"$set": {"role": "guest"}},
         )])
 
-    def test_legacy_v2_startup_does_not_downgrade_v3_workspace_roles(self):
+    def test_retired_legacy_entrypoint_is_database_free(self):
         entrypoint_source = ROOT_APP_PATH.read_text(encoding="utf-8")
-        self.assertIn("from v2.app.app import app", entrypoint_source)
-        self.assertNotIn("update_many", entrypoint_source)
+        entrypoint_tree = ast.parse(entrypoint_source, filename=str(ROOT_APP_PATH))
+        imported_modules = {
+            alias.name
+            for node in ast.walk(entrypoint_tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        } | {
+            node.module or ""
+            for node in ast.walk(entrypoint_tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertEqual(imported_modules, {"flask"})
+        for forbidden in (
+            "v2", "pymongo", "MongoClient", "load_dotenv", "MONGO_URI",
+            "MONGO_DB", "USER_COLLECTION", "update_many",
+        ):
+            self.assertNotIn(forbidden, entrypoint_source)
+        self.assertIn('"status": "retired"', entrypoint_source)
+        self.assertIn("410", entrypoint_source)
+
+        package_source = ROOT_APP_INIT_PATH.read_text(encoding="utf-8")
+        self.assertIn("from .app import app, application", package_source)
+        self.assertNotIn("v2", package_source)
+
+    def test_archived_v2_startup_does_not_downgrade_v3_workspace_roles(self):
 
         source = V2_APP_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(V2_APP_PATH))
@@ -422,6 +448,180 @@ class SecurityHelperTests(unittest.TestCase):
         self.assertEqual(query_b, {"workspaceId": "class-b", "uploadBatchId": "batch-b"})
         self.assertNotEqual(query_a, query_b)
 
+
+class OwnerWorkspaceSecurityTests(unittest.TestCase):
+    def test_owner_role_is_platform_scoped_and_not_a_workspace_role(self):
+        loaded = load_functions(
+            {"normalize_role", "_is_owner", "_account_role", "_membership_workspace_id_for_user", "_workspace_members_query"},
+            {
+                "ROLE_OWNER": "owner",
+                "ROLE_GUEST": "guest",
+                "VALID_ROLES": {"admin", "editor", "writer", "guest"},
+            },
+        )
+        self.assertEqual(loaded["normalize_role"]("owner"), "guest")
+        self.assertTrue(loaded["_is_owner"]({"platformRole": "owner"}))
+        self.assertTrue(loaded["_is_owner"]({"role": "owner"}))
+        self.assertEqual(loaded["_account_role"]({"platformRole": "owner"}), "owner")
+        self.assertEqual(loaded["_membership_workspace_id_for_user"]({"platformRole": "owner"}), "")
+        self.assertEqual(
+            loaded["_workspace_members_query"]("newsroom-a"),
+            {
+                "workspaceId": "newsroom-a",
+                "platformRole": {"$ne": "owner"},
+                "role": {"$in": ["admin", "editor", "guest", "writer"]},
+            },
+        )
+
+    def test_owner_login_redirect_ignores_requested_workspace_page(self):
+        app = Flask(__name__)
+        loaded = load_functions(
+            {"normalize_role", "_sanitize_next_url", "_auth_redirect_for_role"},
+            {
+                "request": request,
+                "urlparse": urlparse,
+                "ROLE_OWNER": "owner",
+                "ROLE_GUEST": "guest",
+                "VALID_ROLES": {"admin", "editor", "writer", "guest"},
+                "FRONTEND_ROLE_LANDING": {
+                    "owner": "/owner",
+                    "guest": "/interviewees",
+                    "writer": "/stories",
+                    "editor": "/dashboard",
+                    "admin": "/dashboard",
+                },
+            },
+        )
+        redirect_for_role = loaded["_auth_redirect_for_role"]
+        with app.test_request_context("/api/auth/login?next=/stories"):
+            self.assertEqual(redirect_for_role("owner"), "/owner")
+            self.assertEqual(redirect_for_role("writer"), "/stories")
+
+    def test_owner_account_migration_removes_workspace_membership(self):
+        class Users:
+            calls = []
+
+            def update_many(self, query, update):
+                self.calls.append((query, update))
+
+        users = Users()
+        loaded = load_functions(
+            {"_canonicalize_owner_accounts"},
+            {
+                "users_col": users,
+                "ROLE_OWNER": "owner",
+                "OWNER_EMAILS": {"owner@example.com"},
+                "_now_iso": lambda: "2026-08-11T12:00:00+00:00",
+            },
+        )
+        loaded["_canonicalize_owner_accounts"]()
+        query, update = users.calls[0]
+        self.assertIn({"role": "owner"}, query["$or"])
+        self.assertIn({"email": {"$in": ["owner@example.com"]}}, query["$or"])
+        self.assertEqual(update["$set"]["platformRole"], "owner")
+        self.assertEqual(set(update["$unset"]), {"workspaceId", "role", "joinedWorkspaceAt"})
+
+    def test_workspace_creation_helpers_are_unique_and_allow_optional_publication_url(self):
+        class Workspaces:
+            def __init__(self):
+                self.public_ids = {"school-news"}
+
+            def find_one(self, query):
+                return query.get("publicId") in self.public_ids
+
+        loaded = load_functions(
+            {"_new_workspace_public_id", "_workspace_settings_updates"},
+            {
+                "re": re,
+                "secrets": secrets,
+                "workspaces_col": Workspaces(),
+                "urlparse": urlparse,
+                "_now_iso": lambda: "2026-08-11T12:00:00+00:00",
+                "_safe_http_url": lambda value, max_length=500: value if str(value).startswith(("http://", "https://")) else "",
+                "_normalized_publication_hostname": lambda value: str(value or "").lower(),
+            },
+        )
+        public_id = loaded["_new_workspace_public_id"]("School News")
+        self.assertTrue(public_id.startswith("school-news-"))
+        updates, error = loaded["_workspace_settings_updates"]({"name": "School News", "publicationUrl": ""})
+        self.assertEqual(error, "")
+        self.assertEqual(updates["publicationUrl"], "")
+        self.assertEqual(loaded["_workspace_settings_updates"]({"name": "School News", "publicationUrl": "javascript:alert(1)"})[1], "Enter a valid publication URL beginning with http:// or https://.")
+
+    def test_owner_workspace_context_is_the_collection_scope(self):
+        runtime_session = {"owner_workspace_id": "newsroom-a"}
+        loaded = load_functions(
+            {"_is_owner", "_membership_workspace_id_for_user", "_workspace_id_for_user", "_workspace_query", "_scoped_query"},
+            {
+                "ROLE_OWNER": "owner",
+                "has_request_context": lambda: True,
+                "session": runtime_session,
+            },
+        )
+        owner = {"platformRole": "owner"}
+        self.assertEqual(loaded["_workspace_query"](owner), {"workspaceId": "newsroom-a"})
+        self.assertEqual(
+            loaded["_scoped_query"](owner, {"status": "Published"}),
+            {"$and": [{"workspaceId": "newsroom-a"}, {"status": "Published"}]},
+        )
+        runtime_session["owner_workspace_id"] = "newsroom-b"
+        self.assertEqual(loaded["_workspace_query"](owner), {"workspaceId": "newsroom-b"})
+        runtime_session.clear()
+        self.assertEqual(loaded["_workspace_query"](owner), {"_id": None})
+        self.assertEqual(
+            loaded["_workspace_query"]({"role": "admin", "workspaceId": "member-newsroom"}),
+            {"workspaceId": "member-newsroom"},
+        )
+
+    def test_workspace_data_routes_are_scoped_and_creation_does_not_seed_content(self):
+        source = AUTH_APP_PATH.read_text(encoding="utf-8")
+
+        def function_source(name):
+            node = next(item for item in AUTH_APP_TREE.body if isinstance(item, ast.FunctionDef) and item.name == name)
+            return ast.get_source_segment(source, node) or ""
+
+        scoped_routes = {
+            "api_stories": "_story_query_for_user(user_doc)",
+            "api_pitches": "_pitch_query_for_user(user_doc)",
+            "api_feedback": '"workspaceId": _workspace_id_for_user(user_doc)',
+            "api_activity": '"workspaceId": _workspace_id_for_user(user_doc)',
+            "api_dashboard": "_scoped_query(user_doc",
+            "api_article_records": "_workspace_query(user_doc)",
+            "api_interview_records": "_workspace_query(_current_user_doc())",
+            "api_admin_names": "_active_names_query(workspace)",
+        }
+        for route_name, scope_snippet in scoped_routes.items():
+            self.assertIn(scope_snippet, function_source(route_name), route_name)
+
+        create_source = function_source("api_owner_create_workspace")
+        self.assertIn("workspaces_col.insert_one(workspace)", create_source)
+        for content_collection in (
+            "stories_col",
+            "pitches_col",
+            "articles_col",
+            "interviews_col",
+            "feedback_col",
+            "activity_col",
+            "names_col",
+        ):
+            self.assertNotIn(content_collection, create_source)
+    def test_owner_routes_and_first_member_admin_policy_are_wired(self):
+        source = AUTH_APP_PATH.read_text(encoding="utf-8")
+        for snippet in (
+            '@app.get("/api/owner/workspaces")',
+            '@app.post("/api/owner/workspaces")',
+            '@app.patch("/api/owner/workspaces/<workspace_id>")',
+            '@app.post("/api/owner/workspaces/<workspace_id>/open")',
+            '@app.post("/api/owner/workspaces/<workspace_id>/join-code/rotate")',
+            "joining_role = ROLE_ADMIN if member_count == 0 else ROLE_GUEST",
+            "Owners open workspaces from the owner workspace page.",
+        ):
+            self.assertIn(snippet, source)
+        admin_roles_source = ast.get_source_segment(
+            source,
+            next(node for node in AUTH_APP_TREE.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "VALID_ROLES" for target in node.targets)),
+        ) or ""
+        self.assertNotIn("ROLE_OWNER", admin_roles_source)
 
 if __name__ == "__main__":
     unittest.main()

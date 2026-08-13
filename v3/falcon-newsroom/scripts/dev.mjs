@@ -1,11 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const healthUrl = "http://127.0.0.1:5003/api/health";
 const requiredCapabilities = [
   "admin-users",
+  "article-date-sort-v2",
   "guest-role-v1",
   "rbac-v4",
   "stories",
@@ -13,9 +15,15 @@ const requiredCapabilities = [
   "pitch-owner-submit",
   "shared-workflow-activity",
   "workspace-settings",
+  "owner-workspaces",
 ];
 const venvPython = resolve(root, "..", "..", "venv", "Scripts", "python.exe");
 const pythonCommand = process.env.FALCON_V3_PYTHON || (existsSync(venvPython) ? venvPython : "python");
+const backendBuildId = createHash("sha256")
+  .update(readFileSync(resolve(root, "server", "auth_app.py")))
+  .update(readFileSync(resolve(root, "server", "article_extractor.py")))
+  .digest("hex")
+  .slice(0, 16);
 
 let authProcess = null;
 let viteProcess = null;
@@ -38,6 +46,7 @@ async function readAuthHealth() {
 function hasRequiredCapabilities(payload) {
   const capabilities = new Set(Array.isArray(payload?.capabilities) ? payload.capabilities : []);
   return payload?.service === "falcon-newsroom-v3-auth"
+    && payload?.buildId === backendBuildId
     && requiredCapabilities.every((capability) => capabilities.has(capability));
 }
 
@@ -118,7 +127,9 @@ if (hasRequiredCapabilities(initialHealth)) {
 } else {
   if (initialHealth?.service === "falcon-newsroom-v3-auth") {
     console.log("[v3 dev] Restarting stale v3 auth backend on 127.0.0.1:5003...");
-    stopStaleFalconBackendOnPort();
+    if (!stopStaleFalconBackendOnPort()) {
+      throw new Error("Could not stop the stale v3 auth backend on port 5003. Stop that process and run npm run dev again.");
+    }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
   }
   console.log("[v3 dev] Starting v3 auth backend on 127.0.0.1:5003...");

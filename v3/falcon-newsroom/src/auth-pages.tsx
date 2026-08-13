@@ -13,6 +13,7 @@ function modeFromPath(pathname: string): AuthMode {
 }
 
 function redirectForRole(role: string | undefined) {
+  if (role === "owner") return "/owner";
   if (role === "writer") return "/stories";
   return role === "guest" ? "/interviewees" : "/dashboard";
 }
