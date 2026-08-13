@@ -13,4 +13,5 @@ artifacts/
 legacy_experiments/
 v2/data/pulse_scrape/
 .playwright-cli/
+.vercel/
 %SystemDrive%/
