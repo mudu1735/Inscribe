@@ -259,7 +259,7 @@ export default function V4LandingPage() {
 
 
       <section id="workflow" className="section workflow-section">
-        <div className="page-width workflow-intro"><Reveal><h2>Three steps to a clearer newsroom.</h2><p>Move every story from pitch to publication with a simple, shared process that keeps the next decision visible.</p></Reveal></div>
+        <div className="page-width workflow-intro"><Reveal><h2>A workflow built for journalists.</h2></Reveal></div>
         <div className="page-width workflow-grid">
           {workflowStages.map((stage, index) => (
             <Reveal className="workflow-box-reveal" delay={index * 0.08} key={stage.id}>
