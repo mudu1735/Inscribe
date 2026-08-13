@@ -1,4 +1,4 @@
-# Falcon Journalism
+# Scribe
 
 This repo now keeps the deployed Flask app and the React prototypes separate.
 
