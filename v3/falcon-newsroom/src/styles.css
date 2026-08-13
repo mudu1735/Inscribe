@@ -38,7 +38,7 @@ button {
 .text-zinc-600 { color: oklch(59% 0 0); }
 .text-zinc-500 { color: oklch(68% 0 0); }
 
-/* Falcon Newsroom V3 public landing page */
+/* Inscribe V3 public landing page */
 .v3-landing {
   --v3-ink: oklch(11.5% 0.012 165);
   --v3-line: oklch(93% 0.008 105 / 0.12);

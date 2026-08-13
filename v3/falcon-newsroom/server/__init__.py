@@ -1,1 +1,1 @@
-"""Falcon Newsroom v3 backend package."""
+"""Inscribe v3 backend package."""

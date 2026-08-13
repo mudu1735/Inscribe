@@ -441,6 +441,7 @@ const ADMIN_ROLES = [
 ];
 
 const ADMIN_ROLE_OPTIONS = ADMIN_ROLES.map((role) => role.id);
+const APP_ROLE_OPTIONS = [...ADMIN_ROLE_OPTIONS, "owner"];
 const ADMIN_ROLE_FILTER_OPTIONS = ["All roles", ...ADMIN_ROLE_OPTIONS];
 
 const STORY_STATUSES = ["Assigned", "Reporting", "Drafting", "Submitted", "In Review", "Needs Revision", "Returned", "Ready for Publish", "Published"];
@@ -1341,11 +1342,11 @@ function normalizeDisplayUser(user = {}) {
 
 function normalizeAppRole(role) {
   const value = asText(role).toLowerCase();
-  return ADMIN_ROLE_OPTIONS.includes(value) ? value : "guest";
+  return APP_ROLE_OPTIONS.includes(value) ? value : "guest";
 }
 
 function canManageEditorialWorkflow(role) {
-  return ["admin", "editor"].includes(normalizeAppRole(role));
+  return ["owner", "admin", "editor"].includes(normalizeAppRole(role));
 }
 
 function pitchBelongsToUser(pitch, user) {
@@ -1420,7 +1421,7 @@ function canUpdateOwnStorySubmission(user, story) {
 function canManageStoryCollaborators(user, story) {
   const role = normalizeAppRole(user?.role);
   if (["Ready for Publish", "Published"].includes(story?.status)) return false;
-  return ["admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user))));
+  return ["owner", "admin", "editor"].includes(role) || (role === "writer" && (storyBelongsToUser(story, user) || Boolean(storyEditingCollaboratorForUser(story, user))));
 }
 
 function canEditStoryAttachment(user, story) {
@@ -1449,9 +1450,14 @@ function roleCanAccessPage(role, page) {
 
 function defaultPageForRole(role) {
   const currentRole = normalizeAppRole(role);
+  if (currentRole === "owner") return "dashboard";
   if (currentRole === "guest") return "interviewees";
   if (currentRole === "writer") return "stories";
   return "dashboard";
+}
+
+function isOwnerRoute(pathname = window.location.pathname) {
+  return pathname.toLowerCase().replace(/\/+$/, "") === "/owner";
 }
 
 function loginRedirectForCurrentPath() {
@@ -2305,6 +2311,9 @@ function runAdminPageTests() {
   console.assert(users.filter((user) => adminUserMatches(user, "", "guest")).every((user) => user.role === "guest"), "Admin role filter should limit visible staff.");
   console.assert(navItemsForRole("guest").every((item) => !["pitches", "stories", "admin"].includes(item.id)), "Guests should not see story, pitch, or admin navigation.");
   console.assert(navItemsForRole("writer").some((item) => item.id === "stories") && !navItemsForRole("writer").some((item) => item.id === "admin"), "Writers should see stories but not admin.");
+  console.assert(APP_ROLE_OPTIONS.includes("owner") && !ADMIN_ROLE_OPTIONS.includes("owner"), "Owner should be an app role, not a workspace role option.");
+  console.assert(navItemsForRole("owner").length === navItems.length, "Owners should see the complete workspace navigation after opening a workspace.");
+  console.assert(defaultPageForRole("owner") === "dashboard", "Opened owner workspaces should start on the dashboard.");
 }
 runAdminPageTests();
 
@@ -2493,14 +2502,14 @@ function V3LandingPage() {
       title: "Every story knows what comes next.",
       body: "Editors can scan active work by review state, open the right draft, and move reporting from assignment through teacher approval.",
       image: "/landing/product-stories.png",
-      alt: "Falcon Newsroom Stories view showing active drafts organized into In Progress, Ready for Review, and Teacher Approval columns.",
+      alt: "Inscribe Stories view showing active drafts organized into In Progress, Ready for Review, and Teacher Approval columns.",
     },
     {
       id: "records",
       title: "Reporting records that outlast the deadline.",
       body: "Published work stays searchable by title, author, section, tag, and interviewee, giving the next reporter a useful newsroom archive.",
       image: "/landing/product-articles.png",
-      alt: "Falcon Newsroom Articles Database showing searchable publication records and article details.",
+      alt: "Inscribe Articles Database showing searchable publication records and article details.",
     },
   ];
 
@@ -2508,9 +2517,9 @@ function V3LandingPage() {
     <main className="v3-landing">
       <header className="v3-landing-header">
         <nav className="v3-landing-nav" aria-label="Main navigation">
-          <a href="/" className="v3-landing-mark" aria-label="Falcon Newsroom home">
-            <span aria-hidden="true">F</span>
-            <strong>Falcon Newsroom</strong>
+          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
+            <span aria-hidden="true">I</span>
+            <strong>Inscribe</strong>
           </a>
           <div className="v3-nav-sections">
             <a className="v3-nav-link" href="#product">Product</a>
@@ -2534,7 +2543,7 @@ function V3LandingPage() {
             <p>Everything you need in one unified workspace.</p>
           </motion.div>
           <motion.figure className="v3-product-shot" initial={reduceMotion ? false : { opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ ...revealTransition, delay: reduceMotion ? 0 : 0.12 }}>
-            <img src="/landing/product-dashboard.png" alt="Falcon Newsroom dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
+            <img src="/landing/product-dashboard.png" alt="Inscribe dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
           </motion.figure>
         </div>
       </section>
@@ -2562,11 +2571,11 @@ function V3LandingPage() {
 
       <footer className="v3-footer">
         <div className="v3-content">
-          <a href="/" className="v3-landing-mark" aria-label="Falcon Newsroom home">
-            <span aria-hidden="true">F</span>
-            <strong>Falcon Newsroom</strong>
+          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
+            <span aria-hidden="true">I</span>
+            <strong>Inscribe</strong>
           </a>
-          <small>&copy; 2026 Falcon Newsroom</small>
+          <small>&copy; 2026 Inscribe</small>
         </div>
       </footer>
     </main>
@@ -2595,7 +2604,7 @@ function AppShell() {
 
   const selectedArticle = articles.find((a) => a.id === selectedArticleId) || articles[0];
   const accountRole = normalizeAppRole(account?.role);
-  const hasWorkspace = Boolean(asText(account?.workspaceId));
+  const hasWorkspace = accountRole === "owner" ? Boolean(asText(workspace?.id)) : Boolean(asText(account?.workspaceId));
   const workspaceName = asText(workspace?.name) || "Workspace";
   const availableNavItems = navItemsForRole(accountRole);
   const availableNavSections = navSectionsForItems(availableNavItems);
@@ -2654,17 +2663,28 @@ function AppShell() {
   }, [sessionAttempt]);
 
   useEffect(() => {
-    if (!account || !hasWorkspace) return;
+    if (!account) return;
+    if (accountRole !== "owner" && isOwnerRoute(locationPath)) {
+      const nextPage = defaultPageForRole(accountRole);
+      setPage(nextPage);
+      pushAppPath(pagePath(nextPage));
+      return;
+    }
+    if (accountRole === "owner" && !hasWorkspace && !isOwnerRoute(locationPath)) {
+      pushAppPath("/owner");
+      return;
+    }
+    if (!hasWorkspace || (accountRole === "owner" && isOwnerRoute(locationPath))) return;
     if (!roleCanAccessPage(accountRole, page)) {
       const nextPage = defaultPageForRole(accountRole);
       setToast(`${accountRoleLabel(accountRole)} access does not include ${navItems.find((item) => item.id === page)?.label || page}.`);
       setPage(nextPage);
       pushAppPath(pagePath(nextPage));
     }
-  }, [account, accountRole, hasWorkspace, page]);
+  }, [account, accountRole, hasWorkspace, locationPath, page]);
 
   useEffect(() => {
-    if (!account || !hasWorkspace) return undefined;
+    if (!account || !hasWorkspace || (accountRole === "owner" && isOwnerRoute(locationPath))) return undefined;
     const controller = new AbortController();
 
     async function loadStories() {
@@ -2699,7 +2719,7 @@ function AppShell() {
 
     loadStories();
     return () => controller.abort();
-  }, [account, accountRole, hasWorkspace]);
+  }, [account, accountRole, hasWorkspace, locationPath]);
 
   const navigatePage = (nextPage) => {
     if (account && !roleCanAccessPage(accountRole, nextPage)) {
@@ -2727,7 +2747,7 @@ function AppShell() {
     const canSendToTeacherApproval = canManageEditorialWorkflow(accountRole) && currentStory?.status === "In Review" && status === "Ready for Publish";
     const publicationUrl = asText(options.publicationUrl);
     const canPublish =
-      accountRole === "admin" &&
+      ["owner", "admin"].includes(accountRole) &&
       currentStory?.status === "Ready for Publish" &&
       status === "Published" &&
       isValidHttpUrl(publicationUrl);
@@ -3063,7 +3083,7 @@ function AppShell() {
 
   if (!account && sessionLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100" aria-label="Loading Falcon Newsroom">
+      <div className="flex h-screen items-center justify-center bg-[#08090c] px-6 text-zinc-100" aria-label="Loading Inscribe">
         <div className="w-full max-w-sm" role="status">
           <div className="h-2 w-24 animate-pulse rounded bg-white/[0.12]" />
           <div className="mt-5 h-7 w-64 animate-pulse rounded bg-white/[0.08]" />
@@ -3100,6 +3120,17 @@ function AppShell() {
     );
   }
 
+  if (accountRole === "owner" && (isOwnerRoute(locationPath) || !hasWorkspace)) {
+    return (
+      <OwnerWorkspacesPage
+        user={account}
+        csrfToken={csrfToken}
+        signingOut={signingOut}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
   if (!hasWorkspace) {
     return <WorkspaceJoinShell user={account} signingOut={signingOut} onJoin={joinWorkspace} onSignOut={handleSignOut} />;
   }
@@ -3109,10 +3140,16 @@ function AppShell() {
       <div className="relative flex h-screen overflow-hidden">
         <aside className="hidden h-screen w-72 shrink-0 flex-col overflow-hidden border-r border-white/[0.08] bg-[#08090c]/80 p-4 backdrop-blur-xl lg:flex">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            <button type="button" onClick={() => navigatePage("dashboard")} className="group mb-7 flex w-full items-center gap-2 rounded-xl border-0 bg-transparent px-2 py-1 text-left outline-none focus:outline-none focus-visible:outline-none">
+            <button type="button" onClick={() => accountRole === "owner" ? pushAppPath("/owner") : navigatePage("dashboard")} className="group mb-7 flex w-full items-center gap-2 rounded-xl border-0 bg-transparent px-2 py-1 text-left outline-none focus:outline-none focus-visible:outline-none">
               <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
               <div className="min-w-0 truncate text-sm font-medium text-zinc-100 group-focus-visible:underline group-focus-visible:underline-offset-4">{workspaceName}</div>
             </button>
+            {accountRole === "owner" ? (
+              <button type="button" onClick={() => pushAppPath("/owner")} className="mb-5 flex items-center gap-2 px-3 text-xs text-zinc-500 transition hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20">
+                <Icon name="dashboard" className="h-3.5 w-3.5" />
+                All workspaces
+              </button>
+            ) : null}
 
             <nav className="space-y-5" aria-label="Primary navigation">
               {availableNavSections.map((section) => (
@@ -3140,7 +3177,14 @@ function AppShell() {
                 <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
                 <span className="max-w-[55vw] truncate font-medium">{workspaceName}</span>
               </div>
-              <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
+              <div className="flex items-center gap-3">
+                <HeaderBreadcrumb page={page} detailLabel={breadcrumbDetail} navigatePage={navigatePage} />
+                {accountRole === "owner" ? (
+                  <button type="button" onClick={() => pushAppPath("/owner")} className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-white/[0.04] hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 lg:hidden">
+                    Workspaces
+                  </button>
+                ) : null}
+              </div>
             </div>
           </header>
 
@@ -3164,6 +3208,309 @@ function AppShell() {
         </main>
       </div>
       <Toast message={toast} onDismiss={() => setToast("")} />
+    </div>
+  );
+}
+
+function OwnerWorkspacesPage({ user, csrfToken = "", signingOut = false, onSignOut = () => {} }) {
+  const [workspaces, setWorkspaces] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [surfaceError, setSurfaceError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState({ name: "", publicationUrl: "" });
+  const [editingId, setEditingId] = useState("");
+  const [editDraft, setEditDraft] = useState({ name: "", publicationUrl: "" });
+  const [busyId, setBusyId] = useState("");
+  const [rotateConfirmId, setRotateConfirmId] = useState("");
+
+  const requestHeaders = (json = false) => ({
+    Accept: "application/json",
+    ...(json ? { "Content-Type": "application/json" } : {}),
+    ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+  });
+
+  const sortWorkspaces = (items) => [...items].sort((left, right) => asText(left.name).localeCompare(asText(right.name)));
+
+  const loadWorkspaces = async (signal) => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not load workspaces.");
+      setWorkspaces(sortWorkspaces(Array.isArray(payload.workspaces) ? payload.workspaces : []));
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      setLoadError(error instanceof Error ? error.message : "Could not load workspaces.");
+      setWorkspaces([]);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadWorkspaces(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const replaceWorkspace = (workspace) => {
+    setWorkspaces((current) => sortWorkspaces(current.map((item) => item.id === workspace.id ? { ...item, ...workspace } : item)));
+  };
+
+  const createWorkspace = async () => {
+    if (creating) return;
+    if (!createDraft.name.trim()) {
+      setSurfaceError("Workspace name is required.");
+      return;
+    }
+    setCreating(true);
+    setSurfaceError("");
+    setNotice("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces`, {
+        method: "POST",
+        headers: requestHeaders(true),
+        credentials: "include",
+        body: JSON.stringify(createDraft),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not create workspace.");
+      setWorkspaces((current) => sortWorkspaces([...current, payload.workspace]));
+      setCreateDraft({ name: "", publicationUrl: "" });
+      setCreateOpen(false);
+      setNotice(`${payload.workspace?.name || "Workspace"} created. Its join code is ready to share.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not create workspace.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const openWorkspace = async (workspace) => {
+    if (busyId) return;
+    setBusyId(`open:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}/open`, {
+        method: "POST",
+        headers: requestHeaders(),
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not open workspace.");
+      window.location.assign(payload.redirect || "/dashboard");
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not open workspace.");
+      setBusyId("");
+    }
+  };
+
+  const beginEditing = (workspace) => {
+    setEditingId(workspace.id);
+    setEditDraft({ name: asText(workspace.name), publicationUrl: asText(workspace.publicationUrl) });
+    setRotateConfirmId("");
+    setSurfaceError("");
+    setNotice("");
+  };
+
+  const saveWorkspace = async (workspace) => {
+    if (busyId) return;
+    if (!editDraft.name.trim()) {
+      setSurfaceError("Workspace name is required.");
+      return;
+    }
+    setBusyId(`save:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}`, {
+        method: "PATCH",
+        headers: requestHeaders(true),
+        credentials: "include",
+        body: JSON.stringify(editDraft),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not save workspace.");
+      replaceWorkspace(payload.workspace);
+      setEditingId("");
+      setNotice(`${payload.workspace?.name || "Workspace"} updated.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not save workspace.");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const rotateJoinCode = async (workspace) => {
+    if (rotateConfirmId !== workspace.id) {
+      setRotateConfirmId(workspace.id);
+      return;
+    }
+    if (busyId) return;
+    setBusyId(`rotate:${workspace.id}`);
+    setSurfaceError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/owner/workspaces/${encodeURIComponent(workspace.id)}/join-code/rotate`, {
+        method: "POST",
+        headers: requestHeaders(),
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not rotate join code.");
+      replaceWorkspace(payload.workspace);
+      setRotateConfirmId("");
+      setNotice(`New join code created for ${payload.workspace?.name || "workspace"}.`);
+    } catch (error) {
+      setSurfaceError(error instanceof Error ? error.message : "Could not rotate join code.");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const copyJoinCode = async (workspace) => {
+    if (!workspace.joinCode) return;
+    try {
+      await navigator.clipboard.writeText(workspace.joinCode);
+      setNotice(`Copied the join code for ${workspace.name}.`);
+      setSurfaceError("");
+    } catch {
+      setSurfaceError("Could not copy the join code. Select it and copy it manually.");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#08090c] text-zinc-100">
+      <header className="border-b border-white/[0.08]">
+        <div className="mx-auto flex max-w-[1240px] items-center justify-between gap-4 px-5 py-4 md:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src="/app-logo.png" alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-zinc-100">Inscribe</div>
+
+            </div>
+          </div>
+          <AccountMenu variant="header" user={user} signingOut={signingOut} onSignOut={onSignOut} />
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[1240px] px-5 py-10 md:px-8 md:py-14">
+        <div className="flex flex-col gap-5 border-b border-white/[0.1] pb-7 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">Workspaces</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Open a newsroom, update its settings, or create a new workspace.</p>
+          </div>
+          <Button icon="plus" onClick={() => { setCreateOpen((open) => !open); setSurfaceError(""); setNotice(""); }}>
+            {createOpen ? "Cancel" : "New workspace"}
+          </Button>
+        </div>
+
+        {createOpen ? (
+          <section className="border-b border-white/[0.1] py-7" aria-labelledby="create-workspace-title">
+            <div className="max-w-2xl">
+              <h2 id="create-workspace-title" className="text-lg font-semibold text-zinc-100">Create workspace</h2>
+              <p className="mt-1 text-sm text-zinc-500">A unique join code is generated automatically.</p>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <SettingsField id="owner-create-name" label="Workspace name" value={createDraft.name} onChange={(name) => setCreateDraft((draft) => ({ ...draft, name }))} autoComplete="organization" />
+                <SettingsField id="owner-create-url" label="Publication website (optional)" value={createDraft.publicationUrl} onChange={(publicationUrl) => setCreateDraft((draft) => ({ ...draft, publicationUrl }))} type="url" autoComplete="url" />
+              </div>
+              <div className="mt-5">
+                <Button onClick={createWorkspace} disabled={creating}>{creating ? "Creating" : "Create workspace"}</Button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {surfaceError ? <div className="mt-5 border border-rose-300/20 bg-rose-300/[0.05] px-4 py-3 text-sm text-rose-200" role="alert">{surfaceError}</div> : null}
+        {notice ? <div className="mt-5 border border-white/[0.1] bg-white/[0.025] px-4 py-3 text-sm text-zinc-300" role="status">{notice}</div> : null}
+
+        <section className="pt-7" aria-labelledby="workspace-list-title">
+          <div className="mb-3 hidden grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] gap-4 px-3 text-xs uppercase tracking-[0.14em] text-zinc-600 md:grid">
+            <span id="workspace-list-title">Workspace</span>
+            <span className="text-center">Date created</span>
+            <span className="text-center">Members</span>
+            <span className="text-center">Join code</span>
+            <span aria-hidden="true" />
+          </div>
+
+          {loading ? (
+            <div className="divide-y divide-white/[0.08] border-y border-white/[0.08]" role="status" aria-label="Loading workspaces">
+              {Array.from({ length: 3 }, (_, index) => (
+                <div key={index} className="grid animate-pulse gap-4 px-3 py-6 md:grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] md:items-center md:gap-4">
+                  <div><div className="h-4 w-44 rounded bg-white/[0.09]" /><div className="mt-3 h-3 w-64 max-w-full rounded bg-white/[0.05]" /></div>
+                  <div className="h-3 w-24 rounded bg-white/[0.05]" />
+                  <div className="h-3 w-20 rounded bg-white/[0.05]" />
+                  <div className="h-4 w-24 rounded bg-white/[0.06]" />
+                  <div className="h-9 w-40 rounded bg-white/[0.06]" />
+                </div>
+              ))}
+            </div>
+          ) : loadError ? (
+            <StateMessage icon="x" title="Could not load workspaces" body={loadError} action={<Button variant="ghost" onClick={() => loadWorkspaces()}>Try again</Button>} />
+          ) : workspaces.length === 0 ? (
+            <StateMessage icon="dashboard" title="No workspaces yet" body="Create the first workspace to generate its join code." action={<Button onClick={() => setCreateOpen(true)}>Create workspace</Button>} />
+          ) : (
+            <div className="border-y border-white/[0.1]">
+              {workspaces.map((workspace) => {
+                const editing = editingId === workspace.id;
+                const opening = busyId === `open:${workspace.id}`;
+                const saving = busyId === `save:${workspace.id}`;
+                const rotating = busyId === `rotate:${workspace.id}`;
+                return (
+                  <article key={workspace.id} className="border-b border-white/[0.08] last:border-b-0">
+                    <div className="grid gap-4 px-3 py-5 md:grid-cols-[minmax(0,1.25fr)_minmax(120px,0.42fr)_minmax(80px,0.28fr)_minmax(120px,0.42fr)_minmax(220px,220px)] md:items-center md:gap-4">
+                      <div className="min-w-0">
+                        <h2 className="truncate text-sm font-semibold text-zinc-100">{workspace.name}</h2>
+                        <p className="mt-1 truncate text-xs text-zinc-500">{workspace.publicationUrl || "Publication website not set"}</p>
+
+                      </div>
+                      <div className="text-sm text-zinc-400 md:text-center"><span className="md:hidden">Date created: </span>{workspace.createdAt ? formatDisplayDate(workspace.createdAt) : "Unavailable"}</div>
+                      <div className="text-sm text-zinc-400 md:text-center"><span className="md:hidden">Members: </span>{workspace.memberCount || 0}</div>
+                      <button type="button" onClick={() => copyJoinCode(workspace)} className="w-fit justify-self-start font-mono text-sm tracking-[0.12em] text-zinc-300 underline-offset-4 hover:text-zinc-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:justify-self-center" aria-label={`Copy join code ${workspace.joinCode} for ${workspace.name}`}>
+                        {workspace.joinCode || "Unavailable"}
+                      </button>
+                      <div className="flex flex-wrap justify-start gap-2 md:flex-nowrap md:justify-end">
+                        <Button onClick={() => openWorkspace(workspace)} disabled={Boolean(busyId)}>{opening ? "Opening" : "Open"}</Button>
+                        <Button variant="ghost" icon="settings" onClick={() => editing ? setEditingId("") : beginEditing(workspace)} disabled={Boolean(busyId)}>{editing ? "Close" : "Settings"}</Button>
+                      </div>
+                    </div>
+
+                    {editing ? (
+                      <div className="border-t border-white/[0.08] bg-white/[0.018] px-3 py-6">
+                        <div className="max-w-3xl">
+                          <h3 className="text-sm font-semibold text-zinc-200">Workspace settings</h3>
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                            <SettingsField id={`owner-edit-name-${workspace.id}`} label="Workspace name" value={editDraft.name} onChange={(name) => setEditDraft((draft) => ({ ...draft, name }))} autoComplete="organization" />
+                            <SettingsField id={`owner-edit-url-${workspace.id}`} label="Publication website (optional)" value={editDraft.publicationUrl} onChange={(publicationUrl) => setEditDraft((draft) => ({ ...draft, publicationUrl }))} type="url" autoComplete="url" />
+                          </div>
+                          <div className="mt-5 flex flex-col gap-4 border-t border-white/[0.08] pt-5 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-xs text-zinc-600">Workspace join code</div>
+                              <div className="mt-1 font-mono text-sm tracking-[0.12em] text-zinc-300">{workspace.joinCode}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="ghost" onClick={() => rotateJoinCode(workspace)} disabled={Boolean(busyId)}>
+                                {rotating ? "Rotating" : rotateConfirmId === workspace.id ? "Confirm rotation" : "Rotate code"}
+                              </Button>
+                              <Button onClick={() => saveWorkspace(workspace)} disabled={Boolean(busyId)}>{saving ? "Saving" : "Save changes"}</Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
@@ -3196,8 +3543,8 @@ function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
       <div className="flex h-full">
         <aside className="hidden h-full w-72 shrink-0 flex-col border-r border-white/[0.08] bg-[#08090c] p-4 lg:flex">
           <div className="flex items-center gap-3 px-2 py-1">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-zinc-950">F</div>
-            <div className="text-sm font-medium text-zinc-100">Falcon Newsroom</div>
+            <img src="/app-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-xl object-cover" />
+            <div className="text-sm font-medium text-zinc-100">Inscribe</div>
           </div>
           <div className="flex-1" aria-hidden="true" />
           <AccountMenu user={user} signingOut={signingOut} onSignOut={onSignOut} />
@@ -3205,8 +3552,8 @@ function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
 
         <main className="relative flex min-w-0 flex-1 flex-col">
           <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.08] px-5 py-4 lg:hidden">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-sm font-bold text-zinc-950">F</div>
-            <span className="text-sm font-medium">Falcon Newsroom</span>
+            <img src="/app-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-xl object-cover" />
+            <span className="text-sm font-medium">Inscribe</span>
           </header>
 
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-12">
@@ -3263,7 +3610,7 @@ function WorkspaceJoinShell({ user, signingOut, onJoin, onSignOut }) {
   );
 }
 
-function AccountMenu({ user, signingOut, onSignOut }) {
+function AccountMenu({ user, signingOut, onSignOut, variant = "sidebar" }) {
   const reduceMotion = useReducedMotion();
   const menuId = useId();
   const [open, setOpen] = useState(false);
@@ -3274,6 +3621,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   const email = asText(user?.email);
   const initials = accountInitials(user);
   const roleLabel = accountRoleLabel(user?.role);
+  const headerVariant = variant === "header";
 
   useEffect(() => {
     if (!open) return undefined;
@@ -3305,7 +3653,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
   }, [open, signingOut]);
 
   return (
-    <div ref={menuRef} className="relative border-t border-white/[0.08] pt-3">
+    <div ref={menuRef} className={headerVariant ? "relative" : "relative border-t border-white/[0.08] pt-3"}>
       <button
         ref={triggerRef}
         type="button"
@@ -3314,15 +3662,15 @@ function AccountMenu({ user, signingOut, onSignOut }) {
         aria-controls={open ? menuId : undefined}
         aria-label={open ? "Close user menu" : "Open user menu"}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-white/[0.035] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 motion-reduce:transition-none"
+        className={`${headerVariant ? "justify-center p-1.5" : "w-full px-2 py-2 text-left"} flex items-center gap-3 rounded-lg transition hover:bg-white/[0.035] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 motion-reduce:transition-none`}
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.07] text-xs font-semibold text-zinc-100">
           {initials}
         </span>
-        <span className="min-w-0 flex-1">
+        {!headerVariant ? <span className="block min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-zinc-100">{displayName}</span>
           {roleLabel ? <span className="mt-0.5 block truncate text-xs text-zinc-500">{roleLabel}</span> : null}
-        </span>
+        </span> : null}
       </button>
       <AnimatePresence>
         {open && (
@@ -3334,9 +3682,14 @@ function AccountMenu({ user, signingOut, onSignOut }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduceMotion ? undefined : { opacity: 0, y: 6, scale: 0.98 }}
             transition={{ duration: reduceMotion ? 0 : 0.14, ease: "easeOut" }}
-            className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[1000] w-full min-w-64 overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50"
+            className={`${headerVariant ? "right-0 top-[calc(100%+0.5rem)] w-56" : "bottom-[calc(100%+0.5rem)] left-0 w-full min-w-64"} absolute z-[1000] overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d0e12] shadow-2xl shadow-black/50`}
           >
-            {email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
+            {headerVariant ? (
+              <div className="px-3 py-3">
+                <div className="truncate text-sm font-medium text-zinc-100">{displayName}</div>
+                {email ? <div className="mt-0.5 truncate text-xs text-zinc-500">{email}</div> : null}
+              </div>
+            ) : email ? <div className="truncate px-3 py-3 text-sm text-zinc-400">{email}</div> : null}
             <div className="h-px bg-white/[0.08]" />
             <button
               ref={menuItemRef}
@@ -3347,7 +3700,7 @@ function AccountMenu({ user, signingOut, onSignOut }) {
                 setOpen(false);
                 onSignOut();
               }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:text-zinc-600 motion-reduce:transition-none"
+              className={`${headerVariant ? "py-2 text-xs" : "py-2.5 text-sm"} flex w-full items-center gap-2 px-3 text-left text-zinc-300 transition hover:bg-white/[0.05] hover:text-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 disabled:cursor-not-allowed disabled:text-zinc-600 motion-reduce:transition-none`}
             >
               <Icon name="logout" className="h-4 w-4" />
               {signingOut ? "Signing out" : "Sign out"}
@@ -3832,11 +4185,6 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     }
   };
 
-  const selectNextPitch = (currentId) => {
-    const nextId = nextActivePitchId(activePitches, currentId);
-    if (nextId) navigateToPitch(nextId);
-  };
-
   const createPitch = async (draft) => {
     const title = draft.title.trim();
     if (!title) return;
@@ -3952,7 +4300,6 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
         onUpdate={updatePitchDetails}
         onDelete={deletePitch}
-        onNext={selectNextPitch}
         onAddComment={addComment}
         onEditComment={editComment}
         onDeleteComment={deleteComment}
@@ -4159,7 +4506,6 @@ function PitchQueueRow({ pitch, onSelect }) {
 
 function PitchDetailPage({
   pitch,
-  activePitches,
   onBack,
   onSubmitForReview,
   onMarkInProgress,
@@ -4167,7 +4513,6 @@ function PitchDetailPage({
   onHold,
   onUpdate,
   onDelete,
-  onNext,
   canManagePitches = false,
   canSubmitForReview = false,
   canEditPitch = false,
@@ -4507,14 +4852,6 @@ function PitchDetailPage({
                 Mark in progress
               </Button>
               <Button variant="ghost" onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
-              <Button
-                variant="ghost"
-                disabled={activePitches.length <= 1}
-                onClick={() => onNext(pitch.id)}
-                className="w-full"
-              >
-                Next active pitch
-              </Button>
               {canDeletePitch ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
             </div>
           </div>
@@ -6670,7 +7007,7 @@ function IntervieweesPage({ currentUser, csrfToken = "", setToast = () => {} }) 
 function ReadOnlyField({ label, value }) {
   return (
     <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 py-5">
-      <p className="text-xs uppercase tracking-[0.16em] text-zinc-600">{label}</p>
+      <p className="text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">{label}</p>
       <p className="min-w-0 truncate text-sm text-zinc-200">{value || "Unknown"}</p>
     </div>
   );
@@ -6696,8 +7033,8 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
       <Card className="flex min-h-[560px] items-center justify-center p-5">
         <div className="max-w-sm text-center">
           <div className="mx-auto mb-5 h-px w-16 bg-white/20" />
-          <h3 className="text-lg font-semibold tracking-tight text-zinc-100">Select a source</h3>
-          <p className="mt-3 text-sm leading-6 text-zinc-500">
+          <h3 className="text-[0.95rem] font-semibold tracking-tight text-zinc-100">Select a source</h3>
+          <p className="mt-3 text-xs leading-5 text-zinc-500">
             Record details, article context, and editable source fields will appear here.
           </p>
         </div>
@@ -6708,35 +7045,34 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
   return (
     <Card className="flex min-h-[560px] flex-col p-5">
       <div>
-        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Selected record</p>
-        <h2 className="break-words text-2xl font-semibold tracking-tight text-zinc-50">{record.name}</h2>
+        <h2 className="break-words text-[1.7rem] font-semibold tracking-tight text-zinc-50">{record.name}</h2>
       </div>
 
-      {saveError ? <p className="mt-4 text-sm text-rose-300">{saveError}</p> : null}
+      {saveError ? <p className="mt-4 text-xs text-rose-300">{saveError}</p> : null}
 
       {editing ? (
         <div className="mt-8 space-y-5 border-t border-white/[0.08] pt-5">
           <div className="grid gap-3 2xl:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">First name</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">First name</span>
               <input
                 value={draft?.firstName || ""}
                 onChange={(event) => setDraft((previous) => ({ ...(previous || {}), firstName: event.target.value }))}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-xs text-zinc-200 outline-none focus:border-white/[0.18]"
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Last name</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">Last name</span>
               <input
                 value={draft?.lastName || ""}
                 onChange={(event) => setDraft((previous) => ({ ...(previous || {}), lastName: event.target.value }))}
-                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+                className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-xs text-zinc-200 outline-none focus:border-white/[0.18]"
               />
             </label>
           </div>
           <div className="grid gap-3 2xl:grid-cols-2">
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Grade</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">Grade</span>
               <AnimatedDropdown
                 text={draft?.grade || "Unknown"}
                 items={sourceEditGradeOptions(draft?.grade).map((name) => ({ name, link: "#" }))}
@@ -6744,7 +7080,7 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
               />
             </label>
             <label className="block">
-              <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">House</span>
+              <span className="mb-2 block text-[0.65rem] uppercase tracking-[0.16em] text-zinc-600">House</span>
               <AnimatedDropdown
                 text={draft?.house || "Unknown"}
                 items={sourceEditHouseOptions(draft?.house).map((name) => ({ name, link: "#" }))}
@@ -6760,23 +7096,23 @@ function InterviewRecordInspector({ record, loading, editing, draft, setDraft, o
         </div>
       )}
 
-      <div className="mt-8 border-t border-white/[0.08] pt-7">
-        <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-600">Article</p>
+      <div className="mt-8 pt-7">
+        <p className="mb-3 text-[0.65rem] uppercase tracking-[0.18em] text-zinc-600">Article</p>
         {isValidHttpUrl(record.article?.url) ? (
           <a
             href={record.article.url}
             target="_blank"
             rel="noreferrer"
-            className="block break-words text-base font-semibold leading-7 text-zinc-100 transition hover:text-white"
+            className="block break-words text-[1rem] font-semibold leading-6 text-zinc-100 transition hover:text-white"
           >
             {record.article?.title || "Article title unavailable"}
           </a>
         ) : (
-          <p className="break-words text-base font-semibold leading-7 text-zinc-100">
+          <p className="break-words text-[0.85rem] font-semibold leading-6 text-zinc-100">
             {record.article?.title || "Article title unavailable"}
           </p>
         )}
-        <p className="mt-3 text-sm text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
+        <p className="mt-3 text-xs text-zinc-500">{record.article?.publishedAt || "Date unavailable"}</p>
       </div>
 
       {canManage ? (
@@ -7077,7 +7413,6 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {}, csrfToken 
       setIntervieweeExtraction({
         mode: extraction.mode,
         message: extraction.message,
-        foundCount: extractedRows.length,
         manualMode,
       });
       setRows(nextRows);
@@ -7289,11 +7624,9 @@ function ArticleExtractorOverlay({ onClose, onSaved = async () => {}, csrfToken 
                 <div className="mb-3">
                   <div>
                     <h3 className="font-medium text-zinc-50">Review interviewees</h3>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      {intervieweeExtraction?.manualMode
-                        ? "Add the source name before saving."
-                        : `${intervieweeExtraction?.foundCount || rows.length} source${(intervieweeExtraction?.foundCount || rows.length) === 1 ? "" : "s"} found. Check each name before saving.`}
-                    </p>
+                    {intervieweeExtraction?.manualMode ? (
+                      <p className="mt-1 text-sm text-zinc-500">Add the source name before saving.</p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -7487,15 +7820,8 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     });
     return grouped;
   }, [calendarEvents]);
-  const visibleMonthEventCount = useMemo(
-    () => calendarEvents.filter((event) => (
-      event.date.getFullYear() === visibleMonth.getFullYear() && event.date.getMonth() === visibleMonth.getMonth()
-    )).length,
-    [calendarEvents, visibleMonth]
-  );
-
   return (
-    <PageShell title="Publishing calendar" description="Story deadlines from your current newsroom view.">
+    <PageShell title="Calendar">
       <section className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-white/[0.12] pb-4 lg:flex-row lg:items-end lg:justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-zinc-50">{monthYearLabel(visibleMonth)}</h2>
@@ -7505,22 +7831,6 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
             <Button variant="ghost" onClick={() => navigateCalendarMonth(addMonths(visibleMonth, 1))}>Next</Button>
           </div>
         </div>
-
-        {visibleMonthEventCount === 0 ? (
-          <div className="flex items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3" role="status">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-zinc-400">
-              <Icon name="calendar" className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-zinc-200">No deadlines in {monthYearLabel(visibleMonth)}</p>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
-                {calendarEvents.length
-                  ? "Move between months to review scheduled work, or add a due date from a story."
-                  : "Add a due date to a story and it will appear here automatically."}
-              </p>
-            </div>
-          </div>
-        ) : null}
 
         <div className="overflow-x-auto">
           <div className="min-w-[860px]">
@@ -7736,10 +8046,10 @@ function InviteStaffModal({ workspace, setToast, onRotate, onClose }) {
   const joinCode = asText(workspace?.joinCode);
   const signupUrl = `${window.location.origin}/signup`;
   const inviteMessage = joinCode
-    ? `Join ${workspaceName} on Falcon Newsroom. Sign up at ${signupUrl}, then enter workspace code ${joinCode}.`
+    ? `Join ${workspaceName} on Inscribe. Sign up at ${signupUrl}, then enter workspace code ${joinCode}.`
     : "The workspace join code is currently unavailable. Close this dialog and reload Administration before inviting staff.";
   const mailtoHref = joinCode
-    ? `mailto:?subject=${encodeURIComponent(`Join ${workspaceName} on Falcon Newsroom`)}&body=${encodeURIComponent(inviteMessage)}`
+    ? `mailto:?subject=${encodeURIComponent(`Join ${workspaceName} on Inscribe`)}&body=${encodeURIComponent(inviteMessage)}`
     : "";
 
   useEffect(() => {
@@ -8273,8 +8583,7 @@ function WorkspaceSettings({ draft, updateDraft, loading, saving, canManageWorks
       {saveError ? <div className="mt-5 rounded-xl border border-amber-400/15 bg-amber-400/[0.07] px-4 py-3 text-sm text-amber-200" role="alert">{saveError}</div> : null}
 
       <section className="py-7" aria-labelledby="workspace-details-title">
-
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
           <SettingsField id="workspace-name" label="Workspace name" value={draft.name} onChange={(value) => updateDraft("name", value)} disabled={loading || !canManageWorkspace} autoComplete="organization" />
           <SettingsField id="publication-url" label="Publication website" value={draft.publicationUrl} onChange={(value) => updateDraft("publicationUrl", value)} disabled={loading || !canManageWorkspace} type="url" autoComplete="url" />
         </div>
@@ -8284,7 +8593,7 @@ function WorkspaceSettings({ draft, updateDraft, loading, saving, canManageWorks
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px] md:items-center">
           <div>
             <h3 id="workspace-access-title" className="text-sm font-semibold text-zinc-200">Workspace access code</h3>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">Share this with people joining {draft.name || "your newsroom"}. New members start as guests.</p>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-zinc-500">Share this with people joining {draft.name || "your newsroom"}. </p>
           </div>
           <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.09] bg-black/20 px-4 py-3">
             <div className="min-w-0">
@@ -8495,7 +8804,7 @@ function SettingsPage({ workspace, currentUser, csrfToken = "", setToast = () =>
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [copied, setCopied] = useState(false);
-  const canManageWorkspace = normalizeAppRole(currentUser?.role) === "admin";
+  const canManageWorkspace = ["owner", "admin"].includes(normalizeAppRole(currentUser?.role));
   const requestedSection = settingsSectionForPath(locationPath);
   const activeSection = canManageWorkspace ? requestedSection : "workspace";
   const isDirty = Object.keys(savedSettings).some((key) => draft[key] !== savedSettings[key]);

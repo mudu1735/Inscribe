@@ -3,6 +3,7 @@ import re
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from article_extractor import ArticleExtractionError, normalize_publication_host
@@ -28,6 +29,103 @@ def load_functions(names, namespace=None):
 
 
 class ExtractorApiHelperTests(unittest.TestCase):
+    def test_extracted_article_dates_always_get_a_sortable_utc_datetime(self):
+        loaded = load_functions(
+            {"_extracted_article_date_sort"},
+            {"datetime": datetime, "timezone": timezone},
+        )
+        parse_date = loaded["_extracted_article_date_sort"]
+
+        self.assertEqual(
+            parse_date("June 16, 2026"),
+            datetime(2026, 6, 16, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            parse_date("Apr 2, 2026"),
+            datetime(2026, 4, 2, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            parse_date("2026-05-06T13:00:00Z"),
+            datetime(2026, 5, 6, 13, tzinfo=timezone.utc),
+        )
+        self.assertIsNone(parse_date("not a publication date"))
+
+    def test_extracted_article_insert_persists_the_publication_sort_date(self):
+        class Articles:
+            def __init__(self):
+                self.inserted = None
+
+            def find_one(self, _query):
+                return None
+
+            def insert_one(self, document):
+                self.inserted = dict(document)
+                return SimpleNamespace(inserted_id="article-1")
+
+        articles = Articles()
+        loaded = load_functions(
+            {
+                "_article_url_lookup_candidates",
+                "_extracted_article_date_sort",
+                "_article_published_value",
+                "_user_display_name",
+                "_upsert_extracted_article",
+            },
+            {
+                "articles_col": articles,
+                "datetime": datetime,
+                "timezone": timezone,
+                "urlparse": urlparse,
+                "DuplicateKeyError": RuntimeError,
+            },
+        )
+
+        saved = loaded["_upsert_extracted_article"](
+            "poolesville-pulse",
+            "https://poolesvillepulse.org/new-story",
+            {
+                "title": "New Kentlands Bookstore Opens Doors to Enthusiastic Community",
+                "authors": ["Student Reporter"],
+                "tags": ["Community News"],
+                "datePublished": "June 3, 2026",
+            },
+            {"_id": "user-1", "name": "Editor"},
+        )
+
+        expected = datetime(2026, 6, 3, tzinfo=timezone.utc)
+        self.assertEqual(saved["datePublishedSort"], expected)
+        self.assertEqual(articles.inserted["datePublishedSort"], expected)
+
+    def test_extracted_article_insert_rejects_an_unparseable_nonempty_date(self):
+        class Articles:
+            def find_one(self, _query):
+                return None
+
+        loaded = load_functions(
+            {
+                "_article_url_lookup_candidates",
+                "_extracted_article_date_sort",
+                "_article_published_value",
+                "_user_display_name",
+                "_upsert_extracted_article",
+            },
+            {
+                "articles_col": Articles(),
+                "datetime": datetime,
+                "timezone": timezone,
+                "urlparse": urlparse,
+                "DuplicateKeyError": RuntimeError,
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "could not be normalized"):
+            loaded["_upsert_extracted_article"](
+                "poolesville-pulse",
+                "https://poolesvillepulse.org/new-story",
+                {"title": "New story", "datePublished": "sometime this summer"},
+                {"_id": "user-1", "name": "Editor"},
+            )
+
     def test_workspace_publication_url_takes_priority_over_stale_domain(self):
         loaded = load_functions(
             {"_safe_http_url", "_workspace_extraction_host"},

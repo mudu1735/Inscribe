@@ -104,10 +104,11 @@ export default function AnimatedDropdown({
               }}
               className={cn(
                 'absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 w-full origin-top',
-                'overflow-hidden rounded-xl',
+                'max-h-[18rem] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl',
                 'border border-white/[0.08] bg-zinc-950',
                 'shadow-2xl shadow-black/40'
               )}
+              style={{ maxHeight: 'min(18rem, calc(100dvh - 8rem))' }}
             >
               <motion.div
                 className='flex flex-col'
