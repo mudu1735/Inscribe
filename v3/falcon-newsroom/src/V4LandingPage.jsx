@@ -1,25 +1,22 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import './landing-v4.css';
 
 const workflowStages = [
   {
     id: 'pitch',
     label: 'Pitch',
-    note: 'Capture the idea, audience, urgency, and first reporting leads so every assignment starts with direction.',
-    details: ['Angle and audience', 'Reporting leads'],
+    note: 'Create and share ideas on the pitch board',
   },
   {
-    id: 'report',
-    label: 'Report',
-    note: 'Track ownership, deadlines, source records, interview notes, and editor questions in one shared story workspace.',
-    details: ['Sources and notes', 'Draft and deadline'],
+    id: 'write',
+    label: 'Write',
+    note: 'Report, draft, and get direct feedback',
   },
   {
     id: 'publish',
     label: 'Publish',
-    note: 'Make feedback actionable, resolve the open checks, and carry final metadata from review to the next deadline.',
-    details: ['Editor feedback', 'Publish handoff'],
+    note: 'Clear the final checks and publish the finished story',
   },
 ];
 
@@ -103,6 +100,47 @@ function Reveal({ children, className = '', delay = 0, amount = 0.2 }) {
   );
 }
 
+function WorkflowVisual({ stage }) {
+  if (stage === 'pitch') {
+    return (
+      <div className="workflow-visual pitch-visual" aria-hidden="true">
+        <div className="workflow-visual-bar"><span>New pitch</span></div>
+        <div className="pitch-preview">
+          {[
+            ['LOCAL', 'How new bus routes change the school day'],
+            ['ARTS', 'Behind the spring musical set'],
+            ['SPORTS', 'Tennis heads to the regional final'],
+          ].map(([section, title]) => (
+            <div className="pitch-item" key={title}><small>{section}</small><strong>{title}</strong></div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === 'write') {
+    return (
+      <div className="workflow-visual writer-visual" aria-hidden="true">
+        <div className="workflow-visual-bar"><span>Draft</span><span>742 words</span></div>
+        <div className="draft-preview">
+          <strong>A longer ride, and an earlier start</strong>
+          <span/><span/><span className="short"/>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="workflow-visual publish-visual" aria-hidden="true">
+      <div className="workflow-visual-bar"><span>Final checks</span><span>3 of 3</span></div>
+      <div className="publish-checks">
+        {['Facts verified', 'Sources cited', 'Editor approved'].map((item) => <div key={item}><span>✓</span><strong>{item}</strong></div>)}
+      </div>
+      <div className="publish-ready"><strong>Ready to publish</strong><span>→</span></div>
+    </div>
+  );
+}
+
 function ProductFrame({ activeView }) {
   const [selectedStory, setSelectedStory] = useState(0);
   const stories = [
@@ -159,7 +197,7 @@ function ProductFrame({ activeView }) {
           {Array.from({ length: 6 }).map((_, i) => <span key={i} className={i === 0 ? 'active' : ''}/>) }
         </aside>
         <div className="dashboard-main">
-          <div className="dashboard-topline"><div><small>MONDAY, JULY 13</small><h3>Good morning, Mu.</h3></div><button>New story</button></div>
+          <div className="dashboard-topline"><div><small>MONDAY, JULY 13</small><h3>Good morning, Mu</h3></div><button>New story</button></div>
           <div className="pulse-strip">
             <div><Icon name="spark" size={17}/><span><strong>6 updates</strong><small>since your last visit</small></span></div>
             <div className="pulse-people"><span className="avatar">M</span><span className="avatar">E</span><span className="avatar">J</span><small>8 active today</small></div>
@@ -187,26 +225,7 @@ function ProductFrame({ activeView }) {
 }
 
 function AnalyticsFrame() {
-  const sections = [
-    { label: 'News', value: 88, stories: 18 },
-    { label: 'Features', value: 64, stories: 13 },
-    { label: 'Sports', value: 52, stories: 11 },
-    { label: 'Opinion', value: 36, stories: 7 },
-  ];
-
-  return (
-    <div className="analytics-frame" aria-label="Newsroom analytics preview">
-      <div className="analytics-toolbar"><span>Publication overview</span><small>Last 30 days</small></div>
-      <div className="analytics-summary"><div><small>Published stories</small><strong>49</strong></div><div><small>On-time rate</small><strong>91%</strong></div></div>
-      <div className="analytics-chart">
-        <div className="analytics-chart-head"><span>Output by section</span><small>Stories published</small></div>
-        <div className="analytics-bars">
-          {sections.map((section) => <div className="analytics-bar-row" key={section.label}><span>{section.label}</span><div><i style={{ width: `${section.value}%` }}/></div><strong>{section.stories}</strong></div>)}
-        </div>
-      </div>
-      <div className="analytics-note"><span className="analytics-note-mark"/><p><strong>Review time is down 18%.</strong><small>Editors are resolving feedback earlier in the workflow.</small></p></div>
-    </div>
-  );
+  return <div className="analytics-frame"><img className="analytics-image" src="/landing/article-analytics.jpg" alt="Article performance preview showing Poolesville Pulse impressions over the past seven days." loading="lazy" decoding="async"/></div>;
 }
 export default function V4LandingPage() {
   const reduceMotion = useReducedMotion();
@@ -227,6 +246,16 @@ export default function V4LandingPage() {
   }, [query]);
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) || filteredRecords[0] || null;
 
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileOpen]);
+
+  const closeMobileNavigation = () => setMobileOpen(false);
 
   return (
     <main className="landing-page">
@@ -237,16 +266,16 @@ export default function V4LandingPage() {
             <a href="#workflow">Workflow</a><a href="#records">Records</a><a href="#analytics">Analytics</a>
           </div>
           <div className="nav-actions"><a className="primary-button small-button" href="/login">Sign in <Icon name="arrow" size={15}/></a></div>
-          <button className="mobile-toggle" onClick={() => setMobileOpen((value) => !value)} aria-label="Toggle navigation" aria-expanded={mobileOpen}><Icon name={mobileOpen ? 'close' : 'menu'}/></button>
+          <button className="mobile-toggle" onClick={() => setMobileOpen((value) => !value)} aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileOpen} aria-controls="mobile-navigation"><Icon name={mobileOpen ? 'close' : 'menu'}/></button>
         </nav>
         <AnimatePresence>
-          {mobileOpen && <motion.div className="mobile-menu" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}><a href="#workflow">Workflow</a><a href="#records">Records</a><a href="#analytics">Analytics</a><a href="/login">Sign in</a></motion.div>}
+          {mobileOpen && <motion.div id="mobile-navigation" className="mobile-menu" initial={reduceMotion ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={reduceMotion ? undefined : { opacity: 0, height: 0 }}><a href="#workflow" onClick={closeMobileNavigation}>Workflow</a><a href="#records" onClick={closeMobileNavigation}>Records</a><a href="#analytics" onClick={closeMobileNavigation}>Analytics</a><a href="/login" onClick={closeMobileNavigation}>Sign in</a></motion.div>}
         </AnimatePresence>
       </header>
 
       <section id="top" className="hero-section">
         <div className="page-width hero-content">
-          <motion.h1 initial={reduceMotion ? false : { opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}>The most complete<br/>journalism workflow tool.</motion.h1>
+          <motion.h1 initial={reduceMotion ? false : { opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}>The most complete<br/>journalism workflow tool</motion.h1>
           <motion.p className="hero-subtitle" initial={reduceMotion ? false : { opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}>Manage everything in one place.</motion.p>
           <motion.div className="hero-actions" initial={reduceMotion ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.75, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}><a className="primary-button" href="/signup">Get Inscribe <Icon name="arrow"/></a></motion.div>
         </div>
@@ -259,14 +288,15 @@ export default function V4LandingPage() {
 
 
       <section id="workflow" className="section workflow-section">
-        <div className="page-width workflow-intro"><Reveal><h2>A workflow built for journalists.</h2></Reveal></div>
+        <div className="page-width workflow-intro"><Reveal><h2>A workflow built for journalists</h2></Reveal></div>
         <div className="page-width workflow-grid">
           {workflowStages.map((stage, index) => (
             <Reveal className="workflow-box-reveal" delay={index * 0.08} key={stage.id}>
               <article className="workflow-box">
-               <h3>{stage.label}</h3>
+                <div className="workflow-step"><span>0{index + 1}</span></div>
+                <WorkflowVisual stage={stage.id}/>
+                <h3>{stage.label}</h3>
                 <p>{stage.note}</p>
-                <ul className="workflow-box-details">{stage.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
               </article>
             </Reveal>
           ))}
@@ -275,7 +305,7 @@ export default function V4LandingPage() {
 
       <section id="records" className="section archive-section">
         <div className="landing-visual-wide">
-          <Reveal className="archive-copy"><h2>Your newspaper records, organized.</h2><p>Find published articles and sources in seconds.</p></Reveal>
+          <Reveal className="archive-copy"><h2>Your newspaper records, organized</h2><p>Find published articles and sources in seconds.</p></Reveal>
         </div>
           <Reveal className="landing-visual-wide records-preview" delay={0.08} amount={0.12}>
             <div className="records-app-header">
@@ -347,19 +377,18 @@ export default function V4LandingPage() {
       <section id="analytics" className="section analytics-section">
         <div className="page-width feature-layout analytics-layout">
           <Reveal className="analytics-visual"><AnalyticsFrame/></Reveal>
-          <Reveal className="feature-copy" delay={0.08}><h2>Track and analyze article analytics.</h2><p>Track publishing pace, section output, deadline health, and review time without turning the newsroom into a wall of metrics.</p><ul className="feature-points"><li>Compare output across desks and sections</li><li>Spot missed deadlines and review bottlenecks</li><li>Use trends to plan the next coverage cycle</li></ul></Reveal>
+          <Reveal className="feature-copy" delay={0.08}><h2 className="analytics-heading"><span>See how your stories</span><span>reach readers</span></h2><p>Understand article impressions and trends</p><ul className="feature-points"><li>Track impressions for every published article</li><li>See which stories are resonating with readers</li><li>Analyze trends to plan the next story</li></ul></Reveal>
         </div>
       </section>
       <section className="section final-section">
-        <Reveal className="page-width final-content"><h2>A better newspaper starts with a clearer system.</h2><div className="hero-actions"><a className="primary-button light-button" href="/signup">Start your workspace <Icon name="arrow"/></a></div></Reveal>
+        <Reveal className="page-width final-content"><h2>A better newspaper starts with a clearer system</h2><div className="hero-actions"><a className="primary-button light-button" href="/signup">Start your workspace <Icon name="arrow"/></a></div></Reveal>
       </section>
       <footer className="footer">
         <div className="landing-visual-wide footer-top">
           <div className="footer-brand"><a className="brand" href="#top"><img className="brand-logo" src="/app-logo.png" alt=""/><span>Inscribe</span></a></div>
           <div className="footer-links">
             <div><strong>Product</strong><a href="#workflow">Workflow</a><a href="#records">Records</a><a href="#analytics">Analytics</a></div>
-            <div><strong>Legal</strong><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/accessibility">Accessibility</a></div>
-            <div><strong>Connect</strong><a href="https://instagram.com" target="_blank" rel="noreferrer">Instagram ↗</a><a href="https://x.com" target="_blank" rel="noreferrer">X ↗</a><a href="https://linkedin.com" target="_blank" rel="noreferrer">LinkedIn ↗</a></div>
+            <div><strong>Connect</strong><a href="https://instagram.com" target="_blank" rel="noreferrer">Instagram ↗</a><a href="https://github.com/mudu1735" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://www.linkedin.com/in/mu-du/" target="_blank" rel="noreferrer">LinkedIn ↗</a></div>
           </div>
         </div>
         <div className="landing-visual-wide footer-bottom"><small>© 2026 Inscribe</small></div>

@@ -490,6 +490,8 @@ def _pinned_http_get(
             return response, pool
         except urllib3.exceptions.TimeoutError:
             last_was_timeout = True
+        except ArticleExtractionError:
+            raise
         except Exception:
             last_was_timeout = False
         if pool is not None:

@@ -8,7 +8,7 @@ v3 Python requirements, and installing Node dependencies:
 
 ```bash
 npm ci
-FALCON_V3_PYTHON="$PWD/../../venv/bin/python" npm run dev
+npm run dev
 ```
 
 The backend listens on `127.0.0.1:5003` and Vite listens on

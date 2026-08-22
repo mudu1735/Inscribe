@@ -3,7 +3,7 @@ import re
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 AUTH_APP_PATH = Path(__file__).with_name("auth_app.py")
@@ -95,7 +95,27 @@ class WorkflowHelperTests(unittest.TestCase):
         self.assertEqual(validate({"angle": ""}, pitch)[1], "Pitch angle is required.")
         self.assertEqual(validate({"section": "Unknown Desk"}, pitch)[1], "Choose a valid pitch section.")
         self.assertEqual(validate({"section": "Legacy Desk"}, pitch)[1], "")
+        custom_updates, custom_error = validate(
+            {"title": "New", "angle": "New angle", "section": "Climate", "notes": ""},
+            {"title": "", "angle": "", "section": "", "notes": ""},
+            allow_custom_section=True,
+        )
+        self.assertEqual(custom_error, "")
+        self.assertEqual(custom_updates["section"], "Climate")
         self.assertIn("240 characters", validate({"title": "x" * 241}, pitch)[1])
+
+    def test_story_sections_allow_normalized_custom_values(self):
+        loaded = load_functions(
+            {"_story_section_value"},
+            {
+                "re": re,
+                "MAX_PITCH_SECTION_LENGTH": 80,
+            },
+        )
+        validate = loaded["_story_section_value"]
+        self.assertEqual(validate("  Climate   Desk  "), ("Climate Desk", ""))
+        self.assertEqual(validate("All sections")[0], "")
+        self.assertIn("80 characters", validate("x" * 81)[1])
 
     def test_story_transition_policy_is_strict_and_publish_retry_is_idempotent(self):
         loaded = load_functions(
@@ -157,7 +177,7 @@ class WorkflowHelperTests(unittest.TestCase):
     def test_publication_url_is_workspace_bound_and_canonical(self):
         loaded = load_functions(
             {"_safe_http_url", "_normalized_publication_hostname", "_validated_publication_url", "_canonical_article_url", "_article_url_lookup_candidates", "_publication_url_conflict_query"},
-            {"urlparse": urlparse, "re": re},
+            {"unquote": unquote, "urlparse": urlparse, "re": re},
         )
         validate = loaded["_validated_publication_url"]
         workspace = {"publicationUrl": "https://paper.example", "articleDomain": "paper.example"}
@@ -195,7 +215,7 @@ class WorkflowHelperTests(unittest.TestCase):
                 "_coerce_list_field", "_safe_http_url", "_canonical_article_url", "_doc_public_id",
                 "_story_archive_authors", "_article_archive_document", "_upsert_published_article",
             },
-            {"urlparse": urlparse, "datetime": datetime, "articles_col": articles},
+            {"unquote": unquote, "urlparse": urlparse, "datetime": datetime, "articles_col": articles},
         )
         story = {
             "_id": "story-1",

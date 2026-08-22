@@ -9,7 +9,7 @@ import zipfile
 from datetime import datetime, timezone
 from io import BytesIO, StringIO
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from bson import ObjectId
 from cryptography.fernet import Fernet, InvalidToken
@@ -125,10 +125,27 @@ class SecurityHelperTests(unittest.TestCase):
         self.assertEqual(start.minute, 0)
         self.assertEqual((expires - start).total_seconds(), 1800)
 
+    def test_in_memory_rate_limit_fallback_is_bounded(self):
+        loaded = load_functions(
+            {"_record_fallback_rate_attempt"},
+            {
+                "monotonic": lambda: 100.0,
+                "RATE_LIMIT_FALLBACK_MAX_KEYS": 2,
+            },
+        )
+        record = loaded["_record_fallback_rate_attempt"]
+        storage = {}
+        self.assertEqual(record(storage, "first", 60, now=100.0), 1)
+        self.assertEqual(record(storage, "second", 60, now=100.0), 1)
+        self.assertEqual(record(storage, "third", 60, now=100.0), 1)
+        self.assertEqual(len(storage), 2)
+        self.assertNotIn("first", storage)
+        self.assertEqual(record(storage, "third", 60, now=101.0), 2)
+
     def test_redirect_and_external_url_guards(self):
         loaded = load_functions(
             {"_sanitize_next_url", "_safe_http_url", "_is_valid_http_url"},
-            {"urlparse": urlparse},
+            {"unquote": unquote, "urlparse": urlparse},
         )
         sanitize = loaded["_sanitize_next_url"]
         self.assertEqual(sanitize("/stories?mine=1"), "/stories?mine=1")
@@ -137,8 +154,45 @@ class SecurityHelperTests(unittest.TestCase):
 
         safe_url = loaded["_safe_http_url"]
         self.assertEqual(safe_url("https://docs.google.com/document/d/abc"), "https://docs.google.com/document/d/abc")
-        for payload in ("javascript:alert(1)", "https://good.example\\@evil.example", "https://user:pass@example.com/"):
+        for payload in (
+            "javascript:alert(1)",
+            "https://good.example\\@evil.example",
+            "https://example.com/%5c%5cevil",
+            "https://example.com/%0d%0aInjected",
+            "https://user:pass@example.com/",
+        ):
             self.assertEqual(safe_url(payload), "")
+
+    def test_secondary_activity_writes_are_best_effort(self):
+        class Activity:
+            @staticmethod
+            def insert_one(_document):
+                raise RuntimeError("audit collection unavailable")
+
+        class Logger:
+            @staticmethod
+            def warning(*_args, **_kwargs):
+                pass
+
+        loaded = load_functions(
+            {"_record_activity"},
+            {"activity_col": Activity(), "app": type("App", (), {"logger": Logger()})()},
+        )
+        self.assertFalse(loaded["_record_activity"]({"eventType": "status_change"}))
+
+    def test_followup_mutations_remain_workspace_scoped(self):
+        source = AUTH_APP_PATH.read_text(encoding="utf-8")
+
+        def function_source(name):
+            node = next(
+                item for item in AUTH_APP_TREE.body
+                if isinstance(item, ast.FunctionDef) and item.name == name
+            )
+            return ast.get_source_segment(source, node) or ""
+
+        self.assertIn('"workspaceId": workspace_id', function_source("api_update_feedback"))
+        self.assertIn('"workspaceId": _workspace_id_for_user(user_doc)', function_source("api_delete_feedback"))
+        self.assertIn('"workspaceId": _workspace_id_for_user(actor_doc)', function_source("_add_approval_collaborators"))
 
     def test_login_origin_guard(self):
         app = Flask(__name__)

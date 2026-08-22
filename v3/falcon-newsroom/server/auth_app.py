@@ -10,7 +10,7 @@ from datetime import timedelta, timezone, datetime
 from functools import wraps
 from pathlib import Path
 from time import monotonic
-from urllib.parse import urlencode, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 
 import gridfs
 import requests
@@ -294,8 +294,8 @@ security_rate_col = db[SECURITY_RATE_COLLECTION]
 admin_mutation_locks_col = db[ADMIN_MUTATION_LOCK_COLLECTION]
 story_files = gridfs.GridFS(db, collection="storyAttachments")
 AUTH_FAILURES: dict[str, list[float]] = {}
-AUTH_FAILURES_MAX_KEYS = 10000
 JOIN_FAILURES: dict[str, list[float]] = {}
+RATE_LIMIT_FALLBACK_MAX_KEYS = 10000
 GOOGLE_STATE_MAX_AGE_SECONDS = 600
 DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
 
@@ -1133,16 +1133,6 @@ def _security_rate_window(window_seconds: int, now: datetime | None = None) -> t
     return start, start + timedelta(seconds=seconds * 2)
 
 
-def _shared_rate_count(kind: str, key: str, window_seconds: int) -> int:
-    window_start, _expires_at = _security_rate_window(window_seconds)
-    bucket = security_rate_col.find_one({
-        "kind": kind,
-        "rateKey": _security_rate_key(key),
-        "windowStart": window_start,
-    }) or {}
-    return int(bucket.get("count") or 0)
-
-
 def _record_shared_rate_failure(kind: str, key: str, window_seconds: int):
     window_start, expires_at = _security_rate_window(window_seconds)
     query = {
@@ -1197,13 +1187,31 @@ def _release_admin_mutation_lock(workspace_id: str, token: str):
         admin_mutation_locks_col.delete_one({"workspaceId": workspace_id, "token": token})
 
 
-def _active_auth_failures(key: str, now: float) -> list[float]:
-    attempts = [ts for ts in AUTH_FAILURES.get(key, []) if now - ts < AUTH_RATE_LIMIT_WINDOW_SECONDS]
-    if attempts:
-        AUTH_FAILURES[key] = attempts
-    else:
-        AUTH_FAILURES.pop(key, None)
-    return attempts
+def _record_fallback_rate_attempt(
+    storage: dict[str, list[float]],
+    key: str,
+    window_seconds: int,
+    now: float | None = None,
+) -> int:
+    current = monotonic() if now is None else now
+
+    def active_attempts(candidate: str) -> list[float]:
+        attempts = [timestamp for timestamp in storage.get(candidate, []) if current - timestamp < window_seconds]
+        if attempts:
+            storage[candidate] = attempts
+        else:
+            storage.pop(candidate, None)
+        return attempts
+
+    if key not in storage and len(storage) >= RATE_LIMIT_FALLBACK_MAX_KEYS:
+        for existing_key in list(storage):
+            active_attempts(existing_key)
+        while len(storage) >= RATE_LIMIT_FALLBACK_MAX_KEYS:
+            storage.pop(next(iter(storage)), None)
+    attempts = active_attempts(key)
+    attempts.append(current)
+    storage[key] = attempts
+    return len(attempts)
 
 
 def _is_auth_rate_limited(email: str) -> bool:
@@ -1221,29 +1229,8 @@ def _is_auth_rate_limited(email: str) -> bool:
         if FLASK_ENV == "production":
             return True
     key = _auth_rate_key(email)
-    attempts = _active_auth_failures(key, monotonic())
-    attempts.append(monotonic())
-    AUTH_FAILURES[key] = attempts
-    return len(attempts) > AUTH_RATE_LIMIT_MAX
-
-
-def _record_auth_failure(email: str):
-    key = _auth_rate_key(email)
-    try:
-        _record_shared_rate_failure("auth", key, AUTH_RATE_LIMIT_WINDOW_SECONDS)
-        return
-    except Exception:
-        if FLASK_ENV == "production":
-            return
-    now = monotonic()
-    if key not in AUTH_FAILURES and len(AUTH_FAILURES) >= AUTH_FAILURES_MAX_KEYS:
-        for existing_key in list(AUTH_FAILURES):
-            _active_auth_failures(existing_key, now)
-        while len(AUTH_FAILURES) >= AUTH_FAILURES_MAX_KEYS:
-            AUTH_FAILURES.pop(next(iter(AUTH_FAILURES)), None)
-    attempts = _active_auth_failures(key, now)
-    attempts.append(now)
-    AUTH_FAILURES[key] = attempts
+    count = _record_fallback_rate_attempt(AUTH_FAILURES, key, AUTH_RATE_LIMIT_WINDOW_SECONDS)
+    return count > AUTH_RATE_LIMIT_MAX
 
 
 def _clear_auth_failures(email: str):
@@ -1254,32 +1241,6 @@ def _clear_auth_failures(email: str):
     except Exception:
         pass
     AUTH_FAILURES.pop(key, None)
-
-
-def _active_join_failures(now: float) -> list[float]:
-    key = _client_ip()
-    attempts = [ts for ts in JOIN_FAILURES.get(key, []) if now - ts < JOIN_RATE_LIMIT_WINDOW_SECONDS]
-    if attempts:
-        JOIN_FAILURES[key] = attempts
-    else:
-        JOIN_FAILURES.pop(key, None)
-    return attempts
-
-
-def _record_join_failure():
-    key = _client_ip()
-    try:
-        _record_shared_rate_failure("join", key, JOIN_RATE_LIMIT_WINDOW_SECONDS)
-        return
-    except Exception:
-        if FLASK_ENV == "production":
-            return
-    now = monotonic()
-    attempts = _active_join_failures(now)
-    attempts.append(now)
-    JOIN_FAILURES[key] = attempts
-    while len(JOIN_FAILURES) > AUTH_FAILURES_MAX_KEYS:
-        JOIN_FAILURES.pop(next(iter(JOIN_FAILURES)), None)
 
 
 def _is_join_rate_limited(user_doc: dict | None = None) -> bool:
@@ -1295,10 +1256,12 @@ def _is_join_rate_limited(user_doc: dict | None = None) -> bool:
     except Exception:
         if FLASK_ENV == "production":
             return True
-    attempts = _active_join_failures(monotonic())
-    attempts.append(monotonic())
-    JOIN_FAILURES[_client_ip()] = attempts
-    return len(attempts) > JOIN_RATE_LIMIT_MAX
+    count = _record_fallback_rate_attempt(
+        JOIN_FAILURES,
+        _client_ip(),
+        JOIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+    return count > JOIN_RATE_LIMIT_MAX
 
 
 def _is_ip_action_rate_limited(kind: str, maximum: int, window_seconds: int) -> bool:
@@ -1338,10 +1301,6 @@ def find_user_by_google_id(google_id: str):
     if not value:
         return None
     return users_col.find_one({"$or": [{"googleId": value}, {"googleSub": value}]})
-
-
-def find_user_by_google_sub(google_sub: str):
-    return find_user_by_google_id(google_sub)
 
 
 def _serialize_user(doc: dict) -> dict:
@@ -1928,6 +1887,12 @@ def _safe_http_url(value: str, max_length: int = 2048) -> str:
     if "\\" in raw or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in raw):
         return ""
     try:
+        decoded = unquote(raw)
+    except Exception:
+        return ""
+    if "\\" in decoded or any(ord(char) < 32 or ord(char) == 127 for char in decoded):
+        return ""
+    try:
         parsed = urlparse(raw)
         _ = parsed.port
     except Exception:
@@ -2175,11 +2140,6 @@ def _story_attachment_usage(doc: dict) -> tuple[int, int]:
     return len(attachments), stored_bytes
 
 
-def _story_attachment_to_api(doc: dict) -> dict | None:
-    attachments = _story_attachments_to_api(doc)
-    return attachments[0] if attachments else None
-
-
 def _attachment_item_key(item: dict) -> str:
     item_type = str(item.get("type") or "").strip().lower()
     url = str(item.get("webViewLink") or item.get("url") or "").strip()
@@ -2238,10 +2198,6 @@ def _merged_attachment_items(story: dict, *new_items: dict) -> list[dict]:
             seen.add(key)
         deduped.append(item)
     return deduped
-
-
-def _attachment_push_value(story: dict, *new_items: dict) -> dict:
-    return {"$each": _merged_attachment_items(story, *new_items)}
 
 
 DUE_DATE_FIELDS = ("deadline", "dueDate", "approvalDueDate", "due", "dateDue", "deadlineDate", "due_date", "deadline_date", "approval_due_date")
@@ -2398,7 +2354,7 @@ def _normalize_pitch_status(value) -> str:
     }.get(status, status or "In Progress")
 
 
-def _pitch_detail_updates(payload: dict, pitch: dict) -> tuple[dict, str]:
+def _pitch_detail_updates(payload: dict, pitch: dict, allow_custom_section: bool = False) -> tuple[dict, str]:
     fields = {"title", "angle", "section", "notes"}
     if not any(field in payload for field in fields):
         return {}, "No editable pitch details provided."
@@ -2413,7 +2369,7 @@ def _pitch_detail_updates(payload: dict, pitch: dict) -> tuple[dict, str]:
     existing_section = str(pitch.get("section") or "").strip()
     if not merged["section"]:
         return {}, "Pitch section is required."
-    if merged["section"] not in PITCH_SECTIONS and merged["section"] != existing_section:
+    if not allow_custom_section and merged["section"] not in PITCH_SECTIONS and merged["section"] != existing_section:
         return {}, "Choose a valid pitch section."
     limits = {
         "title": (MAX_PITCH_TITLE_LENGTH, "Pitch title"),
@@ -2425,6 +2381,15 @@ def _pitch_detail_updates(payload: dict, pitch: dict) -> tuple[dict, str]:
         if len(merged[field]) > limit:
             return {}, f"{label} must be {limit} characters or fewer."
     return {field: merged[field] for field in fields if field in payload}, ""
+
+
+def _story_section_value(value) -> tuple[str, str]:
+    section = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not section or section.casefold() == "all sections":
+        return "", "Choose or create a story section."
+    if len(section) > MAX_PITCH_SECTION_LENGTH:
+        return "", f"Story section must be {MAX_PITCH_SECTION_LENGTH} characters or fewer."
+    return section, ""
 
 def _pitch_to_api(doc: dict) -> dict:
     deadline = _story_deadline(doc)
@@ -2506,10 +2471,19 @@ def _require_feedback_entity(entity_type: str, entity_id: str, user_doc: dict):
     return entity_doc, "", 200
 
 
+def _record_activity(document: dict) -> bool:
+    try:
+        activity_col.insert_one(document)
+        return True
+    except Exception:
+        app.logger.warning("Activity record could not be saved.", exc_info=True)
+        return False
+
+
 def _record_status_activity(entity_type: str, entity_id: str, from_status: str, to_status: str, actor_doc: dict):
     if from_status == to_status:
         return
-    activity_col.insert_one({
+    _record_activity({
         "workspaceId": _workspace_id_for_user(actor_doc),
         "entityType": entity_type,
         "entityId": str(entity_id),
@@ -2949,6 +2923,7 @@ def _share_drive_attachment_with_editors(drive_attachment: dict, actor_doc: dict
 
 
 def _share_drive_file_with_editors(story: dict, actor_doc: dict) -> tuple[bool, list[dict], str]:
+    """Compatibility wrapper for legacy single-Drive-attachment callers."""
     drive_attachment = story.get("driveAttachment") if isinstance(story.get("driveAttachment"), dict) else {}
     return _share_drive_attachment_with_editors(drive_attachment, actor_doc)
 
@@ -4223,7 +4198,7 @@ def api_create_story():
     user_doc = _current_user_doc()
     payload = _request_payload()
     title = str(payload.get("title") or "").strip()
-    section = str(payload.get("section") or "").strip()
+    section, section_error = _story_section_value(payload.get("section"))
     summary = str(payload.get("summary") or "").strip()
     deadline = _first_text_value(*(payload.get(field) for field in DUE_DATE_FIELDS))
 
@@ -4231,8 +4206,8 @@ def api_create_story():
         return jsonify({"ok": False, "error": "Story title is required."}), 400
     if len(title) > MAX_PITCH_TITLE_LENGTH:
         return jsonify({"ok": False, "error": f"Story title must be {MAX_PITCH_TITLE_LENGTH} characters or fewer."}), 400
-    if section not in PITCH_SECTIONS:
-        return jsonify({"ok": False, "error": "Choose a valid story section."}), 400
+    if section_error:
+        return jsonify({"ok": False, "error": section_error}), 400
     if len(summary) > MAX_PITCH_ANGLE_LENGTH:
         return jsonify({"ok": False, "error": f"Story summary must be {MAX_PITCH_ANGLE_LENGTH} characters or fewer."}), 400
     if len(deadline) > 80:
@@ -4541,8 +4516,11 @@ def _add_approval_collaborators(story: dict, emails: list[str], message: str, ac
 
     if invited:
         next_collaborators = sorted(collaborator_by_email.values(), key=lambda item: item.get("email", ""))
-        stories_col.update_one({"_id": story["_id"]}, {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}})
-        activity_col.insert_one({
+        stories_col.update_one(
+            {"_id": story["_id"], "workspaceId": _workspace_id_for_user(actor_doc)},
+            {"$set": {"collaborators": next_collaborators, "updatedAt": _now_iso()}},
+        )
+        _record_activity({
             "workspaceId": _workspace_id_for_user(actor_doc),
             "entityType": "story",
             "entityId": _doc_public_id(story, "storyId"),
@@ -4632,7 +4610,7 @@ def api_invite_story_collaborators(story_id: str):
     )
     if result.matched_count == 0:
         return jsonify({"ok": False, "error": "Story access or status changed. Refresh and try again."}), 409
-    activity_col.insert_one({
+    _record_activity({
         "workspaceId": _workspace_id_for_user(user_doc),
         "entityType": "story",
         "entityId": _doc_public_id(story, "storyId"),
@@ -5160,7 +5138,11 @@ def api_create_pitch():
     if _normalize_pitch_round_status(pitch_round.get("status")) != "Open":
         return jsonify({"ok": False, "error": "Pitches can only be created in an open round."}), 409
     round_id = _pitch_round_id_from_doc(pitch_round)
-    details, detail_error = _pitch_detail_updates(payload, {"title": "", "angle": "", "section": "", "notes": ""})
+    details, detail_error = _pitch_detail_updates(
+        payload,
+        {"title": "", "angle": "", "section": "", "notes": ""},
+        allow_custom_section=True,
+    )
     if detail_error:
         return jsonify({"ok": False, "error": detail_error}), 400
     now_iso = _now_iso()
@@ -5222,7 +5204,7 @@ def api_update_pitch(pitch_id: str):
         )
         if result.matched_count == 0:
             return jsonify({"ok": False, "error": "Pitch access or status changed. Refresh and try again."}), 409
-        activity_col.insert_one({
+        _record_activity({
             "workspaceId": _workspace_id_for_user(user_doc),
             "entityType": "pitch",
             "entityId": _doc_public_id(pitch, "pitchId"),
@@ -5337,13 +5319,19 @@ def api_update_pitch(pitch_id: str):
             error = "Pitch selection could not create its story. Refresh and try again."
             return jsonify({"ok": False, "error": error, "pitch": _pitch_to_api(current)}), (503 if rollback.matched_count else 500)
         invite_warning = _add_approval_collaborators(story_doc, invite_emails, approval_message, user_doc)
-        story_doc = stories_col.find_one({"_id": story_doc["_id"]}) or story_doc
+        story_doc = stories_col.find_one({
+            "_id": story_doc["_id"],
+            "workspaceId": _workspace_id_for_user(user_doc),
+        }) or story_doc
         story_id = _doc_public_id(story_doc, "storyId")
         pitches_col.update_one(
             {"_id": pitch["_id"], "workspaceId": _workspace_id_for_user(user_doc), "status": PITCH_STATUS_SELECTED},
             {"$set": {"selectedStoryId": story_id, "updatedAt": _now_iso()}},
         )
-        updated = pitches_col.find_one({"_id": pitch["_id"]}) or updated
+        updated = pitches_col.find_one({
+            "_id": pitch["_id"],
+            "workspaceId": _workspace_id_for_user(user_doc),
+        }) or updated
         payload["pitch"] = _pitch_to_api(updated)
         payload["story"] = _story_to_api(story_doc)
         if invite_warning:
@@ -5379,7 +5367,7 @@ def api_delete_pitch(pitch_id: str):
     })
     if result.deleted_count == 0:
         return jsonify({"ok": False, "error": "Pitch access or status changed. Refresh and try again."}), 409
-    activity_col.insert_one({
+    _record_activity({
         "workspaceId": _workspace_id_for_user(user_doc),
         "entityType": "pitch",
         "entityId": _doc_public_id(pitch, "pitchId"),
@@ -5464,8 +5452,14 @@ def api_update_feedback(feedback_id: str):
         return jsonify({"ok": False, "error": "Feedback text is required."}), 400
     if len(text) > 4000:
         return jsonify({"ok": False, "error": "Feedback must be 4000 characters or fewer."}), 400
-    feedback_col.update_one({"_id": oid}, {"$set": {"text": text, "updatedAt": datetime.now(timezone.utc)}})
-    updated = feedback_col.find_one({"_id": oid, "workspaceId": _workspace_id_for_user(user_doc)}) or {}
+    workspace_id = _workspace_id_for_user(user_doc)
+    result = feedback_col.update_one(
+        {"_id": oid, "workspaceId": workspace_id},
+        {"$set": {"text": text, "updatedAt": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count != 1:
+        return jsonify({"ok": False, "error": "Feedback changed in another session. Refresh and try again."}), 409
+    updated = feedback_col.find_one({"_id": oid, "workspaceId": workspace_id}) or {}
     return jsonify({"ok": True, "feedback": _feedback_to_api(updated)})
 
 
@@ -5482,7 +5476,12 @@ def api_delete_feedback(feedback_id: str):
     _, error, status = _require_feedback_entity(doc.get("entityType"), doc.get("entityId"), user_doc)
     if error:
         return jsonify({"ok": False, "error": error}), status
-    feedback_col.delete_one({"_id": oid})
+    result = feedback_col.delete_one({
+        "_id": oid,
+        "workspaceId": _workspace_id_for_user(user_doc),
+    })
+    if result.deleted_count != 1:
+        return jsonify({"ok": False, "error": "Feedback changed in another session. Refresh and try again."}), 409
     return jsonify({"ok": True})
 
 
@@ -5757,7 +5756,21 @@ def api_respond_story_invitation(story_id: str, decision: str):
         )
     if result.modified_count == 0:
         return jsonify({"ok": False, "error": "This invitation is no longer available."}), 409
-    activity_col.insert_one({"workspaceId": _workspace_id_for_user(user_doc), "entityType": "story", "entityId": _doc_public_id(story, "storyId"), "entityTitle": story.get("title") or story.get("storyTitle") or "Untitled story", "eventType": f"invitation_{'accepted' if decision == 'accept' else 'declined'}", "text": f"{_user_display_name(user_doc)} {'joined the story as a co-author' if decision == 'accept' else 'declined the co-author invitation'}.", "actorId": str(user_doc.get("_id")), "actorEmail": email, "actorName": _user_display_name(user_doc), "createdAt": datetime.now(timezone.utc)})
+    _record_activity({
+        "workspaceId": _workspace_id_for_user(user_doc),
+        "entityType": "story",
+        "entityId": _doc_public_id(story, "storyId"),
+        "entityTitle": story.get("title") or story.get("storyTitle") or "Untitled story",
+        "eventType": f"invitation_{'accepted' if decision == 'accept' else 'declined'}",
+        "text": (
+            f"{_user_display_name(user_doc)} "
+            f"{'joined the story as a co-author' if decision == 'accept' else 'declined the co-author invitation'}."
+        ),
+        "actorId": str(user_doc.get("_id")),
+        "actorEmail": email,
+        "actorName": _user_display_name(user_doc),
+        "createdAt": datetime.now(timezone.utc),
+    })
     updated = stories_col.find_one({"_id": story["_id"], "workspaceId": _workspace_id_for_user(user_doc)}) or {}
     return jsonify({"ok": True, "decision": decision, "story": _story_to_api(updated) if decision == "accept" else None})
 
@@ -5775,6 +5788,10 @@ def api_article_records():
     search = str(request.args.get("search") or "").strip()
     section = str(request.args.get("section") or "").strip()
     sort = str(request.args.get("sort") or "desc").strip().lower()
+    if len(search) > 200:
+        return jsonify({"ok": False, "error": "Search must be 200 characters or fewer."}), 400
+    if len(section) > MAX_PITCH_SECTION_LENGTH:
+        return jsonify({"ok": False, "error": f"Section must be {MAX_PITCH_SECTION_LENGTH} characters or fewer."}), 400
     sort_direction = ASCENDING if sort == "asc" else -1
 
     query = {}
@@ -6346,7 +6363,11 @@ def api_extract():
     if not workspace or not publication_host:
         return jsonify({"ok": False, "error": "Configure a valid workspace publication URL before extracting articles."}), 409
 
-    limited, retry_after = _consume_extraction_rate_limit(user_doc)
+    try:
+        limited, retry_after = _consume_extraction_rate_limit(user_doc)
+    except Exception:
+        app.logger.warning("Article extraction rate limit could not be checked.", exc_info=True)
+        return jsonify({"ok": False, "error": "Article extraction is temporarily unavailable."}), 503
     if limited:
         response = jsonify({"ok": False, "error": "Too many article extraction requests. Please wait and try again."})
         response.headers["Retry-After"] = str(retry_after)
@@ -6418,10 +6439,14 @@ def api_save():
         return jsonify({"ok": False, "error": "This extraction token is invalid. Run extraction again."}), 400
 
     workspace_id = _workspace_id_for_user(user_doc)
+    try:
+        ticket_auth_version = int(ticket.get("authVersion") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "This extraction token is invalid. Run extraction again."}), 400
     if (
         str(ticket.get("workspaceId") or "") != workspace_id
         or str(ticket.get("userId") or "") != str(user_doc.get("_id") or "")
-        or int(ticket.get("authVersion") or 0) != _auth_version_for_doc(user_doc)
+        or ticket_auth_version != _auth_version_for_doc(user_doc)
     ):
         return jsonify({"ok": False, "error": "This extraction does not belong to your current session."}), 403
 

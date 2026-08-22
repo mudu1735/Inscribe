@@ -45,8 +45,16 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const moduleId = id.replaceAll("\\", "/");
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(moduleId)) return "react-vendor";
+          if (/\/node_modules\/(framer-motion|motion-dom|motion-utils)\//.test(moduleId)) return "motion-vendor";
+          if (moduleId.includes("/node_modules/lucide-react/")) return "icons-vendor";
+          return undefined;
+        },
+      },
       onwarn(warning, warn) {
         if (
           warning.code === "MODULE_LEVEL_DIRECTIVE" &&

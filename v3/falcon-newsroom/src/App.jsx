@@ -1,7 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { ResponsiveContainer } from "recharts";
 import AnimatedDropdown from "./components/ui/animated-dropdown";
 import V4LandingPage from "./V4LandingPage";
 
@@ -1025,6 +1024,10 @@ function asText(value) {
   return String(value).trim();
 }
 
+function normalizeSectionLabel(value) {
+  return asText(value).replace(/\s+/g, " ");
+}
+
 function uniqueTextValues(values) {
   const seen = new Set();
   const result = [];
@@ -1537,18 +1540,47 @@ function isValidHttpUrl(value) {
   }
 }
 
+function safeResourceUrl(value, { allowRelative = false } = {}) {
+  const url = asText(value);
+  if (!url || /[\\\u0000-\u001f\u007f]/.test(url)) return "";
+  if (allowRelative && url.startsWith("/") && !url.startsWith("//")) {
+    try {
+      const resolved = new URL(url, window.location.origin);
+      return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}${resolved.hash}` : "";
+    } catch {
+      return "";
+    }
+  }
+  return isValidHttpUrl(url) ? url : "";
+}
+
+function safeInternalRedirect(value, fallback = "/dashboard") {
+  const target = asText(value);
+  if (!target || /[\\\u0000-\u001f\u007f]/.test(target)) return fallback;
+  try {
+    const resolved = new URL(target, window.location.origin);
+    if (resolved.origin !== window.location.origin) return fallback;
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
 function storyDocIsOpenable(story) {
   return storyAttachmentItems(story).length > 0;
 }
 
 function normalizeStoryAttachment(story, attachment) {
   if (!attachment) return null;
-  if (attachment?.type === "drive" && attachment.url) {
+  const attachmentUrl = attachment?.type === "file"
+    ? safeResourceUrl(attachment.url, { allowRelative: true })
+    : safeResourceUrl(attachment.webViewLink || attachment.url);
+  if (attachment?.type === "drive" && attachmentUrl) {
     return {
       id: attachment.id || attachment.fileId || attachment.url,
       type: "drive",
       provider: "google-drive",
-      url: attachment.webViewLink || attachment.url,
+      url: attachmentUrl,
       name: attachment.name || story?.title || "Drive file",
       detail: attachment.typeLabel || workAttachmentTypeLabel(attachment),
       permissionStatus: attachment.permissionStatus || "not_shared",
@@ -1556,11 +1588,11 @@ function normalizeStoryAttachment(story, attachment) {
       copyable: true,
     };
   }
-  if (attachment?.type === "file" && attachment.url) {
+  if (attachment?.type === "file" && attachmentUrl) {
     return {
       id: attachment.id || attachment.url,
       type: "file",
-      url: attachment.url,
+      url: attachmentUrl,
       name: workAttachmentTitle(story, attachment),
       detail: workAttachmentTypeLabel(attachment),
       copyable: false,
@@ -2260,7 +2292,12 @@ function nextPitchId(pitches, currentId) {
 
 function initialPitchDetailId() {
   const match = window.location.pathname.match(/^\/pitches\/([^/]+)/i);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 function pitchDetailPath(id) {
@@ -2416,9 +2453,10 @@ function StatusBadge({ children, tone = "neutral" }) {
   return <span className={cx("inline-flex rounded-full border px-2.5 py-1 text-xs", styles[tone])}>{children}</span>;
 }
 
-function Button({ children, icon, variant = "primary", className = "", onClick, disabled = false, type = "button" }) {
+function Button({ children, icon, variant = "primary", className = "", onClick, disabled = false, type = "button", ...buttonProps }) {
   return (
     <button
+      {...buttonProps}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -2493,6 +2531,143 @@ function AnimatedOptionDropdown({ value, options, onChange, className = "" }) {
   );
 }
 
+function SectionCombobox({ value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const inputId = useId();
+  const listId = useId();
+  const sectionOptions = useMemo(
+    () => uniqueTextValues([...options.map(normalizeSectionLabel), value]),
+    [options, value]
+  );
+  const normalizedQuery = normalizeSectionLabel(query);
+  const filteredOptions = useMemo(() => {
+    const search = normalizedQuery.toLowerCase();
+    return sectionOptions.filter((option) => !search || option.toLowerCase().includes(search));
+  }, [normalizedQuery, sectionOptions]);
+  const exactOption = sectionOptions.find((option) => option.toLowerCase() === normalizedQuery.toLowerCase());
+  const canCreate = Boolean(normalizedQuery) && !exactOption && normalizedQuery.toLowerCase() !== "all sections";
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (!containerRef.current?.contains(event.target)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  const selectSection = (section) => {
+    const nextSection = normalizeSectionLabel(section);
+    if (!nextSection) return;
+    onChange(nextSection);
+    setOpen(false);
+    setQuery("");
+  };
+
+  const openMenu = () => {
+    if (!open) setQuery("");
+    setOpen(true);
+  };
+
+  return (
+    <div className="block max-w-xs">
+      <label htmlFor={inputId} className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</label>
+      <div ref={containerRef} className={cx("relative", open && "z-20")}>
+        <div className="relative">
+          <input
+            ref={inputRef}
+            id={inputId}
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-autocomplete="list"
+            value={open ? query : value}
+            onFocus={openMenu}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setOpen(false);
+                setQuery("");
+              }
+              if (event.key === "Enter" && normalizedQuery) {
+                const nextSection = exactOption || (canCreate ? normalizedQuery : "");
+                if (!nextSection) return;
+                event.preventDefault();
+                selectSection(nextSection);
+              }
+            }}
+            maxLength={80}
+            placeholder={open ? "Search or create a section…" : "Choose a section"}
+            className="h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 pr-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18] focus:ring-2 focus:ring-white/10"
+          />
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={open ? "Close section menu" : "Open section menu"}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              if (open) {
+                setOpen(false);
+                setQuery("");
+              } else {
+                inputRef.current?.focus();
+                openMenu();
+              }
+            }}
+            className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-zinc-500 transition hover:text-zinc-200"
+          >
+            <Icon name="chevron" className={cx("h-4 w-4 transition-transform", open && "rotate-180")} />
+          </button>
+        </div>
+
+        {open ? (
+          <div id={listId} role="listbox" className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-64 overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-950 p-1 shadow-2xl shadow-black/40">
+            {filteredOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="option"
+                aria-selected={option.toLowerCase() === String(value || "").toLowerCase()}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectSection(option)}
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-300 transition hover:bg-white/[0.06] hover:text-zinc-50"
+              >
+                {option}
+              </button>
+            ))}
+            {canCreate ? (
+              <button
+                type="button"
+                role="option"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectSection(normalizedQuery)}
+                className="mt-1 flex w-full items-center gap-2 border-t border-white/[0.08] px-3 py-2.5 text-left text-sm text-zinc-200 transition hover:bg-white/[0.06]"
+              >
+                <Icon name="plus" className="h-4 w-4 text-emerald-300" />
+                <span>Create “{normalizedQuery}”</span>
+              </button>
+            ) : null}
+            {!filteredOptions.length && !canCreate ? (
+              <p className="px-3 py-2 text-sm text-zinc-600">Type a section name to create it.</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 
 function initialAppPage() {
   const pathPage = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, "");
@@ -2512,7 +2687,12 @@ function storyDetailPath(id) {
 
 function initialStoryDetailId() {
   const match = window.location.pathname.match(/^\/stories\/([^/]+)/i);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 function pushAppPath(path) {
@@ -2526,98 +2706,6 @@ function isLandingRoute() {
   const path = window.location.pathname.toLowerCase().replace(/\/+$/, "") || "/";
   return path === "/" || path === "/landing";
 }
-
-function V3LandingPage() {
-  const reduceMotion = useReducedMotion();
-  const revealInitial = reduceMotion ? false : { opacity: 0, y: 22 };
-  const revealTransition = { duration: 0.7, ease: [0.16, 1, 0.3, 1] };
-
-  const productScreens = [
-    {
-      id: "workflow",
-      title: "Every story knows what comes next.",
-      body: "Editors can scan active work by review state, open the right draft, and move reporting from assignment through teacher approval.",
-      image: "/landing/product-stories.png",
-      alt: "Inscribe Stories view showing active drafts organized into In Progress, Ready for Review, and Teacher Approval columns.",
-    },
-    {
-      id: "records",
-      title: "Reporting records that outlast the deadline.",
-      body: "Published work stays searchable by title, author, section, tag, and interviewee, giving the next reporter a useful newsroom archive.",
-      image: "/landing/product-articles.png",
-      alt: "Inscribe Articles Database showing searchable publication records and article details.",
-    },
-  ];
-
-  return (
-    <main className="v3-landing">
-      <header className="v3-landing-header">
-        <nav className="v3-landing-nav" aria-label="Main navigation">
-          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
-            <span aria-hidden="true">I</span>
-            <strong>Inscribe</strong>
-          </a>
-          <div className="v3-nav-sections">
-            <a className="v3-nav-link" href="#product">Product</a>
-            <a className="v3-nav-link" href="#workflow">Workflow</a>
-            <a className="v3-nav-link" href="#records">Records</a>
-          </div>
-          <div className="v3-nav-actions">
-            <a className="v3-login v3-nav-link" href="/login">Log in</a>
-            <a className="v3-signup" href="/signup">Sign up</a>
-          </div>
-        </nav>
-      </header>
-
-      <section id="product" className="v3-hero" aria-labelledby="v3-landing-title">
-        <div className="v3-content">
-          <motion.div className="v3-heading-row v3-heading-row--hero" initial={revealInitial} animate={{ opacity: 1, y: 0 }} transition={revealTransition}>
-            <h1 id="v3-landing-title" className="v3-hero-title">
-              <span>The most complete</span>
-              <span>journalism workflow tool.</span>
-            </h1>
-            <p>Everything you need in one unified workspace.</p>
-          </motion.div>
-          <motion.figure className="v3-product-shot" initial={reduceMotion ? false : { opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ ...revealTransition, delay: reduceMotion ? 0 : 0.12 }}>
-            <img src="/landing/product-dashboard.png" alt="Inscribe dashboard showing publication traffic, active stories, deadlines, and editorial activity." />
-          </motion.figure>
-        </div>
-      </section>
-
-      {productScreens.map((screen) => (
-        <section id={screen.id} className="v3-landing-section" aria-labelledby={`${screen.id}-title`} key={screen.id}>
-          <div className="v3-content">
-            <motion.div className="v3-heading-row" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.45 }} transition={revealTransition}>
-              <h2 id={`${screen.id}-title`}>{screen.title}</h2>
-              <p>{screen.body}</p>
-            </motion.div>
-            <motion.figure className="v3-product-shot" initial={revealInitial} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.18 }} transition={revealTransition}>
-              <img src={screen.image} alt={screen.alt} loading="lazy" />
-            </motion.figure>
-          </div>
-        </section>
-      ))}
-
-      <section className="v3-school" aria-labelledby="v3-school-title">
-        <div className="v3-content v3-heading-row">
-          <h2 id="v3-school-title">A calmer editorial desk for your school.</h2>
-          <p>Give writers, editors, and advisers one shared view of the work without replacing the tools your publication already trusts.</p>
-        </div>
-      </section>
-
-      <footer className="v3-footer">
-        <div className="v3-content">
-          <a href="/" className="v3-landing-mark" aria-label="Inscribe home">
-            <span aria-hidden="true">I</span>
-            <strong>Inscribe</strong>
-          </a>
-          <small>&copy; 2026 Inscribe</small>
-        </div>
-      </footer>
-    </main>
-  );
-}
-
 
 function AppShell() {
   const [page, setPage] = useState(initialAppPage);
@@ -2646,7 +2734,10 @@ function AppShell() {
   const availableNavSections = navSectionsForItems(availableNavItems);
 
   useEffect(() => {
-    const syncLocationPath = () => setLocationPath(window.location.pathname);
+    const syncLocationPath = () => {
+      setLocationPath(window.location.pathname);
+      setPage(initialAppPage());
+    };
     window.addEventListener("popstate", syncLocationPath);
     window.addEventListener("falcon-route-change", syncLocationPath);
     return () => {
@@ -3090,11 +3181,11 @@ function AppShell() {
 
   const createStory = async (draft) => {
     const title = asText(draft.title);
-    const section = asText(draft.section);
+    const section = normalizeSectionLabel(draft.section);
     const summary = asText(draft.summary);
     const deadline = asText(draft.deadline);
-    if (!title || !STORY_FILTER_SECTIONS.includes(section) || section === "All sections") {
-      setToast("Add a title and valid section before creating the story.");
+    if (!title || !section || section.toLowerCase() === "all sections") {
+      setToast("Add a title and section before creating the story.");
       return false;
     }
     try {
@@ -3378,7 +3469,7 @@ function OwnerWorkspacesPage({ user, csrfToken = "", signingOut = false, onSignO
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not open workspace.");
-      window.location.assign(payload.redirect || "/dashboard");
+      window.location.assign(safeInternalRedirect(payload.redirect));
     } catch (error) {
       setSurfaceError(error instanceof Error ? error.message : "Could not open workspace.");
       setBusyId("");
@@ -4165,6 +4256,13 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
     () => pitches.filter((pitch) => matchesPitchFilters(pitch, query, section, statusFilter)),
     [pitches, query, section, statusFilter]
   );
+  const pitchSectionOptions = useMemo(
+    () => uniqueTextValues([
+      ...PITCH_SECTIONS.filter((option) => option !== "All sections"),
+      ...pitches.map((pitch) => pitch.section),
+    ]),
+    [pitches]
+  );
   const writerGroups = useMemo(() => groupActivePitchesByWriter(roundPitches), [roundPitches]);
   const detailPitch = pitches.find((pitch) => pitch.id === detailPitchId) || null;
   const currentRound = rounds.find((round) => round.id === selectedRoundId) || null;
@@ -4396,7 +4494,8 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
 
   const createPitch = async (draft) => {
     const title = draft.title.trim();
-    if (!title) return;
+    const section = normalizeSectionLabel(draft.section);
+    if (!title || !section) return;
     try {
       const response = await fetch(`${API_BASE}/api/pitches`, {
         method: "POST",
@@ -4410,7 +4509,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
           roundId: selectedRoundId,
           title,
           angle: draft.angle.trim() || "Angle to be developed.",
-          section: draft.section,
+          section,
           notes: draft.notes.trim(),
         }),
       });
@@ -4577,7 +4676,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
           </div>
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
             <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, or section" />
-            <AnimatedOptionDropdown value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} className="w-full" />
+            <AnimatedOptionDropdown value={section} onChange={handleSectionChange} options={["All sections", ...pitchSectionOptions]} className="w-full" />
           </div>
           <div>
             <div className="flex gap-5 overflow-x-auto border-b border-white/[0.08]">
@@ -4633,6 +4732,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
           <PitchCreateModal
             onClose={() => setCreateOpen(false)}
             onCreate={createPitch}
+            sections={pitchSectionOptions}
           />
         )}
         {roundCreateOpen && (
@@ -5311,7 +5411,7 @@ function PitchRoundCreateModal({ submitting = false, onClose, onCreate }) {
   );
 }
 
-function PitchCreateModal({ onClose, onCreate }) {
+function PitchCreateModal({ onClose, onCreate, sections = [] }) {
   const [draft, setDraft] = useState({
     title: "",
     angle: "",
@@ -5350,14 +5450,11 @@ function PitchCreateModal({ onClose, onCreate }) {
         </div>
 
         <div className="grid gap-4">
-          <label className="block max-w-xs">
-            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
-            <AnimatedOptionDropdown
-              value={draft.section}
-              options={PITCH_SECTIONS.filter((option) => option !== "All sections")}
-              onChange={(value) => updateDraft("section", value)}
-            />
-          </label>
+          <SectionCombobox
+            value={draft.section}
+            options={sections}
+            onChange={(value) => updateDraft("section", value)}
+          />
 
           <label className="block">
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
@@ -5573,6 +5670,13 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
 
   const scopedStories = useMemo(() => stories.filter((story) => storyVisibleToUser(story, currentUser)), [stories, currentUser]);
   const activeStories = useMemo(() => scopedStories.filter(isActiveStory), [scopedStories]);
+  const storySectionOptions = useMemo(
+    () => uniqueTextValues([
+      ...STORY_FILTER_SECTIONS.filter((option) => option !== "All sections"),
+      ...stories.map((story) => story.section),
+    ]),
+    [stories]
+  );
   const visibleStories = useMemo(
     () =>
       activeStories.filter((story) => {
@@ -5653,7 +5757,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
       >
         <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
           <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
-          <AnimatedOptionDropdown value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="w-full" />
+          <AnimatedOptionDropdown value={sectionFilter} onChange={setSectionFilter} options={["All sections", ...storySectionOptions]} className="w-full" />
         </section>
 
       {loading ? (
@@ -5682,6 +5786,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
         {createOpen ? (
           <StoryCreateModal
             onClose={() => setCreateOpen(false)}
+            sections={storySectionOptions}
             onCreate={async (draft) => {
               const created = await createStory(draft);
               if (created) setCreateOpen(false);
@@ -5694,7 +5799,7 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
   );
 }
 
-function StoryCreateModal({ onClose, onCreate }) {
+function StoryCreateModal({ onClose, onCreate, sections = [] }) {
   const [draft, setDraft] = useState({
     title: "",
     section: "News",
@@ -5760,14 +5865,11 @@ function StoryCreateModal({ onClose, onCreate }) {
             />
           </label>
 
-          <label className="block max-w-xs">
-            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
-            <AnimatedOptionDropdown
-              value={draft.section}
-              options={STORY_FILTER_SECTIONS.filter((option) => option !== "All sections")}
-              onChange={(value) => updateDraft("section", value)}
-            />
-          </label>
+          <SectionCombobox
+            value={draft.section}
+            options={sections}
+            onChange={(value) => updateDraft("section", value)}
+          />
 
           <label className="block">
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Summary</span>

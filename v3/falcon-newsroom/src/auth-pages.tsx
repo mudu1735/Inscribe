@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import LoginCardSection, {
   SignUpCardSection,
+  safeRedirectTarget,
 } from "@/components/ui/login-signup";
 
 type AuthMode = "login" | "signup";
@@ -29,22 +30,22 @@ export default function AuthPages() {
   }, []);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
 
     fetch(`${API_BASE}/api/auth/session`, {
       headers: { "Accept": "application/json" },
       credentials: "include",
+      signal: controller.signal,
     })
-      .then((response) => response.json())
-      .then((payload) => {
-        if (!active || !payload?.authenticated) return;
-        window.location.replace(redirectForRole(payload.user?.role));
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.authenticated) return;
+        const requestedNext = new URLSearchParams(window.location.search).get("next") || "";
+        window.location.replace(safeRedirectTarget(requestedNext, redirectForRole(payload.user?.role)));
       })
       .catch(() => {});
 
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, []);
 
   const handleModeChange = (nextMode: AuthMode) => {

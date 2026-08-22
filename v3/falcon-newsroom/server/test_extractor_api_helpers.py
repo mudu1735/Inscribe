@@ -4,7 +4,7 @@ import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from article_extractor import ArticleExtractionError, normalize_publication_host
 
@@ -130,6 +130,7 @@ class ExtractorApiHelperTests(unittest.TestCase):
         loaded = load_functions(
             {"_safe_http_url", "_workspace_extraction_host"},
             {
+                "unquote": unquote,
                 "urlparse": urlparse,
                 "normalize_publication_host": normalize_publication_host,
                 "ArticleExtractionError": ArticleExtractionError,

@@ -1,9 +1,10 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const root = resolve(import.meta.dirname, "..");
+import { pythonCommand, root } from "./python-command.mjs";
+
 const healthUrl = "http://127.0.0.1:5003/api/health";
 const requiredCapabilities = [
   "admin-users",
@@ -18,11 +19,6 @@ const requiredCapabilities = [
   "workspace-settings",
   "owner-workspaces",
 ];
-const venvPythonCandidates = process.platform === "win32"
-  ? [resolve(root, "..", "..", "venv", "Scripts", "python.exe")]
-  : [resolve(root, "..", "..", "venv", "bin", "python"), resolve(root, "..", "..", "venv", "bin", "python3")];
-const venvPython = venvPythonCandidates.find((candidate) => existsSync(candidate));
-const pythonCommand = process.env.FALCON_V3_PYTHON || venvPython || "python";
 const backendBuildId = createHash("sha256")
   .update(readFileSync(resolve(root, "server", "auth_app.py")))
   .update(readFileSync(resolve(root, "server", "article_extractor.py")))
@@ -160,7 +156,7 @@ if (hasRequiredCapabilities(initialHealth)) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
   }
   console.log("[v3 dev] Starting v3 auth backend on 127.0.0.1:5003...");
-  authProcess = spawnChild(pythonCommand, ["-B", "-m", "server.auth_app"]);
+  authProcess = spawnChild(pythonCommand, ["-B", "-m", "server.auth_app"], { shell: false });
   authProcess.on("exit", (code) => {
     if (!shuttingDown && code !== 0) {
       console.error(`[v3 dev] Auth backend exited with code ${code}.`);
@@ -171,5 +167,5 @@ if (hasRequiredCapabilities(initialHealth)) {
 }
 
 console.log("[v3 dev] Starting Vite on 127.0.0.1:5173...");
-viteProcess = spawnChild("npx", ["vite", "--host", "127.0.0.1", "--port", "5173", "--strictPort"]);
+viteProcess = spawnChild("npm", ["run", "dev:vite"]);
 viteProcess.on("exit", (code) => shutdown(code || 0));

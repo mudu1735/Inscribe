@@ -60,7 +60,8 @@ Before starting locally, install or have access to:
 
 1. Python 3.12 or newer. The repository declares 3.12 in `.python-version`, but
    Python 3.14 should be usable if the pinned dependencies install successfully.
-2. Node.js 20 or newer and npm.
+2. Node.js 20.19.x or Node.js 22.12+ and npm, matching Vite's supported
+   runtime range.
 3. A MongoDB deployment, either MongoDB Atlas or a local MongoDB server. Use a
    separate local database; the application creates indexes and performs startup
    migrations.
@@ -86,8 +87,7 @@ python -m pip install -r v3/falcon-newsroom/requirements.txt
 cd v3/falcon-newsroom
 npm ci
 
-# The development helper's automatic venv path is Windows-specific.
-FALCON_V3_PYTHON="$PWD/../../venv/bin/python" npm run dev
+npm run dev
 ```
 
 Then open <http://127.0.0.1:5173>.
@@ -169,7 +169,7 @@ Run both services:
 
 ```bash
 cd v3/falcon-newsroom
-FALCON_V3_PYTHON="$PWD/../../venv/bin/python" npm run dev
+npm run dev
 ```
 
 Run the services separately when debugging:
@@ -196,9 +196,9 @@ python -m unittest discover -s server -p 'test_*.py' -v
 python -m pip check
 ```
 
-`npm test` runs the static source-contract checks, TypeScript checking, and a
-production Vite build. The Python tests focus on extraction, security helpers,
-workspace isolation, and workflow transitions.
+`npm test` runs the static source-contract checks, TypeScript checking, a
+production Vite build, and all Python tests. The Python test suite focuses on
+extraction, security helpers, workspace isolation, and workflow transitions.
 
 ## Security and deployment notes
 

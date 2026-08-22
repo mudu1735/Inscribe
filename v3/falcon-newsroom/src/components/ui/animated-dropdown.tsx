@@ -10,7 +10,7 @@ import React from 'react'
  * @license: MIT
  * @website: https://emerald-ui.com
  */
-import { useState, useRef, FC, ReactNode } from 'react'
+import { useState, useRef, FC, ReactNode, useId } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { clsx } from 'clsx'
@@ -80,6 +80,54 @@ export default function AnimatedDropdown({
   ariaLabel = 'Select an option',
 }: AnimatedDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const listboxId = useId()
+
+  const focusOption = (position: 'first' | 'last' | 'selected' = 'selected') => {
+    window.requestAnimationFrame(() => {
+      const options: HTMLElement[] = menuRef.current
+        ? Array.from(menuRef.current.querySelectorAll('[role="option"]')) as HTMLElement[]
+        : []
+      if (!options.length) return
+      const selectedIndex = options.findIndex((option) => option.getAttribute('aria-selected') === 'true')
+      const index = position === 'first' ? 0 : position === 'last' ? options.length - 1 : Math.max(0, selectedIndex)
+      options[index]?.focus()
+    })
+  }
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setIsOpen(false)
+        triggerRef.current?.focus()
+        return
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      const options: HTMLElement[] = menuRef.current
+        ? Array.from(menuRef.current.querySelectorAll('[role="option"]')) as HTMLElement[]
+        : []
+      if (!options.length) return
+      event.preventDefault()
+      const currentIndex = options.indexOf(document.activeElement as HTMLElement)
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? options.length - 1
+          : event.key === 'ArrowDown'
+            ? (Math.max(-1, currentIndex) + 1) % options.length
+            : (currentIndex <= 0 ? options.length : currentIndex) - 1
+      options[nextIndex]?.focus()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen])
+
+  React.useEffect(() => {
+    if (disabled) setIsOpen(false)
+  }, [disabled])
 
   return (
     <OnClickOutside onClickOutside={() => setIsOpen(false)}>
@@ -88,13 +136,21 @@ export default function AnimatedDropdown({
         className={cn('group relative block w-full', className)}
       >
         <Button
+          ref={triggerRef}
           variant='outline'
           type='button'
           aria-haspopup='listbox'
           aria-expanded={isOpen}
+          aria-controls={listboxId}
           aria-label={ariaLabel}
           disabled={disabled}
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => setIsOpen((open) => !open)}
+          onKeyDown={(event) => {
+            if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return
+            event.preventDefault()
+            setIsOpen(true)
+            focusOption(event.key === 'ArrowUp' ? 'last' : 'selected')
+          }}
           className='h-11 w-full justify-between gap-2 rounded-xl border-white/[0.08] bg-white/[0.035] px-3 text-zinc-200 hover:bg-white/[0.06] hover:text-zinc-50 focus-visible:ring-white/20 focus-visible:ring-offset-0'
         >
           <span className='truncate'>{text}</span>
@@ -109,7 +165,10 @@ export default function AnimatedDropdown({
         <AnimatePresence>
           {isOpen && (
             <motion.div
+              ref={menuRef}
+              id={listboxId}
               role='listbox'
+              aria-label={ariaLabel}
               initial={{ opacity: 0, y: -10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.95 }}
@@ -147,12 +206,12 @@ export default function AnimatedDropdown({
                   )
                   if (!showDelete) {
                     return (
-                      <motion.a
-                        key={index}
-                        href={item.link}
+                      <motion.button
+                        key={item.value || `${item.name}-${index}`}
+                        type='button'
                         role='option'
-                        onClick={(event) => {
-                          if (item.link === '#') event.preventDefault()
+                        aria-selected={item.name === text}
+                        onClick={() => {
                           onSelect?.(item)
                           setIsOpen(false)
                         }}
@@ -160,16 +219,15 @@ export default function AnimatedDropdown({
                           hidden: { opacity: 0, x: -20 },
                           visible: { opacity: 1, x: 0 },
                         }}
-                        className={cn('block w-full truncate px-3 py-2 text-sm', itemClassName)}
+                        className={cn('block w-full truncate px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20', itemClassName)}
                       >
                         {item.name}
-                      </motion.a>
+                      </motion.button>
                     )
                   }
                   return (
                     <motion.div
-                      key={index}
-                      role='option'
+                      key={item.value || `${item.name}-${index}`}
                       variants={{
                         hidden: { opacity: 0, x: -20 },
                         visible: { opacity: 1, x: 0 },
@@ -178,11 +236,13 @@ export default function AnimatedDropdown({
                     >
                       <button
                         type='button'
+                        role='option'
+                        aria-selected={item.name === text}
                         onClick={() => {
                           onSelect?.(item)
                           setIsOpen(false)
                         }}
-                        className='min-w-0 flex-1 truncate px-3 py-2 text-left text-sm'
+                        className='min-w-0 flex-1 truncate px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20'
                       >
                         {item.name}
                       </button>

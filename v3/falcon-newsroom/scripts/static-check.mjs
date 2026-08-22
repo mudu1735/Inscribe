@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 const app = await readFile("src/App.jsx", "utf8");
+const landing = await readFile("src/V4LandingPage.jsx", "utf8");
 const css = await readFile("src/styles.css", "utf8");
 const main = await readFile("src/main.jsx", "utf8");
 const authPages = await readFile("src/auth-pages.tsx", "utf8");
@@ -13,14 +14,12 @@ const v3Backend = await readFile("server/auth_app.py", "utf8");
 const articleExtractor = await readFile("server/article_extractor.py", "utf8");
 const devScript = await readFile("scripts/dev.mjs", "utf8");
 const requirements = await readFile("requirements.txt", "utf8");
+const viteConfigObject = (await import("../vite.config.js")).default;
+const vercelConfigObject = JSON.parse(vercelConfig);
 
 const expectedAppSnippets = [
   "Inscribe",
-  "V3LandingPage",
-  "product-dashboard.png",
-  "journalism workflow tool.",
-  "product-stories.png",
-  "A calmer editorial desk for your school.",
+  "V4LandingPage",
   "Pitch Board",
   "PITCH_ROUND_STATUSES",
   "New round",
@@ -77,7 +76,6 @@ const expectedAppSnippets = [
   "Story pipeline",
   "Analytics",
   "QuickCreateModal",
-  "ResponsiveContainer",
   "runPrototypeTests",
   "normalizeArticleRecord",
   "/api/article-records",
@@ -189,6 +187,17 @@ for (const snippet of expectedAppSnippets) {
   }
 }
 
+for (const snippet of [
+  "journalism workflow tool",
+  "/landing/dashboard-hero.webp",
+  "/landing/article-analytics.jpg",
+  "Featured article records",
+]) {
+  if (!landing.includes(snippet)) {
+    throw new Error(`Missing expected V4LandingPage.jsx snippet: ${snippet}`);
+  }
+}
+
 for (const snippet of ["Refresh</Button>", "Other interviewees in this article", "Why this structure works better", "Faculty / Staff", "Open pipeline", "+9 new", "+3 this week", "label: \"Pipeline\"", "label: \"Assignments\"", "label: \"Articles\"", "label: \"Interviewees\"", "Move to Development", "out of 2", "No pitches here", "Save Feedback", "PitchDetailBreadcrumb", "{ id: \"extractor\"", "ExtractorPage", "Mock extraction complete", "Quote evidence", "Confidence", "Review extracted interviewees", "Remove selected", "Deselect all", "Select all", "interviewee found.", "linked</StatusBadge>", "StoryQueueMetric", "STORY_FILTER_EDITORS", "editorFilter", "MiniStat", ">Owner</th>", ">Doc</th>", "StatusBadge tone={storyStatusTone", "{story.section} / Last edited", "fmt(story.wordCount)} words", "story.sourceCount} sources", "story.revisionCount} revisions", "withPitchActivity", "Draft last edited", "left feedback on this pitch", "No feedback yet.", "onAddFeedback", "onEditFeedback", "onDeleteFeedback", "writers={[accountDisplayName(currentUser)]}", "Approved pitch and removed it from the active board.", "Submit becomes available on stories assigned to you.", "Visible to the story team.", "Submit story", "Will share on submit", "Auto-share failed", "Shared with editors"]) {
   if (app.includes(snippet)) {
     throw new Error(`Found removed App.jsx snippet: ${snippet}`);
@@ -201,7 +210,7 @@ for (const snippet of ["Publishing setup", "Your account", "{ id: \"admin\", lab
   }
 }
 
-for (const snippet of ["@tailwind base", "@tailwind components", "@tailwind utilities", ".v3-landing", "oklch("]) {
+for (const snippet of ["@tailwind base", "@tailwind components", "@tailwind utilities", "oklch("]) {
   if (!css.includes(snippet)) {
     throw new Error(`Missing expected CSS snippet: ${snippet}`);
   }
@@ -220,7 +229,9 @@ const expectedAuthSnippets = [
   "requestedNext",
   "nextRedirect || serverRedirect",
   "AUTH_BUFFER_MS",
-  "Continue with Google",
+  "GOOGLE_AUTH_ENABLED = false",
+  "Sign in with Google",
+  "Sign up with Google",
   "Create your account",
   "Welcome back",
   "First name",
@@ -258,13 +269,13 @@ for (const snippet of ["http://127.0.0.1:5003", "proxy", "port: 5173", "strictPo
   }
 }
 
-for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:auth", "python -B -m server.auth_app", "--port 5173 --strictPort"]) {
+for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:auth", "test:backend", "run-python.mjs", "--port 5173 --strictPort"]) {
   if (!packageJson.includes(snippet)) {
     throw new Error(`Missing v3 backend npm script: ${snippet}`);
   }
 }
 
-for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "article-date-sort-v2", "backendBuildId", "payload?.buildId === backendBuildId", "guest-role-v1", "rbac-v4", "owner-workspaces", "server.auth_app", "npx", "vite", "taskkill", "Could not stop the stale v3 auth backend", "\"-B\"", "\"--port\", \"5173\", \"--strictPort\""]) {
+for (const snippet of ["http://127.0.0.1:5003/api/health", "requiredCapabilities", "admin-users", "article-date-sort-v2", "backendBuildId", "payload?.buildId === backendBuildId", "guest-role-v1", "rbac-v4", "owner-workspaces", "server.auth_app", "npm", "dev:vite", "taskkill", "Could not stop the stale v3 auth backend", "\"-B\""]) {
   if (!devScript.includes(snippet)) {
     throw new Error(`Missing combined v3 dev launcher behavior: ${snippet}`);
   }
@@ -410,9 +421,48 @@ for (const snippet of [
   }
 }
 
-for (const snippet of ["frame-ancestors 'none'", "X-Frame-Options", "Permissions-Policy"]) {
-  if (!viteConfig.includes(snippet) || !vercelConfig.includes(snippet) || !staticHeaders.includes(snippet)) {
-    throw new Error(`Missing static frontend security header: ${snippet}`);
+const vercelGlobalHeaders = Object.fromEntries(
+  vercelConfigObject.headers
+    .find((rule) => rule.source === "/(.*)")
+    ?.headers.map(({ key, value }) => [key, value]) || [],
+);
+const portableStaticHeaders = Object.fromEntries(
+  staticHeaders
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf(":");
+      return [line.slice(0, separator), line.slice(separator + 1).trim()];
+    }),
+);
+
+for (const header of [
+  "Content-Security-Policy",
+  "X-Frame-Options",
+  "X-Content-Type-Options",
+  "Referrer-Policy",
+  "Permissions-Policy",
+]) {
+  const localValue = viteConfigObject.server.headers[header];
+  const expected = header === "Content-Security-Policy"
+    ? localValue.replace("connect-src 'self' ws: wss:", "connect-src 'self' wss:")
+    : localValue;
+  if (!expected || vercelGlobalHeaders[header] !== expected || portableStaticHeaders[header] !== expected) {
+    throw new Error(`Security header drift detected for ${header}.`);
+  }
+}
+
+for (const snippet of ["Strict-Transport-Security", "max-age=31536000; includeSubDomains"]) {
+  if (!vercelConfig.includes(snippet) || !staticHeaders.includes(snippet)) {
+    throw new Error(`Missing production transport security header: ${snippet}`);
+  }
+}
+
+for (const snippet of ["/assets/(.*)", "public, max-age=31536000, immutable"]) {
+  if (!vercelConfig.includes(snippet)) {
+    throw new Error(`Missing immutable cache policy for fingerprinted Vite assets: ${snippet}`);
   }
 }
 
@@ -514,7 +564,8 @@ for (const pin of [
   "python-dotenv==1.2.2",
   "urllib3==2.7.0",
   "Werkzeug==3.1.6",
-  "cryptography==49.0.0",
+  "cryptography==50.0.0",
+  "itsdangerous==2.2.0",
 ]) {
   if (!requirements.includes(pin)) {
     throw new Error(`Missing security-reviewed dependency pin: ${pin}`);

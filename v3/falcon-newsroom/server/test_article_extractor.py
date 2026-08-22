@@ -212,6 +212,22 @@ class UrlValidationTests(unittest.TestCase):
 
 
 class FetchTests(unittest.TestCase):
+    def test_pinned_transport_preserves_total_deadline_error(self):
+        validated = extractor_module.ValidatedArticleURL(
+            "https://example.com/story",
+            "example.com",
+            443,
+            (PUBLIC_A, PUBLIC_B),
+        )
+        with self.assertRaises(ArticleExtractionError) as raised:
+            extractor_module._pinned_http_get(
+                validated,
+                {},
+                deadline=0.0,
+                clock=lambda: 1.0,
+            )
+        self.assertEqual(raised.exception.code, "fetch_timeout")
+
     def test_owned_transport_pins_the_vetted_ip_and_preserves_tls_identity(self):
         calls = {}
 

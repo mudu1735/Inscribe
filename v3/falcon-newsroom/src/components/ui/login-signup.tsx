@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Card,
   CardHeader,
-  CardTitle,
   CardDescription,
   CardContent,
   CardFooter,
@@ -40,12 +39,13 @@ interface AuthResponse {
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const AUTH_BUFFER_MS = 850;
+const GOOGLE_AUTH_ENABLED = false;
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function safeRedirectTarget(target: string | undefined, fallback = "/dashboard") {
+export function safeRedirectTarget(target: string | undefined, fallback = "/dashboard") {
   const raw = target || "";
   const normalized = raw.trim();
   if (raw !== normalized || /[\\\u0000-\u001f\u007f]/.test(raw)) {
@@ -83,6 +83,17 @@ function authErrorForResponse(response: Response, data: AuthResponse) {
     return "Authentication server error. Please try again after the backend restarts.";
   }
   return "Authentication failed. Please try again.";
+}
+
+function safeAuthProviderUrl(target: string | undefined) {
+  try {
+    const url = new URL((target || "").trim());
+    return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))
+      ? url.toString()
+      : "";
+  } catch {
+    return "";
+  }
 }
 
 function AuthBackground() {
@@ -364,11 +375,12 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
         credentials: "include",
       });
       const data = await parseAuthResponse(response);
-      if (!response.ok || !data.ok || !data.authUrl) {
+      const authUrl = safeAuthProviderUrl(data.authUrl);
+      if (!response.ok || !data.ok || !authUrl) {
         showNotice(authErrorForResponse(response, data));
         return;
       }
-      window.location.assign(data.authUrl);
+      window.location.assign(authUrl);
     } catch {
       showNotice("Could not start Google sign-in. Please try again.");
     } finally {
@@ -384,19 +396,23 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
         : "text-zinc-400";
 
   return (
-    <section className="fixed inset-0 overflow-hidden bg-zinc-950 text-zinc-50">
+    <section className="fixed inset-0 overflow-x-hidden overflow-y-auto bg-zinc-950 text-zinc-50">
       <AuthBackground />
 
-      <header className="absolute left-0 right-0 top-0 z-10 flex items-center border-b border-zinc-800/80 px-6 py-5">
-        <span className="text-xs uppercase tracking-[0.14em] text-zinc-400">
+      <header className="absolute left-0 right-0 top-0 z-20 flex items-center border-b border-zinc-800/80 px-6 py-5">
+        <a
+          href="/"
+          aria-label="Go to the Inscribe landing page"
+          className="text-xs uppercase tracking-[0.14em] text-zinc-400 transition hover:text-zinc-50 focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-white/25"
+        >
           Inscribe
-        </span>
+        </a>
       </header>
 
-      <div className="relative z-10 grid h-full w-full place-items-center px-4 py-24">
+      <div className="relative z-10 grid min-h-full w-full place-items-center px-4 py-24">
         <Card className="card-animate w-full max-w-md border-zinc-800 bg-zinc-900/95 shadow-2xl shadow-black/30">
           <CardHeader className="space-y-2 p-7 pb-5">
-            <CardTitle className="text-2xl">{title}</CardTitle>
+            <h1 className="text-2xl font-semibold leading-none tracking-tight">{title}</h1>
             <CardDescription className="text-zinc-400">
               {description}
             </CardDescription>
@@ -414,6 +430,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                       <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                       <Input
                         id="firstName"
+                        name="firstName"
                         type="text"
                         autoComplete="given-name"
                         value={firstName}
@@ -432,6 +449,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                     </Label>
                     <Input
                       id="lastName"
+                      name="lastName"
                       type="text"
                       autoComplete="family-name"
                       value={lastName}
@@ -453,6 +471,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                   <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     autoComplete="email"
                     placeholder="you@example.com"
@@ -474,6 +493,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                   <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                   <Input
                     id="password"
+                    name="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete={isSignup ? "new-password" : "current-password"}
                     placeholder="********"
@@ -508,6 +528,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                   </Label>
                   <Input
                     id="confirmPassword"
+                    name="confirmPassword"
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="********"
@@ -526,6 +547,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
                 <label className="flex w-fit items-center gap-2 text-sm text-zinc-400">
                   <input
                     type="checkbox"
+                    name="remember"
                     checked={remember}
                     onChange={(event) => setRemember(event.target.checked)}
                     disabled={isSubmitting}
@@ -571,9 +593,10 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
             <Button
               type="button"
               variant="outline"
-              disabled={isSubmitting || isGoogleSubmitting}
+              disabled={!GOOGLE_AUTH_ENABLED || isSubmitting || isGoogleSubmitting}
               aria-busy={isGoogleSubmitting}
-              className="h-11 w-full rounded-lg border-zinc-800 bg-zinc-950 text-zinc-50 hover:bg-zinc-900/80"
+              aria-label={`${isSignup ? "Sign up" : "Sign in"} with Google, currently unavailable`}
+              className="h-11 w-full rounded-lg border-zinc-800 bg-zinc-900 px-4 text-zinc-500 disabled:opacity-100"
               onClick={handleGoogleSignIn}
             >
               {isGoogleSubmitting ? (
@@ -584,7 +607,7 @@ function AuthCard({ mode, onModeChange }: AuthCardProps) {
               ) : (
                 <>
                   <Globe className="mr-2 h-4 w-4" />
-                  {isSignup ? "Create account with Google" : "Continue with Google"}
+                  {isSignup ? "Sign up with Google" : "Sign in with Google"}
                 </>
               )}
             </Button>
