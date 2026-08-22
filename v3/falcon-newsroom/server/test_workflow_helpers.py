@@ -56,10 +56,12 @@ class WorkflowHelperTests(unittest.TestCase):
                 "PITCH_STATUS_IN_PROGRESS": "In Progress",
                 "PITCH_STATUS_READY": "Ready for Review",
                 "PITCH_STATUS_SELECTED": "Selected",
+                "PITCH_STATUS_ON_HOLD": "On Hold",
             },
         )
         self.assertEqual(loaded["_normalize_pitch_status"]("Approved"), "Selected")
         self.assertEqual(loaded["_normalize_pitch_status"]("Selected for Story"), "Selected")
+        self.assertEqual(loaded["_normalize_pitch_status"]("Not Selected"), "On Hold")
         self.assertEqual(loaded["_normalize_pitch_status"]("Needs Review"), "Ready for Review")
         self.assertEqual(loaded["_normalize_pitch_round_status"]("Open for Submissions"), "Open")
         details, error = loaded["_pitch_round_detail_updates"]({"name": "  May pitches  "})

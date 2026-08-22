@@ -11,7 +11,7 @@ import React from 'react'
  * @website: https://emerald-ui.com
  */
 import { useState, useRef, FC, ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -46,13 +46,17 @@ interface DropdownItem {
   name: string
   link: string
   value?: string
+  deletable?: boolean
 }
 
 interface AnimatedDropdownProps {
   items?: DropdownItem[]
   text?: string
   className?: string
+  menuClassName?: string
+  menuMaxHeight?: string
   onSelect?: (item: DropdownItem) => void
+  onDelete?: (item: DropdownItem) => void
   disabled?: boolean
   ariaLabel?: string
 }
@@ -68,7 +72,10 @@ export default function AnimatedDropdown({
   items = DEMO,
   text = 'Select Option',
   className,
+  menuClassName,
+  menuMaxHeight = 'min(18rem, calc(100dvh - 8rem))',
   onSelect,
+  onDelete,
   disabled = false,
   ariaLabel = 'Select an option',
 }: AnimatedDropdownProps) {
@@ -114,9 +121,10 @@ export default function AnimatedDropdown({
                 'absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 w-full origin-top',
                 'max-h-[18rem] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl',
                 'border border-white/[0.08] bg-zinc-950',
-                'shadow-2xl shadow-black/40'
+                'shadow-2xl shadow-black/40',
+                menuClassName
               )}
-              style={{ maxHeight: 'min(18rem, calc(100dvh - 8rem))' }}
+              style={{ maxHeight: menuMaxHeight }}
             >
               <motion.div
                 className='flex flex-col'
@@ -130,31 +138,70 @@ export default function AnimatedDropdown({
                   },
                 }}
               >
-                {items.map((item, index) => (
-                  <motion.a
-                    key={index}
-                    href={item.link}
-                    role='option'
-                    onClick={(event) => {
-                      if (item.link === '#') event.preventDefault()
-                      onSelect?.(item)
-                      setIsOpen(false)
-                    }}
-                    variants={{
-                      hidden: { opacity: 0, x: -20 },
-                      visible: { opacity: 1, x: 0 },
-                    }}
-                    className={cn(
-                      'block w-full truncate px-3 py-2 text-sm',
-                      'border-b border-white/[0.06] last:border-b-0',
-                      'bg-zinc-950 hover:bg-white/[0.06]',
-                      'transition-colors duration-150',
-                      'text-zinc-300 no-underline hover:text-zinc-50'
-                    )}
-                  >
-                    {item.name}
-                  </motion.a>
-                ))}
+                {items.map((item, index) => {
+                  const showDelete = Boolean(onDelete && item.deletable !== false)
+                  const itemClassName = cn(
+                    'border-b border-white/[0.06] last:border-b-0',
+                    'bg-zinc-950 transition-colors duration-150',
+                    'text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-50'
+                  )
+                  if (!showDelete) {
+                    return (
+                      <motion.a
+                        key={index}
+                        href={item.link}
+                        role='option'
+                        onClick={(event) => {
+                          if (item.link === '#') event.preventDefault()
+                          onSelect?.(item)
+                          setIsOpen(false)
+                        }}
+                        variants={{
+                          hidden: { opacity: 0, x: -20 },
+                          visible: { opacity: 1, x: 0 },
+                        }}
+                        className={cn('block w-full truncate px-3 py-2 text-sm', itemClassName)}
+                      >
+                        {item.name}
+                      </motion.a>
+                    )
+                  }
+                  return (
+                    <motion.div
+                      key={index}
+                      role='option'
+                      variants={{
+                        hidden: { opacity: 0, x: -20 },
+                        visible: { opacity: 1, x: 0 },
+                      }}
+                      className={cn('flex min-w-0 items-center', itemClassName)}
+                    >
+                      <button
+                        type='button'
+                        onClick={() => {
+                          onSelect?.(item)
+                          setIsOpen(false)
+                        }}
+                        className='min-w-0 flex-1 truncate px-3 py-2 text-left text-sm'
+                      >
+                        {item.name}
+                      </button>
+                      <button
+                        type='button'
+                        aria-label={`Delete ${item.name}`}
+                        title={`Delete ${item.name}`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onDelete?.(item)
+                        }}
+                        className='mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-rose-400/10 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/40'
+                      >
+                        <X aria-hidden='true' className='h-3.5 w-3.5' />
+                      </button>
+                    </motion.div>
+                  )
+                })}
               </motion.div>
             </motion.div>
           )}

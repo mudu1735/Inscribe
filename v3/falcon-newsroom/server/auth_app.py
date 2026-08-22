@@ -159,13 +159,11 @@ PITCH_ROUND_STATUSES = {"Draft", "Open", "Reviewing", "Closed"}
 PITCH_STATUS_IN_PROGRESS = "In Progress"
 PITCH_STATUS_READY = "Ready for Review"
 PITCH_STATUS_SELECTED = "Selected"
-PITCH_STATUS_NOT_SELECTED = "Not Selected"
 PITCH_STATUS_ON_HOLD = "On Hold"
 PITCH_STATUSES = {
     PITCH_STATUS_IN_PROGRESS,
     PITCH_STATUS_READY,
     PITCH_STATUS_SELECTED,
-    PITCH_STATUS_NOT_SELECTED,
     PITCH_STATUS_ON_HOLD,
 }
 VALID_STORY_STATUSES = {
@@ -2395,6 +2393,8 @@ def _normalize_pitch_status(value) -> str:
         "Approved": PITCH_STATUS_SELECTED,
         "Selected": PITCH_STATUS_SELECTED,
         "Selected for Story": PITCH_STATUS_SELECTED,
+        "Not Selected": PITCH_STATUS_ON_HOLD,
+        "Not selected": PITCH_STATUS_ON_HOLD,
     }.get(status, status or "In Progress")
 
 
@@ -5109,6 +5109,30 @@ def api_update_pitch_round(round_id: str):
     return jsonify({"ok": True, "round": _pitch_round_to_api(updated, user_doc)})
 
 
+@app.delete("/api/pitch-rounds/<round_id>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+def api_delete_pitch_round(round_id: str):
+    user_doc = _current_user_doc()
+    pitch_round = _pitch_round_by_id(round_id, user_doc)
+    if not pitch_round:
+        return jsonify({"ok": False, "error": "Pitch round not found."}), 404
+    if pitch_round.get("isLegacy"):
+        return jsonify({"ok": False, "error": "Legacy pitches cannot be deleted as a round."}), 409
+
+    workspace_id = _workspace_id_for_user(user_doc)
+    round_id_value = _pitch_round_id_from_doc(pitch_round)
+    if pitches_col.find_one({"workspaceId": workspace_id, "roundId": round_id_value}, {"_id": 1}):
+        return jsonify({"ok": False, "error": "Only empty pitch rounds can be deleted. Remove the pitches first."}), 409
+
+    result = pitch_rounds_col.delete_one({
+        "_id": pitch_round["_id"],
+        "workspaceId": workspace_id,
+    })
+    if result.deleted_count == 0:
+        return jsonify({"ok": False, "error": "Round changed in another session. Refresh and try again."}), 409
+    return jsonify({"ok": True, "roundId": round_id_value})
+
+
 @app.get("/api/pitches")
 @require_auth
 def api_pitches():
@@ -5246,12 +5270,12 @@ def api_update_pitch(pitch_id: str):
         if role in {ROLE_ADMIN, ROLE_EDITOR}:
             if next_status == PITCH_STATUS_READY:
                 return jsonify({"ok": False, "error": "Only the pitch owner can submit it for review."}), 403
-            if next_status in {PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED} and current_status != PITCH_STATUS_READY:
-                return jsonify({"ok": False, "error": "Only pitches ready for review can receive a decision."}), 409
+            if next_status == PITCH_STATUS_SELECTED and current_status != PITCH_STATUS_READY:
+                return jsonify({"ok": False, "error": "Only pitches ready for review can be selected."}), 409
             if next_status == PITCH_STATUS_IN_PROGRESS and current_status not in {PITCH_STATUS_READY, PITCH_STATUS_ON_HOLD}:
                 return jsonify({"ok": False, "error": "This pitch cannot be moved back to in progress."}), 409
-            if next_status == PITCH_STATUS_ON_HOLD and current_status in {PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED}:
-                return jsonify({"ok": False, "error": "A decided pitch cannot be put on hold."}), 409
+            if next_status == PITCH_STATUS_ON_HOLD and current_status == PITCH_STATUS_SELECTED:
+                return jsonify({"ok": False, "error": "A selected pitch cannot be put on hold."}), 409
         update["status"] = next_status
     if next_status == PITCH_STATUS_SELECTED:
         if not approval_deadline:
@@ -5261,7 +5285,7 @@ def api_update_pitch(pitch_id: str):
         update["selectedBy"] = _user_display_name(user_doc)
         update["selectedAt"] = _now_iso()
         unset.update({"decisionReason": "", "decisionNote": ""})
-    elif next_status == PITCH_STATUS_NOT_SELECTED:
+    elif next_status == PITCH_STATUS_ON_HOLD:
         if "decisionReason" in payload:
             update["decisionReason"] = decision_reason
         if "decisionNote" in payload:
@@ -5565,7 +5589,7 @@ def _dashboard_status_activity_relevant(doc: dict, role: str, personal_story_ids
     if entity_type == "pitch":
         to_status = _normalize_pitch_status(to_status)
         if entity_id in personal_pitch_ids:
-            return to_status in {PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD}
+            return to_status in {PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_ON_HOLD}
         return role in {ROLE_EDITOR, ROLE_ADMIN} and to_status == "Ready for Review"
     if entity_type == "story":
         if entity_id in personal_story_ids:
@@ -5584,8 +5608,7 @@ def _dashboard_status_activity_text(doc: dict) -> str:
             "Ready for Review": f"{actor} submitted this pitch for review.",
             "In Progress": f"{actor} requested more work before this pitch can move forward.",
             PITCH_STATUS_SELECTED: f"{actor} selected this pitch for a story.",
-            PITCH_STATUS_NOT_SELECTED: f"{actor} marked this pitch as not selected.",
-            "On Hold": f"{actor} placed this pitch on hold.",
+            PITCH_STATUS_ON_HOLD: f"{actor} placed this pitch on hold.",
         }
         return messages.get(to_status, str(doc.get("text") or "Pitch updated."))
     messages = {

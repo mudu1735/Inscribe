@@ -901,9 +901,8 @@ const PITCH_ROUND_STATUSES = ["Draft", "Open", "Reviewing", "Closed"];
 const PITCH_STATUS_IN_PROGRESS = "In Progress";
 const PITCH_STATUS_READY = "Ready for Review";
 const PITCH_STATUS_SELECTED = "Selected";
-const PITCH_STATUS_NOT_SELECTED = "Not Selected";
 const PITCH_STATUS_ON_HOLD = "On Hold";
-const PITCH_STATUSES = [PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_READY, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD];
+const PITCH_STATUSES = [PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_READY, PITCH_STATUS_SELECTED, PITCH_STATUS_ON_HOLD];
 const PITCH_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const PITCH_WRITERS = ["Ava Patel", "Daniel Wu", "Iris Park", "Lena Brooks", "Marcus Lee", "Sofia Chen"];
 
@@ -994,7 +993,7 @@ const initialPitches = [
     id: "p7",
     title: "The case for a quieter lunch period",
     angle: "A student-centered look at whether a lower-volume lunch period would change how students use the commons.",
-    status: PITCH_STATUS_NOT_SELECTED,
+    status: PITCH_STATUS_ON_HOLD,
     section: "Opinion",
     owner: "Ava Patel",
     submittedAt: "May 9, 2026",
@@ -1344,6 +1343,8 @@ function normalizeDisplayPitch(pitch = {}) {
     Approved: PITCH_STATUS_SELECTED,
     Selected: PITCH_STATUS_SELECTED,
     "Selected for Story": PITCH_STATUS_SELECTED,
+    "Not Selected": PITCH_STATUS_ON_HOLD,
+    "Not selected": PITCH_STATUS_ON_HOLD,
   };
   return {
     ...pitch,
@@ -2143,9 +2144,8 @@ function buildHouseOptions(sources) {
 
 function pitchStatusTone(status) {
   if (status === PITCH_STATUS_SELECTED) return "green";
-  if (status === PITCH_STATUS_NOT_SELECTED) return "neutral";
   if (status === "Ready for Review") return "blue";
-  if (status === "On Hold") return "amber";
+  if (status === PITCH_STATUS_ON_HOLD) return "amber";
   return "neutral";
 }
 
@@ -2176,9 +2176,8 @@ function pitchFeedbackItems(pitch) {
 
 function pitchStatusDotClass(status) {
   if (status === PITCH_STATUS_SELECTED) return "bg-emerald-400";
-  if (status === PITCH_STATUS_NOT_SELECTED) return "bg-zinc-500";
   if (status === "Ready for Review") return "bg-sky-400";
-  if (status === "On Hold") return "bg-amber-400";
+  if (status === PITCH_STATUS_ON_HOLD) return "bg-amber-400";
   return "bg-zinc-400";
 }
 
@@ -2395,7 +2394,7 @@ function runPrototypeTests() {
   console.assert(PITCH_STATUSES.every((status) => initialPitches.some((pitch) => pitch.status === status)), "Pitch board needs examples for each status.");
   console.assert(matchesPitchFilters(initialPitches[0], "clubs", "All sections"), "Pitch search should include title and angle text.");
   console.assert(matchesPitchFilters(initialPitches[2], "", "All sections"), "Selected pitches should stay on their round board.");
-  console.assert(matchesPitchFilters(initialPitches[6], "", "All sections", PITCH_STATUS_NOT_SELECTED), "Not selected pitches should stay on their round board.");
+  console.assert(matchesPitchFilters(initialPitches[6], "", "All sections", PITCH_STATUS_ON_HOLD), "On hold pitches should stay on their round board.");
   console.assert(groupActivePitchesByWriter(initialPitches).every((group) => group.pitches.every(isRoundPitch)), "Writer groups should include pitches from the selected round.");
   console.assert(groupActivePitchesByWriter([
     { ...initialPitches[0], owner: "Alex Lee", ownerEmail: "alex.one@example.com", ownerUserId: "u1" },
@@ -4287,6 +4286,39 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
     }
   };
 
+  const deleteRound = async (round) => {
+    if (!round || !canManagePitches || roundSaving || round.isLegacy) return;
+    const pitchCount = Number(round.pitchCount || 0);
+    const confirmation = pitchCount
+      ? `Delete “${round.name}”? It still contains ${pitchCount} ${pitchCount === 1 ? "pitch" : "pitches"}. Only empty rounds can be deleted.`
+      : `Delete “${round.name}”? This cannot be undone.`;
+    if (!window.confirm(confirmation)) return;
+    setRoundSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/pitch-rounds/${encodeURIComponent(round.id)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not delete round.");
+      const remainingRounds = rounds.filter((candidate) => candidate.id !== round.id);
+      setRounds(remainingRounds);
+      setSelectedRoundId((previous) => {
+        if (previous !== round.id) return previous;
+        return remainingRounds.find((candidate) => candidate.status === "Open")?.id || remainingRounds[0]?.id || "";
+      });
+      setToast("Deleted round.");
+    } catch (roundDeleteError) {
+      setToast(roundDeleteError instanceof Error ? roundDeleteError.message : "Could not delete round.");
+    } finally {
+      setRoundSaving(false);
+    }
+  };
+
   const updatePitchDetails = async (id, draft) => {
     const targetPitch = pitches.find((pitch) => pitch.id === id);
     if (!pitchBelongsToUser(targetPitch, currentUser) || targetPitch?.status !== "In Progress") {
@@ -4407,12 +4439,6 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
     return updatePitchStatus(id, PITCH_STATUS_IN_PROGRESS, message || "Returned pitch to in progress.");
   };
 
-  const markNotSelected = (id) => {
-    const targetPitch = pitches.find((pitch) => pitch.id === id);
-    if (!window.confirm(`Mark “${targetPitch?.title || "this pitch"}” as not selected?`)) return null;
-    return updatePitchStatus(id, PITCH_STATUS_NOT_SELECTED, "Marked pitch as not selected.");
-  };
-
   const addComment = (id, text) => {
     updatePitch(id, (pitch) => ({
       ...pitch,
@@ -4477,7 +4503,6 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
         onSubmitForReview={submitForReview}
         onMarkInProgress={markInProgress}
         onApprove={(id, approval) => updatePitchStatus(id, PITCH_STATUS_SELECTED, "Selected pitch for a story.", approval)}
-        onNotSelected={markNotSelected}
         onHold={(id) => updatePitchStatus(id, PITCH_STATUS_ON_HOLD, "Put pitch on hold.")}
         onUpdate={updatePitchDetails}
         onDelete={deletePitch}
@@ -4516,23 +4541,38 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
                     name: `${round.name}${round.isLegacy ? " · Legacy" : ""}`,
                     value: round.id,
                     link: "#",
+                    deletable: canManagePitches && !round.isLegacy,
                   }))}
                   onSelect={(item) => setSelectedRoundId(item.value || "")}
+                  onDelete={(item) => deleteRound(rounds.find((round) => round.id === item.value))}
                   disabled={roundLoading || !rounds.length}
                   ariaLabel="Choose a pitch round"
                   className="w-full"
+                  menuClassName="max-h-[min(24rem,calc(100dvh-7rem))] overflow-y-auto"
+                  menuMaxHeight="min(24rem, calc(100dvh - 7rem))"
                 />
               </div>
               {canManagePitches && currentRound && !currentRound.isLegacy ? (
-                <Button
-                  variant="ghost"
-                  disabled={roundSaving}
-                  onClick={() => updateRoundStatus(currentRound.status === "Open" ? "Reviewing" : "Open")}
-                >
-                  {currentRound.status === "Open" ? "Close submissions" : "Open submissions"}
-                </Button>
+                (() => {
+                  const submissionsOpen = currentRound.status === "Open";
+                  return (
+                    <Button
+                      variant="ghost"
+                      className="gap-2"
+                      disabled={roundSaving}
+                      aria-pressed={submissionsOpen}
+                      aria-label={`${submissionsOpen ? "Open" : "Closed"} for submissions. Click to ${submissionsOpen ? "close" : "open"} submissions.`}
+                      onClick={() => updateRoundStatus(submissionsOpen ? "Reviewing" : "Open")}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cx("h-2 w-2 rounded-full", submissionsOpen ? "bg-emerald-400" : "bg-red-400")}
+                      />
+                      {submissionsOpen ? "Open for submissions" : "Closed for submissions"}
+                    </Button>
+                  );
+                })()
               ) : null}
-              {currentRound ? <span className="text-sm text-zinc-500">{currentRound.status}</span> : null}
             </div>
           </div>
           <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
@@ -4541,7 +4581,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = 
           </div>
           <div>
             <div className="flex gap-5 overflow-x-auto border-b border-white/[0.08]">
-              {["All pitches", PITCH_STATUS_READY, PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD].map((filter) => (
+              {["All pitches", PITCH_STATUS_READY, PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_ON_HOLD].map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -4710,7 +4750,6 @@ function PitchDetailPage({
   onSubmitForReview,
   onMarkInProgress,
   onApprove,
-  onNotSelected,
   onHold,
   onUpdate,
   onDelete,
@@ -5041,21 +5080,13 @@ function PitchDetailPage({
               <Button disabled={pitch.status !== PITCH_STATUS_READY} onClick={() => setApprovalOpen(true)} className="w-full">Select for story</Button>
               <Button
                 variant="ghost"
-                disabled={pitch.status !== PITCH_STATUS_READY}
-                onClick={() => onNotSelected(pitch.id)}
-                className="w-full"
-              >
-                Not selected
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={[PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED].includes(pitch.status)}
+                disabled={[PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED].includes(pitch.status)}
                 onClick={() => onMarkInProgress(pitch.id)}
                 className="w-full"
               >
                 Mark in progress
               </Button>
-              <Button variant="ghost" disabled={[PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED].includes(pitch.status)} onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
+              <Button variant="ghost" disabled={[PITCH_STATUS_SELECTED, PITCH_STATUS_ON_HOLD].includes(pitch.status)} onClick={() => onHold(pitch.id)} className="w-full">Put on hold</Button>
               {canDeletePitch && pitch.status !== PITCH_STATUS_SELECTED ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
             </div>
           </div>
