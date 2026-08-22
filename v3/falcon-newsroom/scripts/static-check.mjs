@@ -14,6 +14,7 @@ const v3Backend = await readFile("server/auth_app.py", "utf8");
 const articleExtractor = await readFile("server/article_extractor.py", "utf8");
 const devScript = await readFile("scripts/dev.mjs", "utf8");
 const requirements = await readFile("requirements.txt", "utf8");
+const envExample = await readFile("../../.env.example", "utf8");
 const viteConfigObject = (await import("../vite.config.js")).default;
 const vercelConfigObject = JSON.parse(vercelConfig);
 
@@ -569,6 +570,24 @@ for (const pin of [
 ]) {
   if (!requirements.includes(pin)) {
     throw new Error(`Missing security-reviewed dependency pin: ${pin}`);
+  }
+}
+
+for (const snippet of [
+  "FLASK_SECRET_KEY=",
+  "MONGO_URI=",
+  "OWNER_EMAILS=",
+  "FRONTEND_ORIGIN=",
+  "TRUSTED_CSRF_ORIGINS=",
+]) {
+  if (!envExample.includes(snippet)) {
+    throw new Error(`Missing environment example setting: ${snippet}`);
+  }
+}
+
+for (const obsoleteSetting of ["DEFAULT_PUBLICATION_URL", "DEFAULT_ARTICLE_DOMAIN"]) {
+  if (envExample.includes(obsoleteSetting) || v3Backend.includes(obsoleteSetting)) {
+    throw new Error(`Publication settings must remain workspace-owned: ${obsoleteSetting}`);
   }
 }
 

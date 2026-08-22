@@ -3,8 +3,8 @@
 `falcon-newsroom/` is the current Inscribe application: a React/Vite frontend
 with a Flask/MongoDB backend in `falcon-newsroom/server/`.
 
-Run it from `falcon-newsroom/` after creating the root `.env`, installing the
-v3 Python requirements, and installing Node dependencies:
+Run it from `falcon-newsroom/` after copying the root `.env.example` to `.env`,
+installing the v3 Python requirements, and installing Node dependencies:
 
 ```bash
 npm ci

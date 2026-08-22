@@ -520,7 +520,46 @@ class OwnerWorkspaceSecurityTests(unittest.TestCase):
         updates, error = loaded["_workspace_settings_updates"]({"name": "School News", "publicationUrl": ""})
         self.assertEqual(error, "")
         self.assertEqual(updates["publicationUrl"], "")
+        self.assertEqual(updates["articleDomain"], "")
+        publication_updates, publication_error = loaded["_workspace_settings_updates"]({
+            "name": "School News",
+            "publicationUrl": "https://paper.example/newsroom",
+        })
+        self.assertEqual(publication_error, "")
+        self.assertEqual(publication_updates["publicationUrl"], "https://paper.example/newsroom")
+        self.assertEqual(publication_updates["articleDomain"], "paper.example")
         self.assertEqual(loaded["_workspace_settings_updates"]({"name": "School News", "publicationUrl": "javascript:alert(1)"})[1], "Enter a valid publication URL beginning with http:// or https://.")
+
+    def test_fresh_install_does_not_create_a_branded_default_workspace(self):
+        class Environment:
+            @staticmethod
+            def getenv(_name, default=""):
+                return default
+
+        class Workspaces:
+            def __init__(self):
+                self.lookups = []
+
+            def find_one(self, query):
+                self.lookups.append(query)
+                return None
+
+            @staticmethod
+            def insert_one(_document):
+                raise AssertionError("Fresh installs must create workspaces through the owner UI.")
+
+        workspaces = Workspaces()
+        loaded = load_functions(
+            {"_ensure_default_workspace"},
+            {"os": Environment(), "workspaces_col": workspaces},
+        )
+        self.assertIsNone(loaded["_ensure_default_workspace"]())
+        self.assertEqual(workspaces.lookups, [{"publicId": "poolesville-pulse"}])
+
+    def test_publication_allowlist_has_no_environment_override(self):
+        source = AUTH_APP_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("DEFAULT_PUBLICATION_URL", source)
+        self.assertNotIn("DEFAULT_ARTICLE_DOMAIN", source)
 
     def test_owner_workspace_context_is_the_collection_scope(self):
         runtime_session = {"owner_workspace_id": "newsroom-a"}

@@ -849,19 +849,26 @@ def _ensure_pitch_round_data():
 
 
 def _ensure_default_workspace():
-    public_id = os.getenv("DEFAULT_WORKSPACE_ID", "poolesville-pulse").strip() or "poolesville-pulse"
-    configured_name = os.getenv("DEFAULT_WORKSPACE_NAME", "The Poolesville Pulse").strip() or "The Poolesville Pulse"
-    if public_id == "poolesville-pulse" and configured_name == "Poolesville Pulse":
-        configured_name = "The Poolesville Pulse"
+    # New installations create workspaces through the owner UI. The optional
+    # default workspace settings exist only for explicit bootstrap deployments;
+    # an existing legacy Pulse workspace is still detected so its old records
+    # can complete the workspace-scoping migrations below.
+    configured_public_id = os.getenv("DEFAULT_WORKSPACE_ID", "").strip()
+    public_id = configured_public_id or "poolesville-pulse"
     existing = workspaces_col.find_one({"publicId": public_id})
+    if not configured_public_id and not existing:
+        return None
+
+    configured_name = os.getenv("DEFAULT_WORKSPACE_NAME", "").strip()
+    configured_name = configured_name or str((existing or {}).get("name") or "Newsroom").strip() or "Newsroom"
     if not existing:
         now_iso = _now_iso()
         doc = {
             "publicId": public_id,
             "name": configured_name,
             "joinCode": normalize_workspace_code(os.getenv("DEFAULT_WORKSPACE_JOIN_CODE")) or _new_workspace_code(),
-            "publicationUrl": os.getenv("DEFAULT_PUBLICATION_URL", "https://poolesvillepulse.org").strip(),
-            "articleDomain": os.getenv("DEFAULT_ARTICLE_DOMAIN", "poolesvillepulse.org").strip().lower(),
+            "publicationUrl": "",
+            "articleDomain": "",
             "platformType": os.getenv("DEFAULT_PLATFORM_TYPE", "SNO Sites / WordPress").strip(),
             "createdAt": now_iso,
             "updatedAt": now_iso,
@@ -872,13 +879,6 @@ def _ensure_default_workspace():
             existing = doc
         except DuplicateKeyError:
             existing = workspaces_col.find_one({"publicId": public_id})
-
-    if existing and public_id == "poolesville-pulse" and existing.get("name") == "Poolesville Pulse":
-        workspaces_col.update_one(
-            {"_id": existing["_id"]},
-            {"$set": {"name": configured_name, "updatedAt": _now_iso()}},
-        )
-        existing = {**existing, "name": configured_name}
 
     if existing and not existing.get("legacyMembershipMigratedAt"):
         users_col.update_many(
@@ -919,6 +919,7 @@ def _ensure_default_workspace():
         if legacy_count:
             workspace_update["namesDatabase"] = names_metadata
         workspaces_col.update_one({"_id": existing["_id"]}, {"$set": workspace_update})
+    return existing
 
 
 def _canonicalize_owner_accounts():

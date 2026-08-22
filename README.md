@@ -112,8 +112,12 @@ npm run dev
 
 ## Minimal local `.env`
 
-Create `.env` in the repository root. Replace the placeholder values, and do
-not commit the file.
+Copy the tracked example to `.env` in the repository root, replace its
+placeholders, and do not commit the resulting `.env` file:
+
+```bash
+cp .env.example .env
+```
 
 ```dotenv
 FLASK_ENV=development
@@ -124,12 +128,6 @@ MONGO_DB=inscribe_local
 
 # Make the first local account an owner so it can create/open workspaces.
 OWNER_EMAILS=your-email@example.com
-
-DEFAULT_WORKSPACE_ID=local-newsroom
-DEFAULT_WORKSPACE_NAME=Local Newsroom
-DEFAULT_WORKSPACE_JOIN_CODE=LOCAL123
-DEFAULT_PUBLICATION_URL=https://poolesvillepulse.org
-DEFAULT_ARTICLE_DOMAIN=poolesvillepulse.org
 
 FRONTEND_ORIGIN=http://127.0.0.1:5173
 TRUSTED_CSRF_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
@@ -142,7 +140,11 @@ GEMINI_MODEL=
 `FLASK_ENV=development` matters locally because production mode enables secure
 cookies and rejects weak or missing secrets. `OWNER_EMAILS` is optional, but it
 is the easiest way to make the first registered local account an owner. Other
-users register normally and join a workspace with its join code.
+users register normally and join a workspace with its join code. Owners create
+workspaces in the application and set each workspace's own publication website
+there. Optional `DEFAULT_WORKSPACE_*` variables in `.env.example` are only for
+deployments that intentionally bootstrap one workspace; publication settings
+are never read from the environment.
 
 ## Optional Google configuration
 
