@@ -22,9 +22,6 @@ from werkzeug.utils import secure_filename
 
 AUTH_APP_PATH = Path(__file__).with_name("auth_app.py")
 AUTH_APP_TREE = ast.parse(AUTH_APP_PATH.read_text(encoding="utf-8"), filename=str(AUTH_APP_PATH))
-V2_APP_PATH = AUTH_APP_PATH.parents[3] / "v2" / "app" / "app.py"
-ROOT_APP_PATH = AUTH_APP_PATH.parents[3] / "app" / "app.py"
-ROOT_APP_INIT_PATH = AUTH_APP_PATH.parents[3] / "app" / "__init__.py"
 
 
 def load_functions(names, namespace=None):
@@ -78,83 +75,6 @@ class SecurityHelperTests(unittest.TestCase):
                 "role": {"$nin": ["admin", "editor", "guest", "writer"]},
             },
             {"$set": {"role": "guest"}},
-        )])
-
-    def test_retired_legacy_entrypoint_is_database_free(self):
-        entrypoint_source = ROOT_APP_PATH.read_text(encoding="utf-8")
-        entrypoint_tree = ast.parse(entrypoint_source, filename=str(ROOT_APP_PATH))
-        imported_modules = {
-            alias.name
-            for node in ast.walk(entrypoint_tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        } | {
-            node.module or ""
-            for node in ast.walk(entrypoint_tree)
-            if isinstance(node, ast.ImportFrom)
-        }
-        self.assertEqual(imported_modules, {"flask"})
-        for forbidden in (
-            "v2", "pymongo", "MongoClient", "load_dotenv", "MONGO_URI",
-            "MONGO_DB", "USER_COLLECTION", "update_many",
-        ):
-            self.assertNotIn(forbidden, entrypoint_source)
-        self.assertIn('"status": "retired"', entrypoint_source)
-        self.assertIn("410", entrypoint_source)
-
-        package_source = ROOT_APP_INIT_PATH.read_text(encoding="utf-8")
-        self.assertIn("from .app import app, application", package_source)
-        self.assertNotIn("v2", package_source)
-
-    def test_archived_v2_startup_does_not_downgrade_v3_workspace_roles(self):
-
-        source = V2_APP_PATH.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(V2_APP_PATH))
-        role_rewrites = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr != "update_many":
-                continue
-            call_source = ast.get_source_segment(source, node) or ""
-            if '"role"' in call_source and '"$set"' in call_source and "ROLE_VIEWER" in call_source:
-                role_rewrites.append(call_source)
-        self.assertEqual(len(role_rewrites), 1)
-        self.assertIn('"$exists": False', role_rewrites[0])
-        self.assertNotIn('"$nin"', role_rewrites[0])
-        self.assertIn("Roles that v2 does not", source)
-
-        role_endpoint = next(
-            node for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "api_admin_update_user_role"
-        )
-        role_endpoint_source = ast.get_source_segment(source, role_endpoint) or ""
-        self.assertIn('user_doc.get("workspaceId")', role_endpoint_source)
-        self.assertIn("managed by v3", role_endpoint_source)
-        self.assertLess(role_endpoint_source.index("workspaceId"), role_endpoint_source.index("update_one"))
-
-
-
-        initializer = next(
-            node for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_initialize_missing_user_roles"
-        )
-        module = ast.Module(body=[initializer], type_ignores=[])
-        ast.fix_missing_locations(module)
-        loaded = {"ROLE_VIEWER": "viewer"}
-        exec(compile(module, str(V2_APP_PATH), "exec"), loaded)
-
-        class Users:
-            calls = []
-
-            def update_many(self, query, update):
-                self.calls.append((query, update))
-
-        users = Users()
-        loaded["_initialize_missing_user_roles"](users)
-        self.assertEqual(users.calls, [(
-            {"$or": [{"role": {"$exists": False}}, {"role": None}]},
-            {"$set": {"role": "viewer"}},
         )])
 
     def test_oauth_tokens_are_authenticated_encrypted_and_tamper_evident(self):

@@ -12,13 +12,17 @@ const requiredCapabilities = [
   "rbac-v4",
   "stories",
   "pitches",
+  "pitch-rounds",
   "pitch-owner-submit",
   "shared-workflow-activity",
   "workspace-settings",
   "owner-workspaces",
 ];
-const venvPython = resolve(root, "..", "..", "venv", "Scripts", "python.exe");
-const pythonCommand = process.env.FALCON_V3_PYTHON || (existsSync(venvPython) ? venvPython : "python");
+const venvPythonCandidates = process.platform === "win32"
+  ? [resolve(root, "..", "..", "venv", "Scripts", "python.exe")]
+  : [resolve(root, "..", "..", "venv", "bin", "python"), resolve(root, "..", "..", "venv", "bin", "python3")];
+const venvPython = venvPythonCandidates.find((candidate) => existsSync(candidate));
+const pythonCommand = process.env.FALCON_V3_PYTHON || venvPython || "python";
 const backendBuildId = createHash("sha256")
   .update(readFileSync(resolve(root, "server", "auth_app.py")))
   .update(readFileSync(resolve(root, "server", "article_extractor.py")))
@@ -55,7 +59,30 @@ async function isAuthHealthy() {
 }
 
 function stopStaleFalconBackendOnPort() {
-  if (process.platform !== "win32") return false;
+  if (process.platform !== "win32") {
+    let output = "";
+    try {
+      output = execFileSync("lsof", ["-tiTCP:5003", "-sTCP:LISTEN"], { encoding: "utf8" });
+    } catch {
+      return false;
+    }
+
+    const stalePids = new Set(
+      output
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter((value) => /^\d+$/.test(value))
+    );
+    for (const pid of stalePids) {
+      try {
+        process.kill(Number(pid), "SIGTERM");
+      } catch {
+        return false;
+      }
+    }
+    return stalePids.size > 0;
+  }
+
   let output = "";
   try {
     output = execFileSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8" });

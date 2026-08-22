@@ -12,7 +12,7 @@ const staticHeaders = await readFile("public/_headers", "utf8");
 const v3Backend = await readFile("server/auth_app.py", "utf8");
 const articleExtractor = await readFile("server/article_extractor.py", "utf8");
 const devScript = await readFile("scripts/dev.mjs", "utf8");
-const requirements = await readFile("../../requirements.txt", "utf8");
+const requirements = await readFile("requirements.txt", "utf8");
 
 const expectedAppSnippets = [
   "Inscribe",
@@ -22,6 +22,12 @@ const expectedAppSnippets = [
   "product-stories.png",
   "A calmer editorial desk for your school.",
   "Pitch Board",
+  "PITCH_ROUND_STATUSES",
+  "New round",
+  "Open submissions",
+  "Close submissions",
+  "Select for story",
+  "Not selected",
   "Stories",
   "StoriesPage",
   "navSections",
@@ -45,6 +51,9 @@ const expectedAppSnippets = [
   "PitchBoardPage",
   "initialAppPage",
   "New pitch",
+  "Add story",
+  "StoryCreateModal",
+  "AnimatedOptionDropdown",
   "Pitch review",
   "Editor feedback",
   "Add feedback",
@@ -57,8 +66,6 @@ const expectedAppSnippets = [
   "pitchOwnerGroupKey",
   "PitchDetailPage",
   "PitchStatusText",
-  "Expand all",
-  "Collapse all",
   "Delete pitch",
   "Activity",
   "AI article extractor",
@@ -158,9 +165,8 @@ const expectedAppSnippets = [
   "storyWithApprovedDueDate",
   "approvalDueDate",
   "onStoryCreated",
-  "Approved pitch and moved it to Stories.",
+  "Selected pitch for a story.",
   "canManageEditorialWorkflow",
-  "Workspace details",
   "Workspace access code",
   "Names database",
   "Replace names database",
@@ -250,7 +256,7 @@ for (const snippet of ["http://127.0.0.1:5003", "proxy", "port: 5173", "strictPo
   }
 }
 
-for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:auth", "venv\\\\Scripts\\\\python.exe -B -m server.auth_app", "--port 5173 --strictPort"]) {
+for (const snippet of ["\"dev\": \"node ./scripts/dev.mjs\"", "dev:vite", "dev:auth", "python -B -m server.auth_app", "--port 5173 --strictPort"]) {
   if (!packageJson.includes(snippet)) {
     throw new Error(`Missing v3 backend npm script: ${snippet}`);
   }
@@ -305,6 +311,7 @@ for (const snippet of [
   "@app.get(\"/api/admin/users\")",
   "@app.patch(\"/api/admin/users/<user_id>/role\")",
   "@app.get(\"/api/stories\")",
+  "@app.post(\"/api/stories\")",
   "@app.patch(\"/api/stories/<story_id>\")",
   "@app.post(\"/api/stories/<story_id>/attachment\")",
   "@app.post(\"/api/stories/<story_id>/collaborators\")",
@@ -318,6 +325,9 @@ for (const snippet of [
   "@app.get(\"/api/stories/<story_id>/attachments/<attachment_id>\")",
   "@app.delete(\"/api/stories/<story_id>/attachments/<attachment_id>\")",
   "@app.get(\"/api/pitches\")",
+  "@app.get(\"/api/pitch-rounds\")",
+  "@app.post(\"/api/pitch-rounds\")",
+  "@app.patch(\"/api/pitch-rounds/<round_id>\")",
   "@app.patch(\"/api/pitches/<pitch_id>\")",
   "@app.get(\"/api/activity\")",
   "@app.get(\"/api/dashboard\")",
@@ -380,7 +390,7 @@ for (const snippet of [
   "\"dueDate\": deadline",
   "followup_update[\"dueDate\"] = story_deadline",
   "update[\"dueDate\"] = next_deadline",
-  "Due date is required before approving a pitch.",
+  "Due date is required before selecting a pitch.",
   "update[\"dueDate\"] = approval_deadline",
   "_create_story_from_pitch(updated, user_doc, approval_deadline, approval_message)",
   "@app.delete(\"/api/pitches/<pitch_id>\")",
@@ -394,12 +404,6 @@ for (const snippet of [
 ]) {
   if (!v3Backend.includes(snippet)) {
     throw new Error(`Missing v3 backend auth/API behavior: ${snippet}`);
-  }
-}
-
-for (const snippet of ["from v2.app", "from v2 ", "import v2", "127.0.0.1:5000"]) {
-  if (v3Backend.includes(snippet) || viteConfig.includes(snippet)) {
-    throw new Error(`v3 must not depend on v2 backend wiring; found: ${snippet}`);
   }
 }
 
@@ -501,14 +505,12 @@ if (safeRedirectTarget("/stories?tab=mine#top") !== "/stories?tab=mine#top") {
 }
 
 for (const pin of [
-  "flask==3.1.3",
+  "Flask==3.1.3",
   "requests==2.33.0",
   "pymongo==4.16.0",
   "python-dotenv==1.2.2",
-  "protobuf==5.29.6",
   "urllib3==2.7.0",
   "Werkzeug==3.1.6",
-  "defusedxml==0.7.1",
   "cryptography==49.0.0",
 ]) {
   if (!requirements.includes(pin)) {

@@ -252,7 +252,7 @@ export default function V4LandingPage() {
         </div>
 
         <motion.div className="page-width hero-product" initial={reduceMotion ? false : { opacity: 0, y: 42, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 1.05, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}>
-          <img className="hero-dashboard-image" src="/landing/dashboard-hero.webp" alt="Inscribe dashboard for Poolesville Pulse showing John Doe's editorial tasks and recent newsroom activity." fetchPriority="high" decoding="async"/>
+          <img className="hero-dashboard-image" src="/landing/dashboard-hero.webp" alt="Inscribe dashboard for The Poolesville Pulse showing John Doe's editorial tasks and recent newsroom activity." fetchPriority="high" decoding="async"/>
         </motion.div>
       </section>
 

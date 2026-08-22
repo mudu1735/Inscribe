@@ -45,6 +45,7 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () =
 interface DropdownItem {
   name: string
   link: string
+  value?: string
 }
 
 interface AnimatedDropdownProps {
@@ -52,6 +53,8 @@ interface AnimatedDropdownProps {
   text?: string
   className?: string
   onSelect?: (item: DropdownItem) => void
+  disabled?: boolean
+  ariaLabel?: string
 }
 
 const DEMO: DropdownItem[] = [
@@ -66,6 +69,8 @@ export default function AnimatedDropdown({
   text = 'Select Option',
   className,
   onSelect,
+  disabled = false,
+  ariaLabel = 'Select an option',
 }: AnimatedDropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -77,8 +82,11 @@ export default function AnimatedDropdown({
       >
         <Button
           variant='outline'
+          type='button'
           aria-haspopup='listbox'
           aria-expanded={isOpen}
+          aria-label={ariaLabel}
+          disabled={disabled}
           onClick={() => setIsOpen(!isOpen)}
           className='h-11 w-full justify-between gap-2 rounded-xl border-white/[0.08] bg-white/[0.035] px-3 text-zinc-200 hover:bg-white/[0.06] hover:text-zinc-50 focus-visible:ring-white/20 focus-visible:ring-offset-0'
         >

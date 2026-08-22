@@ -72,8 +72,10 @@ INTERVIEW_COLLECTION = os.getenv("INTERVIEW_COLLECTION", "interviewRecords")
 ARTICLE_COLLECTION = os.getenv("ARTICLE_COLLECTION", "articleRecords")
 STORY_COLLECTION = os.getenv("STORY_COLLECTION", "storyRecords")
 PITCH_COLLECTION = os.getenv("PITCH_COLLECTION", "pitchRecords")
+PITCH_ROUND_COLLECTION = os.getenv("PITCH_ROUND_COLLECTION", "pitchRounds")
 ACTIVITY_COLLECTION = os.getenv("ACTIVITY_COLLECTION", "activityRecords")
 FEEDBACK_COLLECTION = os.getenv("FEEDBACK_COLLECTION", "feedbackRecords")
+CALENDAR_EVENT_COLLECTION = os.getenv("CALENDAR_EVENT_COLLECTION", "calendarEvents")
 WORKSPACE_COLLECTION = os.getenv("WORKSPACE_COLLECTION", "newsroomWorkspaces")
 NAMES_COLLECTION = os.getenv("NAMES_COLLECTION", "names")
 OAUTH_STATE_COLLECTION = os.getenv("OAUTH_STATE_COLLECTION", "googleOAuthStateNonces")
@@ -153,6 +155,19 @@ MAX_PITCH_TITLE_LENGTH = 240
 MAX_PITCH_ANGLE_LENGTH = 4000
 MAX_PITCH_SECTION_LENGTH = 80
 MAX_PITCH_NOTES_LENGTH = 10000
+PITCH_ROUND_STATUSES = {"Draft", "Open", "Reviewing", "Closed"}
+PITCH_STATUS_IN_PROGRESS = "In Progress"
+PITCH_STATUS_READY = "Ready for Review"
+PITCH_STATUS_SELECTED = "Selected"
+PITCH_STATUS_NOT_SELECTED = "Not Selected"
+PITCH_STATUS_ON_HOLD = "On Hold"
+PITCH_STATUSES = {
+    PITCH_STATUS_IN_PROGRESS,
+    PITCH_STATUS_READY,
+    PITCH_STATUS_SELECTED,
+    PITCH_STATUS_NOT_SELECTED,
+    PITCH_STATUS_ON_HOLD,
+}
 VALID_STORY_STATUSES = {
     "Assigned",
     "Reporting",
@@ -200,6 +215,7 @@ BACKEND_CAPABILITIES = {
     "rbac-v4",
     "stories",
     "pitches",
+    "pitch-rounds",
     "pitch-owner-submit",
     "shared-workflow-activity",
     "shared-feedback",
@@ -208,6 +224,7 @@ BACKEND_CAPABILITIES = {
     "multi-workspace",
     "workspace-join-codes",
     "workspace-settings",
+    "calendar-events",
     "owner-workspaces",
     "names-database",
 }
@@ -267,8 +284,10 @@ interviews_col = db[INTERVIEW_COLLECTION]
 articles_col = db[ARTICLE_COLLECTION]
 stories_col = db[STORY_COLLECTION]
 pitches_col = db[PITCH_COLLECTION]
+pitch_rounds_col = db[PITCH_ROUND_COLLECTION]
 activity_col = db[ACTIVITY_COLLECTION]
 feedback_col = db[FEEDBACK_COLLECTION]
+calendar_events_col = db[CALENDAR_EVENT_COLLECTION]
 workspaces_col = db[WORKSPACE_COLLECTION]
 names_col = db[NAMES_COLLECTION]
 oauth_state_col = db[OAUTH_STATE_COLLECTION]
@@ -384,6 +403,23 @@ except Exception:
     pass
 
 try:
+    pitch_rounds_col.create_index([("workspaceId", ASCENDING), ("status", ASCENDING), ("createdAt", -1)])
+    pitch_rounds_col.create_index([("workspaceId", ASCENDING), ("roundId", ASCENDING)], unique=True)
+    pitch_rounds_col.create_index(
+        [("workspaceId", ASCENDING), ("isLegacy", ASCENDING)],
+        unique=True,
+        partialFilterExpression={"isLegacy": True, "workspaceId": {"$type": "string"}},
+    )
+except Exception:
+    if FLASK_ENV == "production":
+        raise
+
+try:
+    pitches_col.create_index([("workspaceId", ASCENDING), ("roundId", ASCENDING), ("updatedAt", -1)])
+except Exception:
+    pass
+
+try:
     articles_col.create_index(
         [("workspaceId", ASCENDING), ("sourceStoryId", ASCENDING)],
         unique=True,
@@ -438,6 +474,11 @@ except Exception:
 
 try:
     feedback_col.create_index([("entityType", ASCENDING), ("entityId", ASCENDING), ("createdAt", -1)])
+except Exception:
+    pass
+
+try:
+    calendar_events_col.create_index([("workspaceId", ASCENDING), ("date", ASCENDING), ("startTime", ASCENDING)])
 except Exception:
     pass
 
@@ -628,6 +669,51 @@ def _workspace_members_query(workspace_id: str, extra: dict | None = None) -> di
     return query
 
 
+def _existing_workspace_pitch_owner_query(workspace_id: str, current_user: dict | None = None) -> dict:
+    """Match pitches whose owner still exists in the workspace user directory."""
+    members = list(users_col.find(
+        _workspace_members_query(workspace_id),
+        {"_id": 1, "email": 1, "name": 1, "firstName": 1, "lastName": 1},
+    ))
+    if current_user and _is_owner(current_user):
+        members.append(current_user)
+
+    user_ids = []
+    emails = set()
+    legacy_owner_values = set()
+    for member in members:
+        member_id = member.get("_id")
+        if member_id is not None:
+            for value in (member_id, str(member_id)):
+                if value not in user_ids:
+                    user_ids.append(value)
+        email = normalize_email(member.get("email") or "")
+        if email:
+            emails.add(email)
+            legacy_owner_values.add(email)
+        display_name = _user_display_name(member)
+        if display_name:
+            legacy_owner_values.add(display_name)
+
+    clauses = []
+    strong_id_fields = ("ownerUserId", "ownerId", "writerUserId", "writerId")
+    strong_email_fields = ("ownerEmail", "writerEmail")
+    if user_ids:
+        clauses.extend({field: {"$in": user_ids}} for field in strong_id_fields)
+    if emails:
+        clauses.extend({field: {"$in": sorted(emails)}} for field in strong_email_fields)
+    if legacy_owner_values:
+        missing_strong_identity = [
+            {field: {"$in": [None, ""]}}
+            for field in (*strong_id_fields, *strong_email_fields)
+        ]
+        clauses.extend({"$and": [
+            {field: {"$in": sorted(legacy_owner_values)}},
+            *missing_strong_identity,
+        ]} for field in ("owner", "writer"))
+    return {"$or": clauses} if clauses else {"_id": None}
+
+
 def _scoped_query(user_doc: dict | None, query: dict | None = None) -> dict:
     workspace = _workspace_query(user_doc)
     if not query:
@@ -635,14 +721,146 @@ def _scoped_query(user_doc: dict | None, query: dict | None = None) -> dict:
     return {"$and": [workspace, query]}
 
 
+def _normalize_pitch_round_status(value) -> str:
+    status = str(value or "").strip()
+    return {
+        "Open for Submissions": "Open",
+        "Review": "Reviewing",
+    }.get(status, status or "Draft")
+
+
+def _new_pitch_round_id(workspace_id: str) -> str:
+    workspace_id = str(workspace_id or "workspace").strip() or "workspace"
+    for _attempt in range(20):
+        candidate = f"round-{secrets.token_hex(5)}"
+        if not pitch_rounds_col.find_one({"workspaceId": workspace_id, "roundId": candidate}):
+            return candidate
+    raise RuntimeError("Could not allocate a unique pitch round id.")
+
+
+def _legacy_pitch_round_id(workspace_id: str) -> str:
+    compact = re.sub(r"[^a-z0-9]+", "-", str(workspace_id or "workspace").lower()).strip("-") or "workspace"
+    return f"legacy-{compact[:48]}"
+
+
+def _pitch_round_id_from_doc(doc: dict | None) -> str:
+    return str((doc or {}).get("roundId") or (doc or {}).get("id") or (doc or {}).get("_id") or "").strip()
+
+
+def _pitch_round_query_for_user(user_doc: dict | None, round_id: str | None = None) -> dict | None:
+    workspace_query = _workspace_query(user_doc)
+    if workspace_query == {"_id": None}:
+        return None
+    query = workspace_query
+    if round_id:
+        query = {"$and": [query, {"roundId": str(round_id).strip()}]}
+    return query
+
+
+def _pitch_round_by_id(round_id: str, user_doc: dict | None):
+    query = _pitch_round_query_for_user(user_doc, None)
+    if query is None:
+        return None
+    clauses = [{"roundId": str(round_id or "").strip()}, {"id": str(round_id or "").strip()}]
+    oid = _object_id_or_none(str(round_id or ""))
+    if oid:
+        clauses.append({"_id": oid})
+    return pitch_rounds_col.find_one({"$and": [query, {"$or": clauses}]})
+
+
+def _pitch_round_to_api(doc: dict, user_doc: dict | None = None) -> dict:
+    workspace_id = str(doc.get("workspaceId") or "").strip()
+    visible_pitch_query = _pitch_query_for_user(user_doc) if user_doc else {"workspaceId": workspace_id}
+    if visible_pitch_query is None:
+        visible_pitch_query = {"_id": None}
+    round_id = _pitch_round_id_from_doc(doc)
+    round_pitch_query = {"$and": [visible_pitch_query, {"roundId": round_id}]}
+    status_counts = {status: 0 for status in PITCH_STATUSES}
+    for pitch in pitches_col.find(round_pitch_query, {"status": 1}):
+        normalized_status = _normalize_pitch_status(pitch.get("status"))
+        if normalized_status in status_counts:
+            status_counts[normalized_status] += 1
+    return {
+        "id": round_id,
+        "workspaceId": workspace_id,
+        "name": str(doc.get("name") or "Untitled round"),
+        "description": str(doc.get("description") or ""),
+        "status": _normalize_pitch_round_status(doc.get("status")),
+        "isLegacy": bool(doc.get("isLegacy")),
+        "createdBy": str(doc.get("createdBy") or ""),
+        "openedBy": str(doc.get("openedBy") or ""),
+        "closedBy": str(doc.get("closedBy") or ""),
+        "createdAt": _datetime_for_api(doc.get("createdAt")),
+        "openedAt": _datetime_for_api(doc.get("openedAt")),
+        "closedAt": _datetime_for_api(doc.get("closedAt")),
+        "updatedAt": _datetime_for_api(doc.get("updatedAt")),
+        "pitchCount": sum(status_counts.values()),
+        "statusCounts": status_counts,
+    }
+
+
+def _pitch_round_detail_updates(payload: dict, existing: dict | None = None) -> tuple[dict, str]:
+    payload = payload or {}
+    current = existing or {}
+    name = str(payload.get("name") if "name" in payload else current.get("name") or "").strip()
+    description = str(payload.get("description") if "description" in payload else current.get("description") or "").strip()
+    if not name:
+        return {}, "Round name is required."
+    if len(name) > 160:
+        return {}, "Round name must be 160 characters or fewer."
+    if len(description) > 500:
+        return {}, "Round description must be 500 characters or fewer."
+    return {"name": name, "description": description}, ""
+
+
+def _ensure_pitch_round_data():
+    for workspace in workspaces_col.find({}, {"_id": 1, "publicId": 1}):
+        workspace_id = str(workspace.get("publicId") or workspace.get("_id") or "").strip()
+        if not workspace_id:
+            continue
+        legacy_id = _legacy_pitch_round_id(workspace_id)
+        now_iso = _now_iso()
+        pitch_rounds_col.update_one(
+            {"workspaceId": workspace_id, "isLegacy": True},
+            {
+                "$setOnInsert": {
+                    "workspaceId": workspace_id,
+                    "roundId": legacy_id,
+                    "name": "Legacy pitches",
+                    "description": "",
+                    "status": "Closed",
+                    "isLegacy": True,
+                    "createdBy": "system",
+                    "createdAt": now_iso,
+                },
+                "$set": {"updatedAt": now_iso},
+            },
+            upsert=True,
+        )
+        pitches_col.update_many(
+            {
+                "workspaceId": workspace_id,
+                "$or": [
+                    {"roundId": {"$exists": False}},
+                    {"roundId": None},
+                    {"roundId": ""},
+                ],
+            },
+            {"$set": {"roundId": legacy_id}},
+        )
+
+
 def _ensure_default_workspace():
     public_id = os.getenv("DEFAULT_WORKSPACE_ID", "poolesville-pulse").strip() or "poolesville-pulse"
+    configured_name = os.getenv("DEFAULT_WORKSPACE_NAME", "The Poolesville Pulse").strip() or "The Poolesville Pulse"
+    if public_id == "poolesville-pulse" and configured_name == "Poolesville Pulse":
+        configured_name = "The Poolesville Pulse"
     existing = workspaces_col.find_one({"publicId": public_id})
     if not existing:
         now_iso = _now_iso()
         doc = {
             "publicId": public_id,
-            "name": os.getenv("DEFAULT_WORKSPACE_NAME", "Poolesville Pulse").strip() or "Poolesville Pulse",
+            "name": configured_name,
             "joinCode": normalize_workspace_code(os.getenv("DEFAULT_WORKSPACE_JOIN_CODE")) or _new_workspace_code(),
             "publicationUrl": os.getenv("DEFAULT_PUBLICATION_URL", "https://poolesvillepulse.org").strip(),
             "articleDomain": os.getenv("DEFAULT_ARTICLE_DOMAIN", "poolesvillepulse.org").strip().lower(),
@@ -656,6 +874,13 @@ def _ensure_default_workspace():
             existing = doc
         except DuplicateKeyError:
             existing = workspaces_col.find_one({"publicId": public_id})
+
+    if existing and public_id == "poolesville-pulse" and existing.get("name") == "Poolesville Pulse":
+        workspaces_col.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"name": configured_name, "updatedAt": _now_iso()}},
+        )
+        existing = {**existing, "name": configured_name}
 
     if existing and not existing.get("legacyMembershipMigratedAt"):
         users_col.update_many(
@@ -748,6 +973,7 @@ def _canonicalize_workspace_user_roles():
 
 _canonicalize_owner_accounts()
 _ensure_default_workspace()
+_ensure_pitch_round_data()
 _canonicalize_workspace_user_roles()
 
 
@@ -1437,11 +1663,13 @@ def _story_collaborator_mutation_query(user_doc: dict, expected_status: str) -> 
 
 def _pitch_query_for_user(user_doc: dict):
     role = _current_user_role(user_doc)
-    if not _workspace_id_for_user(user_doc) or role == ROLE_GUEST:
+    workspace_id = _workspace_id_for_user(user_doc)
+    if not workspace_id or role == ROLE_GUEST:
         return None
+    existing_owner_query = _existing_workspace_pitch_owner_query(workspace_id, user_doc)
     if role == ROLE_WRITER:
-        return _scoped_query(user_doc, _owned_pitch_query(user_doc))
-    return _workspace_query(user_doc)
+        return {"$and": [_scoped_query(user_doc, _owned_pitch_query(user_doc)), existing_owner_query]}
+    return {"$and": [_workspace_query(user_doc), existing_owner_query]}
 
 
 def _find_owned_story_or_404(story_id: str, user_doc: dict):
@@ -2099,12 +2327,74 @@ def _story_to_api(doc: dict) -> dict:
     }
 
 
+CALENDAR_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+CALENDAR_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _calendar_event_updates(payload: dict) -> tuple[dict, str]:
+    title = str((payload or {}).get("title") or "").strip()
+    date = str((payload or {}).get("date") or "").strip()
+    description = str((payload or {}).get("description") or "").strip()
+    all_day = _payload_bool(payload.get("allDay")) if "allDay" in payload else True
+    start_time = str((payload or {}).get("startTime") or "").strip()
+    end_time = str((payload or {}).get("endTime") or "").strip()
+
+    if not title:
+        return {}, "Event title is required."
+    if len(title) > 120:
+        return {}, "Event title must be 120 characters or fewer."
+    if not CALENDAR_DATE_RE.fullmatch(date):
+        return {}, "Choose a valid event date."
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        return {}, "Choose a valid event date."
+    if len(description) > 2000:
+        return {}, "Event description must be 2,000 characters or fewer."
+    if all_day:
+        start_time = ""
+        end_time = ""
+    else:
+        if not CALENDAR_TIME_RE.fullmatch(start_time) or not CALENDAR_TIME_RE.fullmatch(end_time):
+            return {}, "Choose a start and end time, or mark the event as all day."
+        if end_time <= start_time:
+            return {}, "End time must be after the start time."
+
+    return {
+        "title": title,
+        "date": date,
+        "allDay": all_day,
+        "startTime": start_time,
+        "endTime": end_time,
+        "description": description,
+    }, ""
+
+
+def _calendar_event_to_api(doc: dict) -> dict:
+    return {
+        "id": _doc_public_id(doc, "eventId"),
+        "title": str(doc.get("title") or "Untitled event"),
+        "date": str(doc.get("date") or ""),
+        "allDay": _bool_field(doc, "allDay", default=True),
+        "startTime": str(doc.get("startTime") or ""),
+        "endTime": str(doc.get("endTime") or ""),
+        "description": str(doc.get("description") or ""),
+        "createdBy": str(doc.get("createdBy") or ""),
+        "createdByUserId": str(doc.get("createdByUserId") or ""),
+        "createdAt": _datetime_for_api(doc.get("createdAt")),
+        "updatedAt": _datetime_for_api(doc.get("updatedAt")),
+    }
+
+
 def _normalize_pitch_status(value) -> str:
     status = str(value or "").strip()
     return {
-        "New": "In Progress",
-        "Submitted": "Ready for Review",
-        "Needs Review": "Ready for Review",
+        "New": PITCH_STATUS_IN_PROGRESS,
+        "Submitted": PITCH_STATUS_READY,
+        "Needs Review": PITCH_STATUS_READY,
+        "Approved": PITCH_STATUS_SELECTED,
+        "Selected": PITCH_STATUS_SELECTED,
+        "Selected for Story": PITCH_STATUS_SELECTED,
     }.get(status, status or "In Progress")
 
 
@@ -2140,6 +2430,7 @@ def _pitch_to_api(doc: dict) -> dict:
     deadline = _story_deadline(doc)
     return {
         "id": _doc_public_id(doc, "pitchId"),
+        "roundId": str(doc.get("roundId") or ""),
         "title": doc.get("title") or "Untitled pitch",
         "angle": doc.get("angle") or doc.get("summary") or "",
         "status": _normalize_pitch_status(doc.get("status")),
@@ -2154,6 +2445,11 @@ def _pitch_to_api(doc: dict) -> dict:
         "editorFeedback": doc.get("editorFeedback", "") or "",
         "feedback": doc.get("feedback") if isinstance(doc.get("feedback"), list) else [],
         "comments": doc.get("comments") if isinstance(doc.get("comments"), list) else [],
+        "selectedStoryId": str(doc.get("selectedStoryId") or doc.get("sourceStoryId") or ""),
+        "selectedBy": doc.get("selectedBy") or "",
+        "selectedAt": _datetime_for_api(doc.get("selectedAt")),
+        "decisionReason": doc.get("decisionReason") or "",
+        "decisionNote": doc.get("decisionNote") or "",
         "updatedAt": _date_for_api(doc.get("updatedAt") or doc.get("submittedAt") or doc.get("createdAt")),
     }
 
@@ -2266,6 +2562,7 @@ def _create_story_from_pitch(pitch_doc: dict, actor_doc: dict, deadline: str = "
         "wordCount": 0,
         "sourceCount": 0,
         "sourcePitchId": pitch_id,
+        "sourcePitchRoundId": str(pitch_doc.get("roundId") or ""),
     }
     existing_update = {"updatedAt": now_iso}
     try:
@@ -3230,6 +3527,87 @@ def api_rotate_workspace_join_code():
     return jsonify({"ok": True, "workspace": _serialize_workspace(updated, include_join_code=True)})
 
 
+@app.get("/api/calendar-events")
+@require_auth
+def api_calendar_events():
+    user_doc = _current_user_doc()
+    workspace_id = _workspace_id_for_user(user_doc)
+    if not workspace_id:
+        return jsonify({"ok": True, "events": []})
+    docs = list(calendar_events_col.find({"workspaceId": workspace_id}).sort([
+        ("date", ASCENDING),
+        ("startTime", ASCENDING),
+        ("title", ASCENDING),
+        ("_id", ASCENDING),
+    ]))
+    return jsonify({"ok": True, "events": [_calendar_event_to_api(doc) for doc in docs]})
+
+
+@app.post("/api/calendar-events")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_create_calendar_event():
+    user_doc = _current_user_doc()
+    updates, validation_error = _calendar_event_updates(_request_payload())
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
+    now_iso = _now_iso()
+    doc = {
+        **updates,
+        "workspaceId": _workspace_id_for_user(user_doc),
+        "createdBy": _user_display_name(user_doc),
+        "createdByUserId": str(user_doc.get("_id")),
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+    }
+    result = calendar_events_col.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return jsonify({"ok": True, "event": _calendar_event_to_api(doc)}), 201
+
+
+@app.patch("/api/calendar-events/<event_id>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_update_calendar_event(event_id: str):
+    user_doc = _current_user_doc()
+    object_id = _object_id_or_none(event_id)
+    if not object_id:
+        return jsonify({"ok": False, "error": "Event not found."}), 404
+    query = {
+        "_id": object_id,
+        "workspaceId": _workspace_id_for_user(user_doc),
+    }
+    event = calendar_events_col.find_one(query)
+    if not event:
+        return jsonify({"ok": False, "error": "Event not found."}), 404
+    if _current_user_role(user_doc) == ROLE_WRITER and str(event.get("createdByUserId") or "") != str(user_doc.get("_id")):
+        return jsonify({"ok": False, "error": "You can only edit events you created."}), 403
+    updates, validation_error = _calendar_event_updates(_request_payload())
+    if validation_error:
+        return jsonify({"ok": False, "error": validation_error}), 400
+    updates["updatedAt"] = _now_iso()
+    calendar_events_col.update_one(query, {"$set": updates})
+    updated = calendar_events_col.find_one(query) or {**event, **updates}
+    return jsonify({"ok": True, "event": _calendar_event_to_api(updated)})
+
+
+@app.delete("/api/calendar-events/<event_id>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_delete_calendar_event(event_id: str):
+    user_doc = _current_user_doc()
+    object_id = _object_id_or_none(event_id)
+    if not object_id:
+        return jsonify({"ok": False, "error": "Event not found."}), 404
+    query = {
+        "_id": object_id,
+        "workspaceId": _workspace_id_for_user(user_doc),
+    }
+    if _current_user_role(user_doc) == ROLE_WRITER:
+        query["createdByUserId"] = str(user_doc.get("_id"))
+    result = calendar_events_col.delete_one(query)
+    if result.deleted_count != 1:
+        return jsonify({"ok": False, "error": "Event not found or cannot be deleted."}), 404
+    return jsonify({"ok": True, "deletedEventId": event_id})
+
+
 @app.get("/api/owner/workspaces")
 @require_owner
 def api_owner_workspaces():
@@ -3548,6 +3926,215 @@ def api_admin_update_user_role(user_id: str):
     return jsonify({"ok": True, "user": _serialize_user(updated)})
 
 
+def _workspace_user_record_query(
+    workspace_id: str,
+    user_doc: dict,
+    id_fields: tuple[str, ...],
+    email_fields: tuple[str, ...] = (),
+    name_fields: tuple[str, ...] = (),
+) -> dict:
+    user_id = user_doc.get("_id")
+    id_values = []
+    for value in (user_id, str(user_id or "")):
+        if value and value not in id_values:
+            id_values.append(value)
+    email = normalize_email(user_doc.get("email") or "")
+    legacy_values = [value for value in (_user_display_name(user_doc), email) if value]
+    clauses = []
+    if id_values:
+        clauses.extend({field: {"$in": id_values}} for field in id_fields)
+    if email:
+        clauses.extend({field: email} for field in email_fields)
+    if legacy_values:
+        missing_strong_identity = [
+            {field: {"$in": [None, ""]}}
+            for field in (*id_fields, *email_fields)
+        ]
+        clauses.extend({"$and": [{field: {"$in": legacy_values}}, *missing_strong_identity]} for field in name_fields)
+    return {"$and": [{"workspaceId": workspace_id}, {"$or": clauses or [{"_id": None}]}]}
+
+
+def _delete_workspace_user_data(workspace_id: str, user_doc: dict) -> dict[str, int]:
+    """Delete workspace records owned by a removed member and detach shared references."""
+    user_id = user_doc.get("_id")
+    user_ids = []
+    for value in (user_id, str(user_id or "")):
+        if value and value not in user_ids:
+            user_ids.append(value)
+    email = normalize_email(user_doc.get("email") or "")
+
+    story_owner_query = _workspace_user_record_query(
+        workspace_id,
+        user_doc,
+        ("writerUserId", "writerId", "ownerUserId", "ownerId"),
+        ("writerEmail", "ownerEmail"),
+        ("writer", "owner"),
+    )
+    pitch_owner_query = _workspace_user_record_query(
+        workspace_id,
+        user_doc,
+        ("ownerUserId", "ownerId", "writerUserId", "writerId"),
+        ("ownerEmail", "writerEmail"),
+        ("owner", "writer"),
+    )
+    owned_stories = list(stories_col.find(story_owner_query))
+    owned_pitches = list(pitches_col.find(pitch_owner_query))
+    story_ids = sorted({_doc_public_id(doc, "storyId") for doc in owned_stories if _doc_public_id(doc, "storyId")})
+    pitch_ids = sorted({_doc_public_id(doc, "pitchId") for doc in owned_pitches if _doc_public_id(doc, "pitchId")})
+
+    collaborator_clauses = []
+    attachment_owner_clauses = []
+    inline_author_clauses = []
+    if user_ids:
+        collaborator_clauses.extend(({"userId": {"$in": user_ids}}, {"id": {"$in": user_ids}}))
+        attachment_owner_clauses.append({"addedBy.userId": {"$in": user_ids}})
+        inline_author_clauses.extend(({"authorId": {"$in": user_ids}}, {"actorId": {"$in": user_ids}}))
+    if email:
+        collaborator_clauses.append({"email": email})
+        attachment_owner_clauses.append({"addedBy.email": email})
+        inline_author_clauses.extend(({"authorEmail": email}, {"actorEmail": email}))
+
+    file_ids = set()
+    for story in owned_stories:
+        legacy_file_id = str(story.get("attachmentFileId") or "").strip()
+        if legacy_file_id:
+            file_ids.add(legacy_file_id)
+        for item in story.get("attachments") if isinstance(story.get("attachments"), list) else []:
+            if isinstance(item, dict):
+                file_id = str(item.get("fileId") or item.get("attachmentFileId") or "").strip()
+                if file_id:
+                    file_ids.add(file_id)
+
+    if attachment_owner_clauses:
+        attachment_owner_query = {"$or": attachment_owner_clauses}
+        attachment_story_query = {
+            "workspaceId": workspace_id,
+            "attachments": {"$elemMatch": attachment_owner_query},
+        }
+        for story in stories_col.find(attachment_story_query, {"attachments": 1}):
+            for item in story.get("attachments") if isinstance(story.get("attachments"), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                added_by = item.get("addedBy") if isinstance(item.get("addedBy"), dict) else {}
+                matches_user = str(added_by.get("userId") or "") == str(user_id or "")
+                matches_email = email and normalize_email(added_by.get("email") or "") == email
+                if matches_user or matches_email:
+                    file_id = str(item.get("fileId") or item.get("attachmentFileId") or "").strip()
+                    if file_id:
+                        file_ids.add(file_id)
+        stories_col.update_many(
+            {"workspaceId": workspace_id},
+            {"$pull": {"attachments": attachment_owner_query}},
+        )
+
+    if collaborator_clauses:
+        stories_col.update_many(
+            {"workspaceId": workspace_id},
+            {"$pull": {"collaborators": {"$or": collaborator_clauses}}},
+        )
+    if inline_author_clauses:
+        inline_pull = {"$or": inline_author_clauses}
+        stories_col.update_many(
+            {"workspaceId": workspace_id},
+            {"$pull": {"feedback": inline_pull, "comments": inline_pull}},
+        )
+        pitches_col.update_many(
+            {"workspaceId": workspace_id},
+            {"$pull": {"feedback": inline_pull, "comments": inline_pull}},
+        )
+
+    gridfs_clauses = []
+    if user_ids:
+        gridfs_clauses.append({"metadata.uploadedBy": {"$in": user_ids}})
+    if email:
+        gridfs_clauses.append({"metadata.uploadedByEmail": email})
+    if gridfs_clauses:
+        for stored in story_files.find({"metadata.workspaceId": workspace_id, "$or": gridfs_clauses}):
+            file_ids.add(str(stored._id))
+    for file_id in file_ids:
+        _delete_story_file(file_id)
+
+    entity_clauses = []
+    if story_ids:
+        entity_clauses.append({"entityType": "story", "entityId": {"$in": story_ids}})
+    if pitch_ids:
+        entity_clauses.append({"entityType": "pitch", "entityId": {"$in": pitch_ids}})
+
+    feedback_identity = _workspace_user_record_query(
+        workspace_id, user_doc, ("authorId",), ("authorEmail",), ("authorName", "actorName"),
+    )["$and"][1]
+    activity_identity = _workspace_user_record_query(
+        workspace_id, user_doc, ("actorId",), ("actorEmail",), ("actorName",),
+    )["$and"][1]
+    feedback_clauses = [*entity_clauses, feedback_identity]
+    activity_clauses = [*entity_clauses, activity_identity]
+
+    article_identity = _workspace_user_record_query(
+        workspace_id, user_doc, ("addedByUserId",), ("addedByEmail",), ("addedBy",),
+    )["$and"][1]
+    article_clauses = [article_identity]
+    if story_ids:
+        article_clauses.append({"sourceStoryId": {"$in": story_ids}})
+    article_query = {"workspaceId": workspace_id, "$or": article_clauses}
+    owned_articles = list(articles_col.find(article_query, {"url": 1, "articleUrl": 1, "canonicalUrl": 1, "urlNorm": 1}))
+    article_urls = sorted({
+        str(doc.get(field) or "").strip()
+        for doc in owned_articles
+        for field in ("url", "articleUrl", "canonicalUrl", "urlNorm")
+        if str(doc.get(field) or "").strip()
+    })
+
+    interview_identity = _workspace_user_record_query(
+        workspace_id, user_doc, ("addedByUserId",), ("addedByEmail",), ("addedBy", "createdBy"),
+    )["$and"][1]
+    interview_clauses = [interview_identity]
+    if article_urls:
+        interview_clauses.extend({field: {"$in": article_urls}} for field in ("url", "articleUrl", "urlNorm"))
+
+    deleted = {
+        "stories": stories_col.delete_many(story_owner_query).deleted_count,
+        "pitches": pitches_col.delete_many(pitch_owner_query).deleted_count,
+        "articles": articles_col.delete_many(article_query).deleted_count,
+        "interviews": interviews_col.delete_many({
+            "workspaceId": workspace_id,
+            "$or": interview_clauses,
+        }).deleted_count,
+        "calendarEvents": calendar_events_col.delete_many(_workspace_user_record_query(
+            workspace_id,
+            user_doc,
+            ("createdByUserId",),
+            ("createdByEmail",),
+            ("createdBy",),
+        )).deleted_count,
+        "feedback": feedback_col.delete_many({
+            "workspaceId": workspace_id,
+            "$or": feedback_clauses,
+        }).deleted_count,
+        "activity": activity_col.delete_many({
+            "workspaceId": workspace_id,
+            "$or": activity_clauses,
+        }).deleted_count,
+        "extractionRates": extraction_rate_col.delete_many({
+            "workspaceId": workspace_id,
+            "userId": {"$in": user_ids},
+        }).deleted_count,
+        "attachments": len(file_ids),
+    }
+
+    created_round_query = _workspace_user_record_query(
+        workspace_id,
+        user_doc,
+        ("createdByUserId",),
+    )
+    removed_rounds = 0
+    for pitch_round in pitch_rounds_col.find(created_round_query, {"_id": 1, "roundId": 1, "isLegacy": 1}):
+        round_id = _pitch_round_id_from_doc(pitch_round)
+        if not pitch_round.get("isLegacy") and not pitches_col.find_one({"workspaceId": workspace_id, "roundId": round_id}):
+            removed_rounds += pitch_rounds_col.delete_one({"_id": pitch_round["_id"], "workspaceId": workspace_id}).deleted_count
+    deleted["emptyPitchRounds"] = removed_rounds
+    return deleted
+
+
 @app.delete("/api/admin/users/<user_id>/membership")
 @require_roles(ROLE_ADMIN)
 def api_admin_remove_user_membership(user_id: str):
@@ -3572,6 +4159,11 @@ def api_admin_remove_user_membership(user_id: str):
             admin_count = users_col.count_documents({"role": ROLE_ADMIN, "workspaceId": workspace_id})
             if admin_count <= 1:
                 return jsonify({"ok": False, "error": "At least one admin must remain."}), 400
+        try:
+            deleted_data = _delete_workspace_user_data(workspace_id, target)
+        except Exception:
+            app.logger.exception("Workspace member data cleanup failed.")
+            return jsonify({"ok": False, "error": "The member's workspace membership was not removed. Try again to finish cleaning up their data."}), 503
         removed_at = _now_iso()
         result = users_col.update_one(
             _workspace_members_query(workspace_id, {"_id": oid}),
@@ -3611,7 +4203,7 @@ def api_admin_remove_user_membership(user_id: str):
         })
     except Exception:
         pass
-    return jsonify({"ok": True, "removedUserId": str(oid)})
+    return jsonify({"ok": True, "removedUserId": str(oid), "deletedData": deleted_data})
 
 
 @app.get("/api/stories")
@@ -3623,6 +4215,63 @@ def api_stories():
         return jsonify({"ok": False, "error": "Stories are not available to guests."}), 403
     docs = list(stories_col.find(query).sort([("updatedAt", -1), ("_id", -1)]))
     return jsonify({"ok": True, "stories": [_story_to_api(doc) for doc in docs]})
+
+
+@app.post("/api/stories")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR, ROLE_WRITER)
+def api_create_story():
+    user_doc = _current_user_doc()
+    payload = _request_payload()
+    title = str(payload.get("title") or "").strip()
+    section = str(payload.get("section") or "").strip()
+    summary = str(payload.get("summary") or "").strip()
+    deadline = _first_text_value(*(payload.get(field) for field in DUE_DATE_FIELDS))
+
+    if not title:
+        return jsonify({"ok": False, "error": "Story title is required."}), 400
+    if len(title) > MAX_PITCH_TITLE_LENGTH:
+        return jsonify({"ok": False, "error": f"Story title must be {MAX_PITCH_TITLE_LENGTH} characters or fewer."}), 400
+    if section not in PITCH_SECTIONS:
+        return jsonify({"ok": False, "error": "Choose a valid story section."}), 400
+    if len(summary) > MAX_PITCH_ANGLE_LENGTH:
+        return jsonify({"ok": False, "error": f"Story summary must be {MAX_PITCH_ANGLE_LENGTH} characters or fewer."}), 400
+    if len(deadline) > 80:
+        return jsonify({"ok": False, "error": "Due date is too long."}), 400
+
+    now_iso = _now_iso()
+    role = _current_user_role(user_doc)
+    doc = {
+        "workspaceId": _workspace_id_for_user(user_doc),
+        "title": title,
+        "section": section,
+        "writer": _user_display_name(user_doc),
+        "writerEmail": normalize_email(user_doc.get("email") or ""),
+        "writerUserId": str(user_doc.get("_id")),
+        "editor": _user_display_name(user_doc) if role in {ROLE_ADMIN, ROLE_EDITOR} else "",
+        "status": "Assigned",
+        "priority": "Normal",
+        "deadline": deadline,
+        "dueDate": deadline,
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "summary": summary,
+        "nextStep": "Begin reporting.",
+        "editorNote": "",
+        "googleDocUrl": "",
+        "revisionCount": 0,
+        "wordCount": 0,
+        "sourceCount": 0,
+        "feedback": [],
+        "comments": [],
+        "collaborators": [],
+    }
+    result = stories_col.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    try:
+        _record_status_activity("story", _doc_public_id(doc, "storyId"), "", "Assigned", user_doc)
+    except Exception:
+        pass
+    return jsonify({"ok": True, "story": _story_to_api(doc)})
 
 
 @app.patch("/api/stories/<story_id>")
@@ -4360,6 +5009,106 @@ def api_download_story_attachment(story_id: str):
     )
 
 
+@app.get("/api/pitch-rounds")
+@require_auth
+def api_pitch_rounds():
+    user_doc = _current_user_doc()
+    query = _pitch_round_query_for_user(user_doc)
+    if query is None:
+        return jsonify({"ok": False, "error": "Pitch rounds are not available without a workspace."}), 403
+    docs = list(pitch_rounds_col.find(query).sort([("isLegacy", ASCENDING), ("createdAt", -1), ("_id", -1)]))
+    return jsonify({"ok": True, "rounds": [_pitch_round_to_api(doc, user_doc) for doc in docs]})
+
+
+@app.post("/api/pitch-rounds")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+def api_create_pitch_round():
+    user_doc = _current_user_doc()
+    payload = _request_payload()
+    details, detail_error = _pitch_round_detail_updates(payload)
+    if detail_error:
+        return jsonify({"ok": False, "error": detail_error}), 400
+    workspace_id = _workspace_id_for_user(user_doc)
+    now_iso = _now_iso()
+    doc = {
+        "workspaceId": workspace_id,
+        "roundId": _new_pitch_round_id(workspace_id),
+        **details,
+        "status": "Draft",
+        "isLegacy": False,
+        "createdBy": _user_display_name(user_doc),
+        "createdByUserId": str(user_doc.get("_id") or ""),
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+    }
+    try:
+        result = pitch_rounds_col.insert_one(doc)
+    except DuplicateKeyError:
+        doc["roundId"] = _new_pitch_round_id(workspace_id)
+        try:
+            result = pitch_rounds_col.insert_one(doc)
+        except DuplicateKeyError:
+            return jsonify({"ok": False, "error": "That round already exists. Try again."}), 409
+    except Exception:
+        app.logger.exception("Pitch round creation failed.")
+        return jsonify({"ok": False, "error": "The pitch round could not be created."}), 503
+    doc["_id"] = result.inserted_id
+    return jsonify({"ok": True, "round": _pitch_round_to_api(doc, user_doc)}), 201
+
+
+@app.patch("/api/pitch-rounds/<round_id>")
+@require_roles(ROLE_ADMIN, ROLE_EDITOR)
+def api_update_pitch_round(round_id: str):
+    user_doc = _current_user_doc()
+    pitch_round = _pitch_round_by_id(round_id, user_doc)
+    if not pitch_round:
+        return jsonify({"ok": False, "error": "Pitch round not found."}), 404
+    if pitch_round.get("isLegacy"):
+        return jsonify({"ok": False, "error": "Legacy pitches cannot be edited as a round."}), 409
+
+    payload = _request_payload()
+    update, detail_error = _pitch_round_detail_updates(payload, pitch_round)
+    if detail_error:
+        return jsonify({"ok": False, "error": detail_error}), 400
+    current_status = _normalize_pitch_round_status(pitch_round.get("status"))
+    next_status = _normalize_pitch_round_status(payload.get("status")) if "status" in payload else current_status
+    if next_status not in PITCH_ROUND_STATUSES:
+        return jsonify({"ok": False, "error": "Choose a valid round status."}), 400
+
+    workspace_id = _workspace_id_for_user(user_doc)
+    if next_status == "Open":
+        open_round = pitch_rounds_col.find_one({
+            "workspaceId": workspace_id,
+            "status": "Open",
+            "roundId": {"$ne": _pitch_round_id_from_doc(pitch_round)},
+        })
+        if open_round:
+            return jsonify({"ok": False, "error": "Close the current open round before opening another."}), 409
+        if current_status not in {"Draft", "Reviewing", "Closed", "Open"}:
+            return jsonify({"ok": False, "error": "This round cannot be opened from its current status."}), 409
+        update.update({"status": "Open", "openedBy": _user_display_name(user_doc), "openedAt": _now_iso()})
+    elif next_status == "Reviewing":
+        if current_status != "Open":
+            return jsonify({"ok": False, "error": "Only an open round can move to review."}), 409
+        update["status"] = "Reviewing"
+    elif next_status == "Closed":
+        if current_status not in {"Open", "Reviewing"}:
+            return jsonify({"ok": False, "error": "Only an open or reviewing round can be closed."}), 409
+        update.update({"status": "Closed", "closedBy": _user_display_name(user_doc), "closedAt": _now_iso()})
+    elif "status" in payload and next_status != current_status:
+        return jsonify({"ok": False, "error": "This round cannot move to that status."}), 409
+
+    update["updatedAt"] = _now_iso()
+    result = pitch_rounds_col.update_one(
+        {"_id": pitch_round["_id"], "workspaceId": workspace_id, "status": pitch_round.get("status")},
+        {"$set": update},
+    )
+    if result.matched_count == 0:
+        return jsonify({"ok": False, "error": "Round changed in another session. Refresh and try again."}), 409
+    updated = pitch_rounds_col.find_one({"_id": pitch_round["_id"]}) or {**pitch_round, **update}
+    return jsonify({"ok": True, "round": _pitch_round_to_api(updated, user_doc)})
+
+
 @app.get("/api/pitches")
 @require_auth
 def api_pitches():
@@ -4367,6 +5116,9 @@ def api_pitches():
     query = _pitch_query_for_user(user_doc)
     if query is None:
         return jsonify({"ok": False, "error": "Pitch board is not available to guests."}), 403
+    round_id = str(request.args.get("roundId") or "").strip()
+    if round_id:
+        query = {"$and": [query, {"roundId": round_id}]}
     docs = list(pitches_col.find(query).sort([("updatedAt", -1), ("_id", -1)]))
     return jsonify({"ok": True, "pitches": [_pitch_to_api(doc) for doc in docs]})
 
@@ -4376,15 +5128,24 @@ def api_pitches():
 def api_create_pitch():
     user_doc = _current_user_doc()
     payload = _request_payload()
+    workspace_id = _workspace_id_for_user(user_doc)
+    round_id = str(payload.get("roundId") or "").strip()
+    pitch_round = _pitch_round_by_id(round_id, user_doc) if round_id else pitch_rounds_col.find_one({"workspaceId": workspace_id, "status": "Open"})
+    if not pitch_round:
+        return jsonify({"ok": False, "error": "Open a pitch round before creating a pitch."}), 409
+    if _normalize_pitch_round_status(pitch_round.get("status")) != "Open":
+        return jsonify({"ok": False, "error": "Pitches can only be created in an open round."}), 409
+    round_id = _pitch_round_id_from_doc(pitch_round)
     details, detail_error = _pitch_detail_updates(payload, {"title": "", "angle": "", "section": "", "notes": ""})
     if detail_error:
         return jsonify({"ok": False, "error": detail_error}), 400
     now_iso = _now_iso()
     doc = {
-        "workspaceId": _workspace_id_for_user(user_doc),
+        "workspaceId": workspace_id,
+        "roundId": round_id,
         "title": details["title"],
         "angle": details["angle"],
-        "status": "In Progress",
+        "status": PITCH_STATUS_IN_PROGRESS,
         "section": details["section"],
         "owner": _user_display_name(user_doc),
         "ownerEmail": normalize_email(user_doc.get("email") or ""),
@@ -4413,12 +5174,16 @@ def api_update_pitch(pitch_id: str):
     role = _current_user_role(user_doc)
     current_status = _normalize_pitch_status(pitch.get("status"))
     raw_current_status = str(pitch.get("status") or "In Progress")
+    pitch_round = _pitch_round_by_id(str(pitch.get("roundId") or ""), user_doc) if pitch.get("roundId") else None
+    round_status = _normalize_pitch_round_status(pitch_round.get("status")) if pitch_round else "Open"
     detail_fields = {"title", "angle", "section", "notes"}
     if any(field in payload for field in detail_fields):
         if "status" in payload or any(field in payload for field in DUE_DATE_FIELDS):
             return jsonify({"ok": False, "error": "Update pitch details separately from workflow status."}), 400
         if current_status != "In Progress":
             return jsonify({"ok": False, "error": "Only in-progress pitches can be edited."}), 409
+        if round_status != "Open":
+            return jsonify({"ok": False, "error": "Pitches can only be edited while their round is open."}), 409
         if role == ROLE_WRITER and not _pitch_owned_by_user(pitch, user_doc):
             return jsonify({"ok": False, "error": "Only the pitch owner can edit this pitch."}), 403
         detail_update, detail_error = _pitch_detail_updates(payload, pitch)
@@ -4450,31 +5215,60 @@ def api_update_pitch(pitch_id: str):
     approval_deadline = _first_text_value(*(payload.get(field) for field in DUE_DATE_FIELDS))
     approval_message = str(payload.get("approvalMessage") or payload.get("message") or "").strip()
     invite_emails = _approval_invite_emails(payload.get("inviteEmails") or payload.get("invites") or payload.get("emails"))
+    decision_reason = str(payload.get("decisionReason") or "").strip()
+    decision_note = str(payload.get("decisionNote") or "").strip()
     if len(approval_deadline) > 80:
         return jsonify({"ok": False, "error": "Due date is too long."}), 400
     if len(approval_message) > 200:
         return jsonify({"ok": False, "error": "Approval message must be 200 characters or fewer."}), 400
+    if len(decision_reason) > 160:
+        return jsonify({"ok": False, "error": "Decision reason must be 160 characters or fewer."}), 400
+    if len(decision_note) > 1000:
+        return jsonify({"ok": False, "error": "Decision note must be 1,000 characters or fewer."}), 400
+    if any(field in payload for field in DUE_DATE_FIELDS) and role == ROLE_WRITER:
+        return jsonify({"ok": False, "error": "Only editors and admins can update pitch due dates."}), 403
     update = {"updatedAt": _now_iso()}
+    unset = {}
     next_status = ""
     if "status" in payload:
         next_status = _normalize_pitch_status(payload.get("status"))
-        if next_status not in {"In Progress", "Ready for Review", "Approved", "On Hold"}:
+        if next_status not in PITCH_STATUSES:
             return jsonify({"ok": False, "error": "Choose a valid pitch status."}), 400
+        if round_status not in {"Open", "Reviewing"}:
+            return jsonify({"ok": False, "error": "This pitch round is closed."}), 409
         if role == ROLE_WRITER:
             if not _pitch_owned_by_user(pitch, user_doc):
                 return jsonify({"ok": False, "error": "Only the pitch owner can submit it for review."}), 403
-            if next_status != "Ready for Review":
+            if next_status != PITCH_STATUS_READY:
                 return jsonify({"ok": False, "error": "Writers can only submit their own pitch for review."}), 403
-            if current_status != "In Progress":
+            if round_status != "Open" or current_status != PITCH_STATUS_IN_PROGRESS:
                 return jsonify({"ok": False, "error": "This pitch can no longer be submitted for review."}), 409
-        if role in {ROLE_ADMIN, ROLE_EDITOR} and next_status == "Approved" and current_status != "Ready for Review":
-            return jsonify({"ok": False, "error": "Only pitches ready for review can be approved."}), 409
+        if role in {ROLE_ADMIN, ROLE_EDITOR}:
+            if next_status == PITCH_STATUS_READY:
+                return jsonify({"ok": False, "error": "Only the pitch owner can submit it for review."}), 403
+            if next_status in {PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED} and current_status != PITCH_STATUS_READY:
+                return jsonify({"ok": False, "error": "Only pitches ready for review can receive a decision."}), 409
+            if next_status == PITCH_STATUS_IN_PROGRESS and current_status not in {PITCH_STATUS_READY, PITCH_STATUS_ON_HOLD}:
+                return jsonify({"ok": False, "error": "This pitch cannot be moved back to in progress."}), 409
+            if next_status == PITCH_STATUS_ON_HOLD and current_status in {PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED}:
+                return jsonify({"ok": False, "error": "A decided pitch cannot be put on hold."}), 409
         update["status"] = next_status
-    if next_status == "Approved":
+    if next_status == PITCH_STATUS_SELECTED:
         if not approval_deadline:
-            return jsonify({"ok": False, "error": "Due date is required before approving a pitch."}), 400
+            return jsonify({"ok": False, "error": "Due date is required before selecting a pitch."}), 400
         update["deadline"] = approval_deadline
         update["dueDate"] = approval_deadline
+        update["selectedBy"] = _user_display_name(user_doc)
+        update["selectedAt"] = _now_iso()
+        unset.update({"decisionReason": "", "decisionNote": ""})
+    elif next_status == PITCH_STATUS_NOT_SELECTED:
+        if "decisionReason" in payload:
+            update["decisionReason"] = decision_reason
+        if "decisionNote" in payload:
+            update["decisionNote"] = decision_note
+        unset.update({"selectedBy": "", "selectedAt": "", "selectedStoryId": ""})
+    elif next_status == PITCH_STATUS_IN_PROGRESS:
+        unset.update({"decisionReason": "", "decisionNote": ""})
     if len(update) == 1:
         return jsonify({"ok": False, "error": "No editable fields provided."}), 400
 
@@ -4483,43 +5277,55 @@ def api_update_pitch(pitch_id: str):
         mutation_scope = _scoped_query(user_doc, _owned_pitch_query(user_doc))
     result = pitches_col.update_one(
         {"$and": [{"_id": pitch["_id"]}, mutation_scope, {"status": raw_current_status}]},
-        {"$set": update},
+        {"$set": update, "$unset": unset} if unset else {"$set": update},
     )
     if result.matched_count == 0:
         return jsonify({"ok": False, "error": "Pitch access or status changed. Refresh and try again."}), 409
     updated = pitches_col.find_one({"_id": pitch["_id"], "workspaceId": _workspace_id_for_user(user_doc)}) or {**pitch, **update}
     payload = {"ok": True, "pitch": _pitch_to_api(updated)}
-    if update.get("status") == "Approved":
+    if update.get("status") == PITCH_STATUS_SELECTED:
         try:
             story_doc = _create_story_from_pitch(updated, user_doc, approval_deadline, approval_message)
         except Exception:
-            rollback_set = {"status": raw_current_status, "updatedAt": _now_iso()}
+            rollback_set = {
+                "status": raw_current_status,
+                "updatedAt": _now_iso(),
+            }
+            rollback_unset = {}
+            for field in ("deadline", "dueDate", "selectedBy", "selectedAt", "selectedStoryId", "decisionReason", "decisionNote"):
+                if pitch.get(field) not in (None, ""):
+                    rollback_set[field] = pitch.get(field)
+                else:
+                    rollback_unset[field] = ""
             rollback_operation = {"$set": rollback_set}
-            original_deadline = _due_date_from_doc(pitch)
-            if original_deadline:
-                rollback_set["deadline"] = original_deadline
-                rollback_set["dueDate"] = original_deadline
-            else:
-                rollback_operation["$unset"] = {"deadline": "", "dueDate": ""}
+            if rollback_unset:
+                rollback_operation["$unset"] = rollback_unset
             rollback = pitches_col.update_one(
                 {
                     "_id": pitch["_id"],
                     "workspaceId": _workspace_id_for_user(user_doc),
-                    "status": "Approved",
+                    "status": PITCH_STATUS_SELECTED,
                     "updatedAt": update["updatedAt"],
                 },
                 rollback_operation,
             )
             current = pitches_col.find_one({"_id": pitch["_id"], "workspaceId": _workspace_id_for_user(user_doc)}) or updated
-            error = "Pitch approval could not create its story. Refresh and try again."
+            error = "Pitch selection could not create its story. Refresh and try again."
             return jsonify({"ok": False, "error": error, "pitch": _pitch_to_api(current)}), (503 if rollback.matched_count else 500)
         invite_warning = _add_approval_collaborators(story_doc, invite_emails, approval_message, user_doc)
         story_doc = stories_col.find_one({"_id": story_doc["_id"]}) or story_doc
+        story_id = _doc_public_id(story_doc, "storyId")
+        pitches_col.update_one(
+            {"_id": pitch["_id"], "workspaceId": _workspace_id_for_user(user_doc), "status": PITCH_STATUS_SELECTED},
+            {"$set": {"selectedStoryId": story_id, "updatedAt": _now_iso()}},
+        )
+        updated = pitches_col.find_one({"_id": pitch["_id"]}) or updated
+        payload["pitch"] = _pitch_to_api(updated)
         payload["story"] = _story_to_api(story_doc)
         if invite_warning:
             payload["warning"] = invite_warning
-    if "status" in update and update["status"] != pitch.get("status"):
-        _record_status_activity("pitch", _doc_public_id(pitch, "pitchId"), pitch.get("status", ""), update["status"], user_doc)
+    if "status" in update and current_status != next_status:
+        _record_status_activity("pitch", _doc_public_id(pitch, "pitchId"), current_status, next_status, user_doc)
     return jsonify(payload)
 
 
@@ -4538,8 +5344,8 @@ def api_delete_pitch(pitch_id: str):
             return jsonify({"ok": False, "error": "Only the pitch owner can delete this pitch."}), 403
         if current_status != "In Progress":
             return jsonify({"ok": False, "error": "Writers can only delete their in-progress pitches."}), 409
-    if role in {ROLE_ADMIN, ROLE_EDITOR} and current_status == "Approved":
-        return jsonify({"ok": False, "error": "Approved pitches cannot be deleted because their story must retain its source pitch."}), 409
+    if role in {ROLE_ADMIN, ROLE_EDITOR} and current_status == PITCH_STATUS_SELECTED:
+        return jsonify({"ok": False, "error": "Selected pitches cannot be deleted because their story must retain its source pitch."}), 409
 
     mutation_scope = _workspace_query(user_doc)
     if role == ROLE_WRITER:
@@ -4759,7 +5565,7 @@ def _dashboard_status_activity_relevant(doc: dict, role: str, personal_story_ids
     if entity_type == "pitch":
         to_status = _normalize_pitch_status(to_status)
         if entity_id in personal_pitch_ids:
-            return to_status in {"In Progress", "Approved", "On Hold"}
+            return to_status in {PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD}
         return role in {ROLE_EDITOR, ROLE_ADMIN} and to_status == "Ready for Review"
     if entity_type == "story":
         if entity_id in personal_story_ids:
@@ -4777,7 +5583,8 @@ def _dashboard_status_activity_text(doc: dict) -> str:
         messages = {
             "Ready for Review": f"{actor} submitted this pitch for review.",
             "In Progress": f"{actor} requested more work before this pitch can move forward.",
-            "Approved": f"{actor} approved this pitch and moved it to Stories.",
+            PITCH_STATUS_SELECTED: f"{actor} selected this pitch for a story.",
+            PITCH_STATUS_NOT_SELECTED: f"{actor} marked this pitch as not selected.",
             "On Hold": f"{actor} placed this pitch on hold.",
         }
         return messages.get(to_status, str(doc.get("text") or "Pitch updated."))
@@ -4810,7 +5617,7 @@ def api_dashboard():
         })
 
     if role in {ROLE_EDITOR, ROLE_ADMIN}:
-        for pitch in pitches_col.find(_scoped_query(user_doc, {"status": {"$in": ["Ready for Review", "Submitted", "Needs Review"]}})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
+        for pitch in pitches_col.find(_scoped_query(user_doc, {"status": {"$in": [PITCH_STATUS_READY, "Submitted", "Needs Review"]}})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
             if _pitch_owned_by_user(pitch, user_doc):
                 continue
             tasks.append({"id": f"pitch:{_doc_public_id(pitch, 'pitchId')}", "kind": "pitch_review", "title": pitch.get("title") or "Untitled pitch", "detail": f"Pitch from {pitch.get('owner') or pitch.get('writer') or pitch.get('ownerEmail') or 'a writer'} needs review.", "time": _date_for_api(pitch.get("updatedAt") or pitch.get("submittedAt") or pitch.get("createdAt")), "priority": "normal", "entityType": "pitch", "entityId": _doc_public_id(pitch, "pitchId")})
@@ -4819,7 +5626,7 @@ def api_dashboard():
                 continue
             tasks.append({"id": f"story:{_doc_public_id(story, 'storyId')}", "kind": "story_review", "title": story.get("title") or story.get("storyTitle") or "Untitled story", "detail": f"{story.get('writer') or story.get('writerEmail') or 'A writer'} submitted this story for review.", "time": _date_for_api(story.get("submittedAt") or story.get("updatedAt")), "priority": "high" if story.get("dueSoon") else "normal", "entityType": "story", "entityId": _doc_public_id(story, "storyId")})
     elif role == ROLE_WRITER:
-        for pitch in pitches_col.find(_scoped_query(user_doc, {"$and": [_owned_pitch_query(user_doc), {"status": {"$in": ["In Progress", "New"]}}]})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
+        for pitch in pitches_col.find(_scoped_query(user_doc, {"$and": [_owned_pitch_query(user_doc), {"status": {"$in": [PITCH_STATUS_IN_PROGRESS, "New"]}}]})).sort([("updatedAt", -1), ("_id", -1)]).limit(20):
             tasks.append({"id": f"pitch:{_doc_public_id(pitch, 'pitchId')}", "kind": "pitch_work", "title": pitch.get("title") or "Untitled pitch", "detail": "Continue refining this pitch, then submit it when it is ready for editor review.", "time": _date_for_api(pitch.get("updatedAt") or pitch.get("createdAt")), "priority": "normal", "entityType": "pitch", "entityId": _doc_public_id(pitch, "pitchId")})
         writer_story_query = _story_query_for_user(user_doc)
         for story in stories_col.find(writer_story_query).sort([("updatedAt", -1), ("_id", -1)]).limit(30):

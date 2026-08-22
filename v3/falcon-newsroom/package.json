@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
     "dev:vite": "vite --host 127.0.0.1 --port 5173 --strictPort",
-    "dev:auth": "..\\..\\venv\\Scripts\\python.exe -B -m server.auth_app",
+    "dev:auth": "python -B -m server.auth_app",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",

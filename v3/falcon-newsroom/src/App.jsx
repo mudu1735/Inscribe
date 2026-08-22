@@ -897,8 +897,13 @@ const initialStories = [
   },
 ];
 
-const ACTIVE_PITCH_STATUSES = ["In Progress", "Ready for Review"];
-const PITCH_STATUSES = [...ACTIVE_PITCH_STATUSES, "Approved", "On Hold"];
+const PITCH_ROUND_STATUSES = ["Draft", "Open", "Reviewing", "Closed"];
+const PITCH_STATUS_IN_PROGRESS = "In Progress";
+const PITCH_STATUS_READY = "Ready for Review";
+const PITCH_STATUS_SELECTED = "Selected";
+const PITCH_STATUS_NOT_SELECTED = "Not Selected";
+const PITCH_STATUS_ON_HOLD = "On Hold";
+const PITCH_STATUSES = [PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_READY, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD];
 const PITCH_SECTIONS = ["All sections", "News", "Features", "Sports", "Culture", "Opinion", "Science & Technology", "Photo"];
 const PITCH_WRITERS = ["Ava Patel", "Daniel Wu", "Iris Park", "Lena Brooks", "Marcus Lee", "Sofia Chen"];
 
@@ -936,20 +941,21 @@ const initialPitches = [
     id: "p3",
     title: "Athletes managing recovery after long seasons",
     angle: "Interview trainers, coaches, and athletes about rest, injury prevention, and pressure to keep playing.",
-    status: "Approved",
+    status: PITCH_STATUS_SELECTED,
     section: "Sports",
     owner: "Daniel Wu",
     submittedAt: "May 11, 2026",
-    notes: "Approved for a reported feature. Photo request should go in early.",
+    notes: "Selected for a reported feature. Photo request should go in early.",
     editorFeedback: "Move forward. Keep the tone practical and avoid turning this into a medical advice piece.",
-    comments: [{ id: "c4", author: "Ava", text: "Approved for next week's sports package.", time: "May 31, 2026" }],
+    selectedStoryId: "s3",
+    comments: [{ id: "c4", author: "Ava", text: "Selected for next week's sports package.", time: "May 31, 2026" }],
     updatedAt: "May 31, 2026",
   },
   {
     id: "p4",
     title: "What makes a good cafeteria line move faster",
     angle: "Use observations and interviews to explain bottlenecks, lunch waves, and student suggestions.",
-    status: "On Hold",
+    status: PITCH_STATUS_ON_HOLD,
     section: "News",
     owner: "Lena Brooks",
     submittedAt: "May 10, 2026",
@@ -983,6 +989,19 @@ const initialPitches = [
     editorFeedback: "Fun, but it needs a sharper nut graf. Find the larger behavior behind the trend.",
     comments: [{ id: "c6", author: "Iris", text: "I know two students who would talk about this.", time: "June 1, 2026" }],
     updatedAt: "June 1, 2026",
+  },
+  {
+    id: "p7",
+    title: "The case for a quieter lunch period",
+    angle: "A student-centered look at whether a lower-volume lunch period would change how students use the commons.",
+    status: PITCH_STATUS_NOT_SELECTED,
+    section: "Opinion",
+    owner: "Ava Patel",
+    submittedAt: "May 9, 2026",
+    notes: "",
+    editorFeedback: "",
+    comments: [],
+    updatedAt: "May 30, 2026",
   },
 ];
 
@@ -1322,6 +1341,9 @@ function normalizeDisplayPitch(pitch = {}) {
     New: "In Progress",
     Submitted: "Ready for Review",
     "Needs Review": "Ready for Review",
+    Approved: PITCH_STATUS_SELECTED,
+    Selected: PITCH_STATUS_SELECTED,
+    "Selected for Story": PITCH_STATUS_SELECTED,
   };
   return {
     ...pitch,
@@ -2120,14 +2142,15 @@ function buildHouseOptions(sources) {
 }
 
 function pitchStatusTone(status) {
-  if (status === "Approved") return "green";
+  if (status === PITCH_STATUS_SELECTED) return "green";
+  if (status === PITCH_STATUS_NOT_SELECTED) return "neutral";
   if (status === "Ready for Review") return "blue";
   if (status === "On Hold") return "amber";
   return "neutral";
 }
 
-function isActivePitch(pitch) {
-  return ACTIVE_PITCH_STATUSES.includes(pitch.status);
+function isRoundPitch(pitch) {
+  return Boolean(pitch?.id);
 }
 
 function pitchNoteCount(pitch) {
@@ -2152,7 +2175,10 @@ function pitchFeedbackItems(pitch) {
 }
 
 function pitchStatusDotClass(status) {
+  if (status === PITCH_STATUS_SELECTED) return "bg-emerald-400";
+  if (status === PITCH_STATUS_NOT_SELECTED) return "bg-zinc-500";
   if (status === "Ready for Review") return "bg-sky-400";
+  if (status === "On Hold") return "bg-amber-400";
   return "bg-zinc-400";
 }
 
@@ -2182,12 +2208,11 @@ function pitchSearchText(pitch) {
     .toLowerCase();
 }
 
-function matchesPitchFilters(pitch, query, section, statusFilter = "All Active") {
-  if (!isActivePitch(pitch)) return false;
+function matchesPitchFilters(pitch, query, section, statusFilter = "All pitches") {
   const needle = query.trim().toLowerCase();
   if (needle && !pitchSearchText(pitch).includes(needle)) return false;
   if (section !== "All sections" && pitch.section !== section) return false;
-  if (statusFilter !== "All Active" && pitch.status !== statusFilter) return false;
+  if (statusFilter !== "All pitches" && pitch.status !== statusFilter) return false;
   return true;
 }
 
@@ -2227,11 +2252,11 @@ function groupActivePitchesByWriter(pitches) {
     });
 }
 
-function nextActivePitchId(activePitches, currentId) {
-  if (!activePitches.length) return null;
-  const currentIndex = activePitches.findIndex((pitch) => pitch.id === currentId);
-  if (currentIndex === -1) return activePitches[0].id;
-  return activePitches[(currentIndex + 1) % activePitches.length]?.id || null;
+function nextPitchId(pitches, currentId) {
+  if (!pitches.length) return null;
+  const currentIndex = pitches.findIndex((pitch) => pitch.id === currentId);
+  if (currentIndex === -1) return pitches[0].id;
+  return pitches[(currentIndex + 1) % pitches.length]?.id || null;
 }
 
 function initialPitchDetailId() {
@@ -2369,8 +2394,9 @@ function runPrototypeTests() {
   console.assert(initialTasks.every((t) => t.id && t.title && t.status), "Every task needs id, title, and status.");
   console.assert(PITCH_STATUSES.every((status) => initialPitches.some((pitch) => pitch.status === status)), "Pitch board needs examples for each status.");
   console.assert(matchesPitchFilters(initialPitches[0], "clubs", "All sections"), "Pitch search should include title and angle text.");
-  console.assert(!matchesPitchFilters(initialPitches[2], "", "All sections"), "Approved pitches should stay out of the active board.");
-  console.assert(groupActivePitchesByWriter(initialPitches.filter(isActivePitch)).every((group) => group.pitches.every(isActivePitch)), "Writer groups should include active pitches only.");
+  console.assert(matchesPitchFilters(initialPitches[2], "", "All sections"), "Selected pitches should stay on their round board.");
+  console.assert(matchesPitchFilters(initialPitches[6], "", "All sections", PITCH_STATUS_NOT_SELECTED), "Not selected pitches should stay on their round board.");
+  console.assert(groupActivePitchesByWriter(initialPitches).every((group) => group.pitches.every(isRoundPitch)), "Writer groups should include pitches from the selected round.");
   console.assert(groupActivePitchesByWriter([
     { ...initialPitches[0], owner: "Alex Lee", ownerEmail: "alex.one@example.com", ownerUserId: "u1" },
     { ...initialPitches[1], owner: "Alex Lee", ownerEmail: "alex.two@example.com", ownerUserId: "u2" },
@@ -2391,10 +2417,10 @@ function StatusBadge({ children, tone = "neutral" }) {
   return <span className={cx("inline-flex rounded-full border px-2.5 py-1 text-xs", styles[tone])}>{children}</span>;
 }
 
-function Button({ children, icon, variant = "primary", className = "", onClick, disabled = false }) {
+function Button({ children, icon, variant = "primary", className = "", onClick, disabled = false, type = "button" }) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={cx(
@@ -2454,6 +2480,17 @@ function Select({ value, onChange, options, label = "", className = "" }) {
       </select>
       <Icon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
     </div>
+  );
+}
+
+function AnimatedOptionDropdown({ value, options, onChange, className = "" }) {
+  return (
+    <AnimatedDropdown
+      text={value}
+      items={options.map((name) => ({ name, link: "#" }))}
+      onSelect={(item) => onChange(item.name)}
+      className={className}
+    />
   );
 }
 
@@ -3052,6 +3089,42 @@ function AppShell() {
     });
   };
 
+  const createStory = async (draft) => {
+    const title = asText(draft.title);
+    const section = asText(draft.section);
+    const summary = asText(draft.summary);
+    const deadline = asText(draft.deadline);
+    if (!title || !STORY_FILTER_SECTIONS.includes(section) || section === "All sections") {
+      setToast("Add a title and valid section before creating the story.");
+      return false;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/stories`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ title, section, summary, deadline }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not create story.");
+      }
+      const nextStory = normalizeDisplayStory(payload.story);
+      if (!nextStory?.id) throw new Error("The new story did not return an id.");
+      setStories((prev) => [nextStory, ...prev.filter((story) => story.id !== nextStory.id)]);
+      setStoriesError("");
+      setToast("Added a new story.");
+      return true;
+    } catch (createError) {
+      setToast(createError instanceof Error ? createError.message : "Could not create story.");
+      return false;
+    }
+  };
+
   const breadcrumbDetail = useMemo(() => {
     const normalizedPath = locationPath.toLowerCase();
     if (page === "stories" && normalizedPath.startsWith("/stories/")) {
@@ -3070,13 +3143,13 @@ function AppShell() {
 
   const pages = {
     dashboard: <DashboardPage currentUser={account} csrfToken={csrfToken} setPage={setPage} setToast={setToast} onStoryAccepted={handleStoryCreatedFromPitch} />,
-    pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} onStoryCreated={handleStoryCreatedFromPitch} />,
-    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} />,
+    pitches: <PitchBoardPage setToast={setToast} csrfToken={csrfToken} currentUser={account || FALLBACK_ACCOUNT} hasWorkspace={hasWorkspace} onStoryCreated={handleStoryCreatedFromPitch} />,
+    stories: <StoriesPage stories={stories} loading={storiesLoading} error={storiesError} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} updateStoryStatus={updateStoryStatus} updateStoryDocLink={updateStoryDocLink} clearStoryAttachment={clearStoryAttachment} uploadStoryAttachment={uploadStoryAttachment} attachDriveFileToStory={attachDriveFileToStory} inviteStoryCollaborators={inviteStoryCollaborators} removeStoryCollaborator={removeStoryCollaborator} setToast={setToast} createStory={createStory} />,
     pipeline: <PipelinePage articles={articles} updateArticleStatus={updateArticleStatus} setSelectedArticleId={setSelectedArticleId} setPage={setPage} />,
     articles: <ArticlesPage extractorOpen={articleExtractorOpen} setExtractorOpen={setArticleExtractorOpen} setToast={setToast} csrfToken={csrfToken} />,
     interviewees: <IntervieweesPage currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} />,
     tasks: <TasksPage tasks={tasks} updateTaskStatus={updateTaskStatus} />,
-    calendar: <CalendarPage stories={stories} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
+    calendar: <CalendarPage stories={stories} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} onOpenStory={(story) => { setPage("stories"); pushAppPath(storyDetailPath(story.id)); }} />,
     analytics: <AnalyticsPage />,
     settings: <SettingsPage workspace={workspace} currentUser={account || FALLBACK_ACCOUNT} csrfToken={csrfToken} setToast={setToast} onWorkspaceUpdated={setWorkspace} locationPath={locationPath} />,
   };
@@ -3984,23 +4057,66 @@ function DashboardEmpty({ icon, text }) {
 }
 
 
-function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated = () => {} }) {
+function PitchBoardPage({ setToast, csrfToken = "", currentUser, hasWorkspace = true, onStoryCreated = () => {} }) {
   const [pitches, setPitches] = useState([]);
+  const [rounds, setRounds] = useState([]);
+  const [selectedRoundId, setSelectedRoundId] = useState("");
+  const [roundLoading, setRoundLoading] = useState(true);
+  const [roundError, setRoundError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [detailPitchId, setDetailPitchId] = useState(initialPitchDetailId);
   const [query, setQuery] = useState("");
   const [section, setSection] = useState("All sections");
-  const [statusFilter, setStatusFilter] = useState("All Active");
+  const [statusFilter, setStatusFilter] = useState("All pitches");
   const [expandedWriters, setExpandedWriters] = useState(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
+  const [roundCreateOpen, setRoundCreateOpen] = useState(false);
+  const [roundSaving, setRoundSaving] = useState(false);
   const canManagePitches = canManageEditorialWorkflow(currentUser?.role);
 
-  const loadPitches = async (signal) => {
+  const loadRounds = async (signal) => {
+    if (!hasWorkspace) {
+      setRounds([]);
+      setSelectedRoundId("");
+      setRoundError("Open a workspace first.");
+      setRoundLoading(false);
+      return;
+    }
+    setRoundLoading(true);
+    setRoundError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/pitch-rounds`, {
+        headers: { Accept: "application/json" },
+        credentials: "include",
+        signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Pitch rounds are unavailable.");
+      }
+      const nextRounds = Array.isArray(payload.rounds) ? payload.rounds : [];
+      setRounds(nextRounds);
+      setSelectedRoundId((previous) => {
+        if (previous && nextRounds.some((round) => round.id === previous)) return previous;
+        return nextRounds.find((round) => round.status === "Open")?.id || nextRounds[0]?.id || "";
+      });
+    } catch (loadError) {
+      if (loadError.name === "AbortError") return;
+      setRounds([]);
+      setSelectedRoundId("");
+      setRoundError(loadError instanceof Error ? loadError.message : "Pitch rounds are unavailable.");
+    } finally {
+      if (!signal?.aborted) setRoundLoading(false);
+    }
+  };
+
+  const loadPitches = async (signal, roundId = selectedRoundId) => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_BASE}/api/pitches`, {
+      const query = roundId ? `?roundId=${encodeURIComponent(roundId)}` : "";
+      const response = await fetch(`${API_BASE}/api/pitches${query}`, {
         headers: { Accept: "application/json" },
         credentials: "include",
         signal,
@@ -4031,16 +4147,28 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
 
   useEffect(() => {
     const controller = new AbortController();
-    loadPitches(controller.signal);
+    loadRounds(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [hasWorkspace]);
 
-  const activePitches = useMemo(
+  useEffect(() => {
+    if (!selectedRoundId) {
+      setPitches([]);
+      setLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    loadPitches(controller.signal, selectedRoundId);
+    return () => controller.abort();
+  }, [selectedRoundId]);
+
+  const roundPitches = useMemo(
     () => pitches.filter((pitch) => matchesPitchFilters(pitch, query, section, statusFilter)),
     [pitches, query, section, statusFilter]
   );
-  const writerGroups = useMemo(() => groupActivePitchesByWriter(activePitches), [activePitches]);
-  const detailPitch = pitches.find((pitch) => pitch.id === detailPitchId && isActivePitch(pitch)) || null;
+  const writerGroups = useMemo(() => groupActivePitchesByWriter(roundPitches), [roundPitches]);
+  const detailPitch = pitches.find((pitch) => pitch.id === detailPitchId) || null;
+  const currentRound = rounds.find((round) => round.id === selectedRoundId) || null;
 
   const navigateToBoard = () => {
     setDetailPitchId(null);
@@ -4062,16 +4190,16 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     );
   };
 
-  const nextIdAfter = (id) => nextActivePitchId(activePitches.filter((pitch) => pitch.id !== id), id);
+  const nextIdAfter = (id) => nextPitchId(roundPitches.filter((pitch) => pitch.id !== id), id);
 
   const updatePitchStatus = async (id, status, message, approval = {}) => {
     const targetPitch = pitches.find((pitch) => pitch.id === id);
-    const ownerCanSubmit = status === "Ready for Review" && pitchBelongsToUser(targetPitch, currentUser);
+    const ownerCanSubmit = status === PITCH_STATUS_READY && pitchBelongsToUser(targetPitch, currentUser);
     if (!canManagePitches && !ownerCanSubmit) {
       setToast("Only the pitch owner can submit it for review.");
       return null;
     }
-    const approvedDueDate = status === "Approved" ? dueDateValue(approval) : "";
+    const selectedDueDate = status === PITCH_STATUS_SELECTED ? dueDateValue(approval) : "";
     try {
       const response = await fetch(`${API_BASE}/api/pitches/${encodeURIComponent(id)}`, {
         method: "PATCH",
@@ -4088,11 +4216,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         throw new Error(payload?.error || "Pitch status update failed.");
       }
       const updatedPitch = normalizeDisplayPitch(payload.pitch || { id, status, updatedAt: "Just now" });
-      const updatedStory = status === "Approved" && payload.story ? storyWithApprovedDueDate(payload.story, approvedDueDate) : payload.story;
+      const updatedStory = status === PITCH_STATUS_SELECTED && payload.story ? storyWithApprovedDueDate(payload.story, selectedDueDate) : payload.story;
       setPitches((previous) => previous.map((pitch) => (pitch.id === id ? { ...pitch, ...updatedPitch } : pitch)));
-      if (status === "Approved" && updatedStory) {
+      if (status === PITCH_STATUS_SELECTED && updatedStory) {
         onStoryCreated(updatedStory);
       }
+      loadRounds();
       setToast(payload.warning || message || `Updated pitch to ${status}.`);
       return { ...payload, pitch: updatedPitch, ...(updatedStory ? { story: updatedStory } : {}) };
     } catch (statusError) {
@@ -4101,13 +4230,61 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     }
   };
 
-  const moveOutOfActiveBoard = async (id, status, message, approval = {}) => {
-    const nextId = nextIdAfter(id);
-    const result = await updatePitchStatus(id, status, message, approval);
-    if (!result) return null;
-    if (nextId) navigateToPitch(nextId);
-    else navigateToBoard();
-    return result;
+  const updateRoundStatus = async (status) => {
+    if (!currentRound || !canManagePitches) return;
+    setRoundSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/pitch-rounds/${encodeURIComponent(currentRound.id)}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || "Could not update round.");
+      setRounds((previous) => previous.map((round) => (round.id === currentRound.id ? payload.round : round)));
+      setToast(status === "Open" ? "Opened submissions." : status === "Reviewing" ? "Closed submissions." : "Closed round.");
+    } catch (roundUpdateError) {
+      setToast(roundUpdateError instanceof Error ? roundUpdateError.message : "Could not update round.");
+    } finally {
+      setRoundSaving(false);
+    }
+  };
+
+  const createRound = async (name) => {
+    const cleanName = asText(name);
+    if (!hasWorkspace) {
+      setToast("Open a workspace first.");
+      return;
+    }
+    if (!cleanName || roundSaving) return;
+    setRoundSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/pitch-rounds`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify({ name: cleanName }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `Could not create round (${response.status}).`);
+      setRounds((previous) => [payload.round, ...previous]);
+      setSelectedRoundId(payload.round.id);
+      setRoundCreateOpen(false);
+      setToast("Created round.");
+    } catch (roundCreateError) {
+      setToast(roundCreateError instanceof Error ? roundCreateError.message : "Could not create round.");
+    } finally {
+      setRoundSaving(false);
+    }
   };
 
   const updatePitchDetails = async (id, draft) => {
@@ -4198,6 +4375,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
         },
         credentials: "include",
         body: JSON.stringify({
+          roundId: selectedRoundId,
           title,
           angle: draft.angle.trim() || "Angle to be developed.",
           section: draft.section,
@@ -4212,7 +4390,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
       setPitches((previous) => [nextPitch, ...previous]);
       setQuery("");
       setSection("All sections");
-      setStatusFilter("All Active");
+      setStatusFilter("All pitches");
       setExpandedWriters((previous) => new Set([...previous, pitchOwnerGroupKey(nextPitch)]));
       setCreateOpen(false);
       setToast("Created a new pitch.");
@@ -4222,11 +4400,17 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   };
 
   const submitForReview = (id, message) => {
-    return updatePitchStatus(id, "Ready for Review", message || "Submitted pitch for review.");
+    return updatePitchStatus(id, PITCH_STATUS_READY, message || "Submitted pitch for review.");
   };
 
   const markInProgress = (id, message) => {
-    return updatePitchStatus(id, "In Progress", message || "Returned pitch to in progress.");
+    return updatePitchStatus(id, PITCH_STATUS_IN_PROGRESS, message || "Returned pitch to in progress.");
+  };
+
+  const markNotSelected = (id) => {
+    const targetPitch = pitches.find((pitch) => pitch.id === id);
+    if (!window.confirm(`Mark “${targetPitch?.title || "this pitch"}” as not selected?`)) return null;
+    return updatePitchStatus(id, PITCH_STATUS_NOT_SELECTED, "Marked pitch as not selected.");
   };
 
   const addComment = (id, text) => {
@@ -4268,9 +4452,6 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     });
   };
 
-  const expandAll = () => setExpandedWriters(new Set(writerGroups.map((group) => group.key)));
-  const collapseAll = () => setExpandedWriters(new Set());
-
   if (detailPitchId && loading) {
     return (
       <PageShell title="Loading pitch" eyebrow="Pitches" right={<Button variant="ghost" onClick={navigateToBoard}>Back to board</Button>}>
@@ -4292,12 +4473,12 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
     return (
       <PitchDetailPage
         pitch={detailPitch}
-        activePitches={activePitches}
         onBack={navigateToBoard}
         onSubmitForReview={submitForReview}
         onMarkInProgress={markInProgress}
-        onApprove={(id, approval) => moveOutOfActiveBoard(id, "Approved", "Approved pitch and moved it to Stories.", approval)}
-        onHold={(id) => moveOutOfActiveBoard(id, "On Hold", "Held pitch and removed it from the active board.")}
+        onApprove={(id, approval) => updatePitchStatus(id, PITCH_STATUS_SELECTED, "Selected pitch for a story.", approval)}
+        onNotSelected={markNotSelected}
+        onHold={(id) => updatePitchStatus(id, PITCH_STATUS_ON_HOLD, "Put pitch on hold.")}
         onUpdate={updatePitchDetails}
         onDelete={deletePitch}
         onAddComment={addComment}
@@ -4316,38 +4497,63 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
   return (
     <PageShell
       title="Pitch Board"
-      right={<Button icon="plus" onClick={() => setCreateOpen(true)}>New pitch</Button>}
+      right={(
+        <div className="flex items-center gap-2">
+          {canManagePitches && hasWorkspace ? <Button variant="ghost" onClick={() => setRoundCreateOpen(true)}>New round</Button> : null}
+          <Button icon="plus" disabled={!hasWorkspace || !currentRound || currentRound.status !== "Open"} onClick={() => setCreateOpen(true)}>New pitch</Button>
+        </div>
+      )}
     >
 
       <div className="min-w-0">
-        <div className="mb-5 flex flex-col gap-4">
-          <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
-            <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, section, or feedback" />
-            <Select value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} label="Filter pitches by section" />
+        <div className="mb-6 flex flex-col gap-5">
+          <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <div className="w-full min-w-0 sm:w-auto sm:min-w-[250px] sm:max-w-[360px]">
+                <AnimatedDropdown
+                  text={roundLoading ? "Loading rounds…" : currentRound ? `${currentRound.name}${currentRound.isLegacy ? " · Legacy" : ""}` : "No rounds"}
+                  items={rounds.map((round) => ({
+                    name: `${round.name}${round.isLegacy ? " · Legacy" : ""}`,
+                    value: round.id,
+                    link: "#",
+                  }))}
+                  onSelect={(item) => setSelectedRoundId(item.value || "")}
+                  disabled={roundLoading || !rounds.length}
+                  ariaLabel="Choose a pitch round"
+                  className="w-full"
+                />
+              </div>
+              {canManagePitches && currentRound && !currentRound.isLegacy ? (
+                <Button
+                  variant="ghost"
+                  disabled={roundSaving}
+                  onClick={() => updateRoundStatus(currentRound.status === "Open" ? "Reviewing" : "Open")}
+                >
+                  {currentRound.status === "Open" ? "Close submissions" : "Open submissions"}
+                </Button>
+              ) : null}
+              {currentRound ? <span className="text-sm text-zinc-500">{currentRound.status}</span> : null}
+            </div>
           </div>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.025]">
-              {["All Active", "Ready for Review", "In Progress"].map((filter) => (
+          <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
+            <Input value={query} onChange={handleQueryChange} placeholder="Search writer, title, or section" />
+            <AnimatedOptionDropdown value={section} onChange={handleSectionChange} options={PITCH_SECTIONS} className="w-full" />
+          </div>
+          <div>
+            <div className="flex gap-5 overflow-x-auto border-b border-white/[0.08]">
+              {["All pitches", PITCH_STATUS_READY, PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED, PITCH_STATUS_ON_HOLD].map((filter) => (
                 <button
                   key={filter}
                   type="button"
                   onClick={() => handleStatusFilterChange(filter)}
                   className={cx(
-                    "inline-flex items-center gap-2 border-r border-white/[0.08] px-3 py-2 text-sm transition last:border-r-0",
-                    statusFilter === filter ? "bg-white/[0.08] text-zinc-100" : "text-zinc-400 hover:bg-white/[0.045] hover:text-zinc-200"
+                    "whitespace-nowrap border-b-2 pb-2 text-sm transition",
+                    statusFilter === filter ? "border-zinc-100 text-zinc-100" : "border-transparent text-zinc-500 hover:text-zinc-200"
                   )}
                 >
-                  {filter === "All Active" ? (
-                    <span>{filter}</span>
-                  ) : (
-                    <PitchStatusText status={filter} />
-                  )}
+                  {filter}
                 </button>
               ))}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="ghost" onClick={expandAll}>Expand all</Button>
-              <Button variant="ghost" onClick={collapseAll}>Collapse all</Button>
             </div>
           </div>
         </div>
@@ -4359,7 +4565,7 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
               icon="edit"
               title="Could not load pitches"
               body={error}
-              action={<Button variant="ghost" onClick={() => loadPitches()}>Try again</Button>}
+              action={<Button variant="ghost" onClick={() => loadPitches(undefined, selectedRoundId)}>Try again</Button>}
             />
           )}
           {!loading && !error && writerGroups.map((group) => (
@@ -4374,18 +4580,28 @@ function PitchBoardPage({ setToast, csrfToken = "", currentUser, onStoryCreated 
           {!loading && !error && !writerGroups.length && (
             <div className="p-8 text-center">
               <div className="mx-auto mb-4 h-px w-10 bg-zinc-600" />
-              <h3 className="text-sm font-medium text-zinc-200">No active pitches found</h3>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-500">Try a different search or filter, or create a new pitch for review.</p>
+              <h3 className="text-sm font-medium text-zinc-200">No pitches in this round</h3>
             </div>
           )}
         </div>
       </div>
+
+      {roundError ? <p className="mt-4 text-sm text-rose-300">{roundError}</p> : null}
 
       <AnimatePresence>
         {createOpen && (
           <PitchCreateModal
             onClose={() => setCreateOpen(false)}
             onCreate={createPitch}
+          />
+        )}
+        {roundCreateOpen && (
+          <PitchRoundCreateModal
+            submitting={roundSaving}
+            onClose={() => {
+              if (!roundSaving) setRoundCreateOpen(false);
+            }}
+            onCreate={createRound}
           />
         )}
       </AnimatePresence>
@@ -4416,9 +4632,6 @@ function PitchBoardSkeleton() {
 }
 
 function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
-  const progressCount = group.pitches.filter((pitch) => pitch.status === "In Progress").length;
-  const reviewCount = group.pitches.filter((pitch) => pitch.status === "Ready for Review").length;
-
   return (
     <div className="border-b border-white/[0.06] last:border-b-0">
       <button
@@ -4436,11 +4649,7 @@ function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
             ) : null}
           </span>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          <PitchCountLabel label="Active" count={group.pitches.length} />
-          <PitchCountLabel label="In Progress" count={progressCount} />
-          <PitchCountLabel label="Ready for Review" count={reviewCount} />
-        </div>
+        <span className="shrink-0 text-sm text-zinc-500">{group.pitches.length} {group.pitches.length === 1 ? "pitch" : "pitches"}</span>
       </button>
 
       <AnimatePresence initial={false}>
@@ -4476,15 +4685,6 @@ function PitchWriterRow({ group, expanded, onToggle, onSelectPitch }) {
   );
 }
 
-function PitchCountLabel({ label, count }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.035] px-2.5 py-1 text-xs text-zinc-400">
-      <span className="font-medium text-zinc-100">{count}</span>
-      <span>{label}</span>
-    </span>
-  );
-}
-
 function PitchQueueRow({ pitch, onSelect }) {
   return (
     <button
@@ -4510,6 +4710,7 @@ function PitchDetailPage({
   onSubmitForReview,
   onMarkInProgress,
   onApprove,
+  onNotSelected,
   onHold,
   onUpdate,
   onDelete,
@@ -4573,8 +4774,7 @@ function PitchDetailPage({
         <Card className="flex min-h-[420px] items-center justify-center p-6">
           <div className="max-w-sm text-center">
             <div className="mx-auto mb-5 h-px w-12 bg-zinc-600" />
-            <h3 className="text-lg font-semibold tracking-tight text-zinc-100">Pitch is not active</h3>
-            <p className="mt-2 text-sm leading-6 text-zinc-500">This pitch may have been approved, held, deleted, or moved out of the active queue.</p>
+            <h3 className="text-lg font-semibold tracking-tight text-zinc-100">Pitch not found</h3>
           </div>
         </Card>
       </PageShell>
@@ -4816,15 +5016,11 @@ function PitchDetailPage({
               <PitchProperty label="Section">{pitch.section}</PitchProperty>
               <PitchProperty label="Submitted">{pitch.submittedAt}</PitchProperty>
             </div>
-            {canSubmitForReview ? (
+            {canSubmitForReview && [PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_READY].includes(pitch.status) ? (
               <div className="mt-5 border-t border-white/[0.1] pt-5">
-                <p className="text-sm leading-6 text-zinc-500">
-                  {pitch.status === "Ready for Review"
-                    ? "Submitted. An editor or admin can now approve it or return it for more work."
-                    : "Send this pitch to an editor or admin when the angle and reporting plan are ready."}
-                </p>
-                <Button className="mt-4 w-full" disabled={pitch.status === "Ready for Review"} onClick={() => onSubmitForReview(pitch.id)}>
-                  {pitch.status === "Ready for Review" ? "Submitted for review" : "Submit for review"}
+                {pitch.status === PITCH_STATUS_READY ? <p className="text-sm text-zinc-500">Submitted for review.</p> : null}
+                <Button className="mt-4 w-full" disabled={pitch.status === PITCH_STATUS_READY} onClick={() => onSubmitForReview(pitch.id)}>
+                  {pitch.status === PITCH_STATUS_READY ? "Submitted for review" : "Submit for review"}
                 </Button>
                 {canEditPitch ? (
                   <div className="mt-2 grid gap-2">
@@ -4842,17 +5038,25 @@ function PitchDetailPage({
           <div className="rounded-2xl border border-white/[0.12] bg-white/[0.035] p-5">
             <h2 className="text-base font-semibold text-zinc-100">Actions</h2>
             <div className="mt-4 space-y-2">
-              <Button onClick={() => setApprovalOpen(true)} className="w-full">Approve</Button>
+              <Button disabled={pitch.status !== PITCH_STATUS_READY} onClick={() => setApprovalOpen(true)} className="w-full">Select for story</Button>
               <Button
                 variant="ghost"
-                disabled={pitch.status === "In Progress"}
+                disabled={pitch.status !== PITCH_STATUS_READY}
+                onClick={() => onNotSelected(pitch.id)}
+                className="w-full"
+              >
+                Not selected
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={[PITCH_STATUS_IN_PROGRESS, PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED].includes(pitch.status)}
                 onClick={() => onMarkInProgress(pitch.id)}
                 className="w-full"
               >
                 Mark in progress
               </Button>
-              <Button variant="ghost" onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
-              {canDeletePitch ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
+              <Button variant="ghost" disabled={[PITCH_STATUS_SELECTED, PITCH_STATUS_NOT_SELECTED].includes(pitch.status)} onClick={() => onHold(pitch.id)} className="w-full">Hold</Button>
+              {canDeletePitch && pitch.status !== PITCH_STATUS_SELECTED ? <Button variant="danger" icon="trash" onClick={() => onDelete(pitch.id)} className="w-full">Delete pitch</Button> : null}
             </div>
           </div>
           ) : null}
@@ -4910,7 +5114,7 @@ function ApprovePitchModal({ open, pitch, submitting, onClose, onApprove }) {
 
   const submitApproval = () => {
     if (!dueDate) {
-      setError("Set a due date before approving this pitch.");
+      setError("Set a due date before selecting this pitch.");
       return;
     }
     setError("");
@@ -4942,7 +5146,7 @@ function ApprovePitchModal({ open, pitch, submitting, onClose, onApprove }) {
           className="w-full max-w-lg rounded-2xl border border-white/[0.12] bg-zinc-950 p-5 shadow-2xl shadow-black/60"
         >
           <div>
-            <h2 id="approve-pitch-title" className="text-lg font-semibold text-zinc-50">Approve pitch</h2>
+            <h2 id="approve-pitch-title" className="text-lg font-semibold text-zinc-50">Select for story</h2>
             <p className="mt-1 text-sm leading-6 text-zinc-500">{pitch.title}</p>
           </div>
 
@@ -4981,7 +5185,7 @@ function ApprovePitchModal({ open, pitch, submitting, onClose, onApprove }) {
 
           <div className="mt-6 flex justify-end gap-2">
             <Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button>
-            <Button disabled={submitting} onClick={submitApproval}>{submitting ? "Approving..." : "Approve"}</Button>
+            <Button disabled={submitting} onClick={submitApproval}>{submitting ? "Selecting..." : "Select pitch"}</Button>
           </div>
         </motion.div>
       </motion.div>
@@ -5020,6 +5224,59 @@ function PitchProperty({ label, children }) {
       <span className="text-sm text-zinc-500">{label}</span>
       <div className="min-w-0 text-right text-sm font-medium text-zinc-300">{children}</div>
     </div>
+  );
+}
+
+function PitchRoundCreateModal({ submitting = false, onClose, onCreate }) {
+  const [name, setName] = useState("");
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-pitch-round-title"
+    >
+      <motion.form
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#0b0c10] p-5 shadow-2xl shadow-black"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onCreate(name);
+        }}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <h2 id="new-pitch-round-title" className="text-lg font-semibold text-zinc-50">New round</h2>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close new round" className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-45">x</button>
+        </div>
+        <label className="block">
+          <span className="mb-2 block text-sm font-medium text-zinc-300">Name</span>
+          <input
+            required
+            autoFocus
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+            placeholder="May pitches"
+          />
+        </label>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" disabled={submitting} onClick={onClose}>Cancel</Button>
+          <button type="submit" disabled={submitting} className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-3.5 py-2 text-sm font-medium text-black transition hover:bg-white disabled:cursor-wait disabled:opacity-45">
+            {submitting ? "Creating..." : "Create round"}
+          </button>
+        </div>
+      </motion.form>
+    </motion.div>
   );
 }
 
@@ -5064,15 +5321,11 @@ function PitchCreateModal({ onClose, onCreate }) {
         <div className="grid gap-4">
           <label className="block max-w-xs">
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
-            <select
+            <AnimatedOptionDropdown
               value={draft.section}
-              onChange={(event) => updateDraft("section", event.target.value)}
-              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-            >
-              {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
-                <option key={option} value={option} className="bg-zinc-950">{option}</option>
-              ))}
-            </select>
+              options={PITCH_SECTIONS.filter((option) => option !== "All sections")}
+              onChange={(value) => updateDraft("section", value)}
+            />
           </label>
 
           <label className="block">
@@ -5175,15 +5428,11 @@ function PitchEditModal({ pitch, submitting = false, onClose, onSave }) {
         <div className="grid gap-4">
           <label className="block max-w-xs">
             <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
-            <select
+            <AnimatedOptionDropdown
               value={draft.section}
-              onChange={(event) => updateDraft("section", event.target.value)}
-              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
-            >
-              {PITCH_SECTIONS.filter((option) => option !== "All sections").map((option) => (
-                <option key={option} value={option} className="bg-zinc-950">{option}</option>
-              ))}
-            </select>
+              options={PITCH_SECTIONS.filter((option) => option !== "All sections")}
+              onChange={(value) => updateDraft("section", value)}
+            />
           </label>
 
           <label className="block">
@@ -5194,7 +5443,6 @@ function PitchEditModal({ pitch, submitting = false, onClose, onSave }) {
               value={draft.title}
               onChange={(event) => updateDraft("title", event.target.value)}
               className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
-              placeholder="Working story title"
             />
           </label>
 
@@ -5276,10 +5524,11 @@ function StoryCard({ article, columns, updateArticleStatus, open }) {
   );
 }
 
-function StoriesPage({ stories, loading = false, error = "", currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, inviteStoryCollaborators, removeStoryCollaborator, setToast }) {
+function StoriesPage({ stories, loading = false, error = "", currentUser, csrfToken = "", updateStoryStatus, updateStoryDocLink, clearStoryAttachment, uploadStoryAttachment, attachDriveFileToStory, inviteStoryCollaborators, removeStoryCollaborator, setToast, createStory }) {
   const [query, setQuery] = useState("");
   const [sectionFilter, setSectionFilter] = useState("All sections");
   const [detailStoryId, setDetailStoryId] = useState(initialStoryDetailId);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     const syncFromPath = () => setDetailStoryId(initialStoryDetailId());
@@ -5362,15 +5611,19 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
     );
   }
 
+  const canCreateStory = normalizeAppRole(currentUser?.role) !== "guest";
+
   return (
-    <PageShell
-      title="Stories"
-      className="max-w-[1380px]"
-    >
-      <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
-        <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
-        <Select value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} label="Filter stories by section" className="h-10" />
-      </section>
+    <>
+      <PageShell
+        title="Stories"
+        className="max-w-[1380px]"
+        right={canCreateStory ? <Button icon="plus" onClick={() => setCreateOpen(true)}>Add story</Button> : null}
+      >
+        <section className="mb-5 grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px] xl:items-center">
+          <Input value={query} onChange={setQuery} placeholder="Search title, writer, section, or next step" className="h-10" />
+          <AnimatedOptionDropdown value={sectionFilter} onChange={setSectionFilter} options={STORY_FILTER_SECTIONS} className="w-full" />
+        </section>
 
       {loading ? (
         <StateMessage icon="article" title="Loading stories" body="Pulling story assignments from MongoDB." />
@@ -5378,21 +5631,141 @@ function StoriesPage({ stories, loading = false, error = "", currentUser, csrfTo
         <StateMessage icon="article" title="Stories unavailable" body={error} />
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-3" aria-label="Story workflow board">
-        {!loading && !error && STORY_WORKFLOW_COLUMNS.map((column) => {
-          const columnStories = visibleStories.filter((story) => column.statuses.includes(story.status));
-          return (
-            <StoryKanbanColumn
-              key={column.id}
-              column={column}
-              stories={columnStories}
-              total={activeStories.filter((story) => column.statuses.includes(story.status)).length}
-              onOpenStory={navigateToStory}
+        <section className="grid gap-4 lg:grid-cols-3" aria-label="Story workflow board">
+          {!loading && !error && STORY_WORKFLOW_COLUMNS.map((column) => {
+            const columnStories = visibleStories.filter((story) => column.statuses.includes(story.status));
+            return (
+              <StoryKanbanColumn
+                key={column.id}
+                column={column}
+                stories={columnStories}
+                total={activeStories.filter((story) => column.statuses.includes(story.status)).length}
+                onOpenStory={navigateToStory}
+              />
+            );
+          })}
+        </section>
+      </PageShell>
+
+      <AnimatePresence>
+        {createOpen ? (
+          <StoryCreateModal
+            onClose={() => setCreateOpen(false)}
+            onCreate={async (draft) => {
+              const created = await createStory(draft);
+              if (created) setCreateOpen(false);
+              return created;
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function StoryCreateModal({ onClose, onCreate }) {
+  const [draft, setDraft] = useState({
+    title: "",
+    section: "News",
+    summary: "",
+    deadline: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const updateDraft = (field, value) => {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const submit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onCreate(draft);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+    >
+      <motion.form
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/[0.1] bg-[#0b0c10] p-5 shadow-2xl shadow-black"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-story-title"
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 id="create-story-title" className="text-lg font-semibold text-zinc-50">Add story</h2>
+          </div>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close story form" className="rounded-lg px-2 py-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200 disabled:opacity-45">x</button>
+        </div>
+
+        <div className="grid gap-4">
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Title</span>
+            <input
+              required
+              autoFocus
+              value={draft.title}
+              onChange={(event) => updateDraft("title", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
             />
-          );
-        })}
-      </section>
-    </PageShell>
+          </label>
+
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Section</span>
+            <AnimatedOptionDropdown
+              value={draft.section}
+              options={STORY_FILTER_SECTIONS.filter((option) => option !== "All sections")}
+              onChange={(value) => updateDraft("section", value)}
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Summary</span>
+            <textarea
+              rows={4}
+              value={draft.summary}
+              onChange={(event) => updateDraft("summary", event.target.value)}
+              className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.18]"
+              placeholder="What is this story about?"
+            />
+          </label>
+
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-xs uppercase tracking-[0.16em] text-zinc-600">Due date</span>
+            <input
+              type="date"
+              value={draft.deadline}
+              onChange={(event) => updateDraft("deadline", event.target.value)}
+              className="h-11 w-full rounded-xl border border-white/[0.08] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.18]"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button type="submit" disabled={submitting}>{submitting ? "Adding..." : "Add story"}</Button>
+        </div>
+      </motion.form>
+    </motion.div>
   );
 }
 
@@ -7771,6 +8144,7 @@ function buildCalendarEvents(stories = []) {
       if (!date) return null;
       return {
         id: `story-${story.id}`,
+        kind: "story",
         story,
         date,
         title: story.title,
@@ -7780,15 +8154,285 @@ function buildCalendarEvents(stories = []) {
     .sort((a, b) => a.date - b.date || a.title.localeCompare(b.title));
 }
 
-function CalendarPage({ stories = [], onOpenStory = () => {} }) {
-  const calendarEvents = useMemo(() => buildCalendarEvents(stories), [stories]);
-  const firstEventDate = calendarEvents[0]?.date;
+function normalizeCalendarEvent(raw = {}) {
+  const date = parseCalendarDate(raw.date);
+  if (!date) return null;
+  return {
+    ...raw,
+    id: asText(raw.id),
+    kind: "manual",
+    date,
+    title: asText(raw.title) || "Untitled event",
+    allDay: raw.allDay !== false,
+    startTime: asText(raw.startTime),
+    endTime: asText(raw.endTime),
+    description: asText(raw.description),
+    createdBy: asText(raw.createdBy),
+  };
+}
+
+function calendarEventSort(left, right) {
+  const dateDifference = left.date - right.date;
+  if (dateDifference) return dateDifference;
+  if (left.kind !== right.kind) return left.kind === "manual" ? -1 : 1;
+  const timeDifference = asText(left.startTime).localeCompare(asText(right.startTime));
+  return timeDifference || left.title.localeCompare(right.title);
+}
+
+function calendarEventTimeLabel(value) {
+  const [hour, minute] = asText(value).split(":").map(Number);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return "";
+  const date = new Date(2000, 0, 1, hour, minute);
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function CalendarEventModal({ open, initialDate, event = null, onClose, onSave, onDelete, saving = false, deleting = false, canManage = true }) {
+  const isEditing = Boolean(event);
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState(initialDate || inputDateValue(new Date()));
+  const [allDay, setAllDay] = useState(true);
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("10:00");
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(event?.title || "");
+    setDate(event?.date ? inputDateValue(event.date) : initialDate || inputDateValue(new Date()));
+    setAllDay(event ? event.allDay : true);
+    setStartTime(event?.startTime || "09:00");
+    setEndTime(event?.endTime || "10:00");
+    setDescription(event?.description || "");
+    setError("");
+  }, [event, initialDate, open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, open, saving]);
+
+  if (!open) return null;
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!title.trim()) {
+      setError("Add a title for this event.");
+      return;
+    }
+    if (!date) {
+      setError("Choose a date for this event.");
+      return;
+    }
+    if (!allDay && (!startTime || !endTime || endTime <= startTime)) {
+      setError("Choose a start and end time, or mark the event as all day.");
+      return;
+    }
+    setError("");
+    try {
+      await onSave({
+        title: title.trim(),
+        date,
+        allDay,
+        startTime: allDay ? "" : startTime,
+        endTime: allDay ? "" : endTime,
+        description: description.trim(),
+      });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not add event.");
+    }
+  };
+
+  const deleteEvent = async () => {
+    if (!isEditing || !canManage || !onDelete) return;
+    if (!window.confirm(`Delete “${event.title}”? This cannot be undone.`)) return;
+    setError("");
+    try {
+      await onDelete();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete event.");
+    }
+  };
+
+  return createPortal(
+    <motion.div
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="calendar-event-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+    >
+      <motion.form
+        onSubmit={submit}
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.18 }}
+        className="w-full max-w-lg rounded-2xl border border-white/[0.12] bg-[#0b0c10] p-5 shadow-2xl shadow-black/60 sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="calendar-event-title" className="text-xl font-semibold text-zinc-50">{isEditing ? "Edit event" : "Add event"}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            aria-label="Close event dialog"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-45"
+          >
+            <Icon name="x" className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <label className="block text-sm font-medium text-zinc-300">
+            Title
+            <input
+              autoFocus
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              disabled={isEditing && !canManage}
+              placeholder="e.g. Staff meeting"
+              maxLength={120}
+              className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <label className="block text-sm font-medium text-zinc-300">
+              Date
+              <input
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
+                disabled={isEditing && !canManage}
+                className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.24]"
+              />
+            </label>
+            <label className="flex h-11 items-center gap-2 rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-300 sm:mb-0">
+              <input
+                type="checkbox"
+                checked={allDay}
+                onChange={(event) => setAllDay(event.target.checked)}
+                disabled={isEditing && !canManage}
+                className="h-4 w-4 accent-zinc-100"
+              />
+              All day
+            </label>
+          </div>
+
+          {!allDay ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-zinc-300">
+                Starts
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(event) => setStartTime(event.target.value)}
+                  disabled={isEditing && !canManage}
+                  className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.24]"
+                />
+              </label>
+              <label className="block text-sm font-medium text-zinc-300">
+                Ends
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(event) => setEndTime(event.target.value)}
+                  disabled={isEditing && !canManage}
+                  className="mt-2 h-11 w-full rounded-xl border border-white/[0.1] bg-black/25 px-3 text-sm text-zinc-200 outline-none focus:border-white/[0.24]"
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <label className="block text-sm font-medium text-zinc-300">
+            Description <span className="font-normal text-zinc-600">(optional)</span>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              disabled={isEditing && !canManage}
+              rows={3}
+              maxLength={2000}
+              placeholder="Add a little context"
+              className="mt-2 w-full resize-none rounded-xl border border-white/[0.1] bg-black/25 px-3 py-2 text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/[0.24]"
+            />
+          </label>
+          {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+        </div>
+
+        {(!isEditing || canManage) ? (
+          <div className="mt-6 flex justify-end gap-2">
+            {!isEditing ? <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button> : null}
+            {isEditing ? <Button variant="danger" icon="trash" onClick={deleteEvent} disabled={saving || deleting}>{deleting ? "Deleting..." : "Delete"}</Button> : null}
+            <Button type="submit" disabled={saving || deleting}>{saving ? (isEditing ? "Saving..." : "Adding...") : isEditing ? "Save changes" : "Add event"}</Button>
+          </div>
+        ) : null}
+      </motion.form>
+    </motion.div>,
+    document.body
+  );
+}
+
+function CalendarPage({ stories = [], currentUser = FALLBACK_ACCOUNT, csrfToken = "", onOpenStory = () => {}, setToast = () => {} }) {
+  const storyEvents = useMemo(() => buildCalendarEvents(stories), [stories]);
+  const [manualEvents, setManualEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const [hasNavigatedMonth, setHasNavigatedMonth] = useState(false);
   const [expandedDays, setExpandedDays] = useState(() => new Set());
+  const [eventDialogOpen, setEventDialogOpen] = useState(false);
+  const [eventDialogDate, setEventDialogDate] = useState(inputDateValue(new Date()));
+  const [editingCalendarEvent, setEditingCalendarEvent] = useState(null);
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState("");
+  const canCreateManualEvent = ["owner", "admin", "editor", "writer"].includes(normalizeAppRole(currentUser?.role));
+  const calendarEvents = useMemo(
+    () => [...storyEvents, ...manualEvents].sort(calendarEventSort),
+    [manualEvents, storyEvents]
+  );
+  const firstEventDate = calendarEvents[0]?.date;
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const base = firstEventDate || new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadEvents() {
+      setEventsLoading(true);
+      try {
+        const response = await fetch(`${API_BASE}/api/calendar-events`, {
+          headers: { Accept: "application/json" },
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Calendar events are unavailable.");
+        }
+        setManualEvents(Array.isArray(payload.events) ? payload.events.map(normalizeCalendarEvent).filter(Boolean) : []);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setManualEvents([]);
+          setToast(error instanceof Error ? error.message : "Calendar events are unavailable.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setEventsLoading(false);
+      }
+    }
+    loadEvents();
+    return () => controller.abort();
+  }, [setToast]);
 
   useEffect(() => {
     if (!firstEventDate || hasNavigatedMonth) return;
@@ -7799,6 +8443,82 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     setHasNavigatedMonth(true);
     setExpandedDays(new Set());
     setVisibleMonth(nextMonth);
+  };
+
+  const openEventDialog = (date = inputDateValue(new Date())) => {
+    if (!canCreateManualEvent) return;
+    setEventDialogDate(date);
+    setEventDialogOpen(true);
+  };
+
+  const canManageCalendarEvent = (event) => {
+    const role = normalizeAppRole(currentUser?.role);
+    return ["owner", "admin", "editor"].includes(role) || (role === "writer" && asText(event?.createdByUserId) === asText(currentUser?.id));
+  };
+
+  const saveManualEvent = async (draft, eventToUpdate = null) => {
+    if (!canCreateManualEvent || savingEvent) return;
+    setSavingEvent(true);
+    try {
+      const response = await fetch(
+        eventToUpdate ? `${API_BASE}/api/calendar-events/${encodeURIComponent(eventToUpdate.id)}` : `${API_BASE}/api/calendar-events`,
+        {
+          method: eventToUpdate ? "PATCH" : "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+          },
+          credentials: "include",
+          body: JSON.stringify(draft),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || (eventToUpdate ? "Could not update event." : "Could not add event."));
+      }
+      const nextEvent = normalizeCalendarEvent(payload.event);
+      if (!nextEvent) throw new Error(eventToUpdate ? "Could not update event." : "Could not add event.");
+      setManualEvents((current) => eventToUpdate
+        ? current.map((item) => item.id === nextEvent.id ? nextEvent : item)
+        : [...current, nextEvent]
+      );
+      const nextDate = parseCalendarDate(draft.date);
+      if (nextDate) navigateCalendarMonth(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1));
+      setEventDialogOpen(false);
+      setEditingCalendarEvent(null);
+      setToast(eventToUpdate ? "Event updated." : "Event added to the calendar.");
+    } finally {
+      setSavingEvent(false);
+    }
+  };
+
+  const openExistingCalendarEvent = (event) => {
+    setEditingCalendarEvent(event);
+  };
+
+  const deleteManualEvent = async (event) => {
+    if (!event || !canManageCalendarEvent(event) || deletingEventId) return;
+    setDeletingEventId(event.id);
+    try {
+      const response = await fetch(`${API_BASE}/api/calendar-events/${encodeURIComponent(event.id)}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Could not delete event.");
+      }
+      setManualEvents((current) => current.filter((item) => item.id !== event.id));
+      setEditingCalendarEvent(null);
+      setToast("Event deleted.");
+    } finally {
+      setDeletingEventId("");
+    }
   };
 
   const toggleExpandedDay = (dayKey) => {
@@ -7821,7 +8541,10 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
     return grouped;
   }, [calendarEvents]);
   return (
-    <PageShell title="Calendar">
+    <PageShell
+      title="Calendar"
+      right={canCreateManualEvent ? <Button icon="plus" onClick={() => openEventDialog()}>Add event</Button> : null}
+    >
       <section className="space-y-4">
         <div className="flex flex-col gap-3 border-b border-white/[0.12] pb-4 lg:flex-row lg:items-end lg:justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-zinc-50">{monthYearLabel(visibleMonth)}</h2>
@@ -7856,18 +8579,41 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
                   >
                     <div className="mb-2 flex items-center justify-between">
                       <span className={cx("flex h-7 w-7 items-center justify-center rounded-full text-xs", cell.isToday ? "bg-zinc-100 text-black" : cell.inMonth ? "text-zinc-300" : "text-zinc-700")}>{cell.day}</span>
+                      {canCreateManualEvent ? (
+                        <button
+                          type="button"
+                          onClick={() => openEventDialog(cell.key)}
+                          aria-label={`Add event on ${monthDayYear(cell.date)}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-white/[0.08] hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25"
+                        >
+                          <Icon name="plus" className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
                     </div>
                     <div id={eventListId} className="space-y-1.5">
                       {visibleItems.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => onOpenStory(item.story)}
-                          title={item.title}
-                          className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
-                        >
-                          {item.title}
-                        </button>
+                        item.kind === "story" ? (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => onOpenStory(item.story)}
+                            title={item.title}
+                            className="block w-full truncate rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+                          >
+                            {item.title}
+                          </button>
+                        ) : (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => openExistingCalendarEvent(item)}
+                            title={item.description || item.title}
+                            className="flex w-full min-w-0 items-center gap-1.5 rounded-md border border-white/[0.1] bg-white/[0.055] px-2 py-1.5 text-left text-xs font-medium text-zinc-100 transition hover:border-white/[0.2] hover:bg-white/[0.085] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 motion-reduce:transition-none"
+                          >
+                            {!item.allDay && item.startTime ? <span className="shrink-0 text-[10px] text-zinc-500">{calendarEventTimeLabel(item.startTime)}</span> : null}
+                            <span className="truncate">{item.title}</span>
+                          </button>
+                        )
                       ))}
                       {items.length > 4 ? (
                         <button
@@ -7888,7 +8634,26 @@ function CalendarPage({ stories = [], onOpenStory = () => {} }) {
             </div>
           </div>
         </div>
+        {eventsLoading ? <p className="text-xs text-zinc-600">Loading saved events...</p> : null}
       </section>
+      <AnimatePresence>
+        {eventDialogOpen || editingCalendarEvent ? (
+          <CalendarEventModal
+            open={eventDialogOpen || Boolean(editingCalendarEvent)}
+            initialDate={editingCalendarEvent ? inputDateValue(editingCalendarEvent.date) : eventDialogDate}
+            event={editingCalendarEvent}
+            canManage={!editingCalendarEvent || canManageCalendarEvent(editingCalendarEvent)}
+            onClose={() => {
+              setEventDialogOpen(false);
+              setEditingCalendarEvent(null);
+            }}
+            onSave={(draft) => saveManualEvent(draft, editingCalendarEvent)}
+            onDelete={() => deleteManualEvent(editingCalendarEvent)}
+            saving={savingEvent}
+            deleting={deletingEventId === editingCalendarEvent?.id}
+          />
+        ) : null}
+      </AnimatePresence>
     </PageShell>
   );
 }
@@ -8296,7 +9061,7 @@ function AdminStaffTable({ staff, onRoleChange, onRemove, currentUser }) {
             <th className="px-4 py-3 font-medium">Staff member</th>
             <th className="w-44 px-4 py-3 font-medium">Role</th>
             <th className="w-44 px-4 py-3 font-medium">Last seen</th>
-            <th className="w-36 px-4 py-3 font-medium">Access</th>
+            <th className="w-48 px-4 py-3 font-medium">Access</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06]">
@@ -8352,9 +9117,10 @@ function AdminUserRow({ user, onRoleChange, onRemove, isCurrentUser = false }) {
             type="button"
             onClick={requestRemoval}
             className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/30"
-            aria-label={`${confirmingRemoval ? "Confirm removal of" : "Remove"} ${user.name} from workspace`}
+            aria-label={`${confirmingRemoval ? "Confirm removal and data deletion for" : "Remove"} ${user.name} from workspace`}
+            title={confirmingRemoval ? "This also deletes the member’s workspace pitches, stories, attachments, and related records." : undefined}
           >
-            {confirmingRemoval ? "Confirm remove" : "Remove"}
+            {confirmingRemoval ? "Confirm & delete data" : "Remove"}
           </button>
         )}
       </td>

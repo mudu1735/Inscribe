@@ -530,7 +530,7 @@ class MetadataParsingTests(unittest.TestCase):
         self.assertNotIn("Navigation", article["body"])
         self.assertNotIn("secret", article["body"])
 
-    def test_parses_wordpress_json_ld_and_meta_fallbacks(self):
+    def test_does_not_promote_hidden_metadata_into_tags(self):
         source = """
         <html>
           <head>
@@ -553,6 +553,7 @@ class MetadataParsingTests(unittest.TestCase):
             </script>
           </head>
           <body>
+            <div class="tags-links"><a rel="tag">Visible tag</a></div>
             <div class="entry-content"><p>WordPress body text.</p></div>
           </body>
         </html>
@@ -561,7 +562,7 @@ class MetadataParsingTests(unittest.TestCase):
         self.assertEqual(article["title"], "JSON-LD Headline")
         self.assertEqual(article["authors"], ["Jordan Journalist"])
         self.assertEqual(article["datePublished"], "2026-05-06T13:00:00Z")
-        self.assertEqual(article["tags"], ["News", "Campus", "Students", "Local", "Features"])
+        self.assertEqual(article["tags"], ["Visible tag"])
         self.assertEqual(article["body"], "WordPress body text.")
 
     def test_metadata_outputs_are_bounded(self):

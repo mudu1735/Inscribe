@@ -26,6 +26,47 @@ def load_functions(names, namespace=None):
 
 
 class WorkflowHelperTests(unittest.TestCase):
+    def test_removed_user_record_query_prefers_stable_identity_over_legacy_name(self):
+        loaded = load_functions(
+            {"_workspace_user_record_query"},
+            {
+                "normalize_email": lambda value: str(value or "").strip().lower(),
+                "_user_display_name": lambda user: user.get("name", ""),
+            },
+        )
+        query = loaded["_workspace_user_record_query"](
+            "newsroom",
+            {"_id": "user-1", "email": "Writer@Example.com", "name": "Writer One"},
+            ("ownerUserId",),
+            ("ownerEmail",),
+            ("owner",),
+        )
+        clauses = query["$and"][1]["$or"]
+        self.assertIn({"ownerUserId": {"$in": ["user-1"]}}, clauses)
+        self.assertIn({"ownerEmail": "writer@example.com"}, clauses)
+        legacy_clause = next(clause for clause in clauses if "$and" in clause)
+        self.assertIn({"owner": {"$in": ["Writer One", "writer@example.com"]}}, legacy_clause["$and"])
+        self.assertIn({"ownerUserId": {"$in": [None, ""]}}, legacy_clause["$and"])
+        self.assertIn({"ownerEmail": {"$in": [None, ""]}}, legacy_clause["$and"])
+
+    def test_pitch_statuses_and_round_details_normalize_legacy_values(self):
+        loaded = load_functions(
+            {"_normalize_pitch_status", "_normalize_pitch_round_status", "_pitch_round_detail_updates"},
+            {
+                "PITCH_STATUS_IN_PROGRESS": "In Progress",
+                "PITCH_STATUS_READY": "Ready for Review",
+                "PITCH_STATUS_SELECTED": "Selected",
+            },
+        )
+        self.assertEqual(loaded["_normalize_pitch_status"]("Approved"), "Selected")
+        self.assertEqual(loaded["_normalize_pitch_status"]("Selected for Story"), "Selected")
+        self.assertEqual(loaded["_normalize_pitch_status"]("Needs Review"), "Ready for Review")
+        self.assertEqual(loaded["_normalize_pitch_round_status"]("Open for Submissions"), "Open")
+        details, error = loaded["_pitch_round_detail_updates"]({"name": "  May pitches  "})
+        self.assertEqual(error, "")
+        self.assertEqual(details, {"name": "May pitches", "description": ""})
+        self.assertEqual(loaded["_pitch_round_detail_updates"]({"name": ""})[1], "Round name is required.")
+
     def test_pitch_detail_validation_and_legacy_section_compatibility(self):
         loaded = load_functions(
             {"_pitch_detail_updates"},
