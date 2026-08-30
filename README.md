@@ -1,105 +1,103 @@
-# Inscribe / Falcon Newsroom
+# Inscribe
 
-Inscribe is a newsroom workspace for student journalism. It supports pitching,
-assigning, reporting, reviewing, and publishing stories, along with searchable
-article and interviewee databases.
+Inscribe is a collaborative newsroom workspace for student journalism. It
+helps teams develop pitches, assign and report stories, review drafts, manage
+publishing records, and keep research organized across workspaces.
 
-The repository contains the current v3 application. It is the application to
-run for local development and deployment.
+The active application lives in `v3/falcon-newsroom/`. The root `.env.example`
+is the shared configuration template for local development and deployment.
 
-## Repository structure
+## Features
+
+- Multi-workspace organization with owner-managed workspaces and join codes.
+- Email/password accounts with optional Google OAuth sign-in.
+- Role-based access for owners, admins, editors, writers, and guests.
+- Pitch rounds, pitch submissions, editorial feedback, and pitch selection.
+- Story assignments and a controlled workflow from reporting through review and
+  publication.
+- Story comments, activity history, co-author invitations, Google Docs links,
+  Google Drive attachments, and local file uploads.
+- Article archive and interviewee database scoped to each workspace.
+- Optional article metadata and interviewee extraction with Gemini.
+- Calendar events, dashboard tasks, analytics, and admin-managed names imports
+  from CSV or `.xlsx` files.
+
+The editorial workflow is:
 
 ```text
-Falcon_journalism_v2/
-├── v3/
-│   ├── README.md                Short v3 notes
-│   └── falcon-newsroom/
-│       ├── src/                 React/Vite frontend
-│       ├── server/              Flask/MongoDB backend and tests
-│       ├── api/index.py         Vercel serverless backend entrypoint
-│       ├── public/              Logos, landing assets, security headers
-│       ├── scripts/              Development and static checks
-│       ├── package.json          Frontend commands and dependencies
-│       ├── vite.config.js        Local proxy and security headers
-│       └── vercel.json           Production deployment configuration
-└── .gitignore
+Pitch → Approval → Assignment → Reporting/drafting → Review → Publication
 ```
 
-## Current v3 application
+## Project layout
 
-The active application is `v3/falcon-newsroom/`:
+```text
+.
+├── .env.example
+├── .github/workflows/ci.yml
+└── v3/falcon-newsroom/
+    ├── src/                 React frontend and client-side UI
+    ├── server/              Flask API, article extractor, and Python tests
+    ├── api/index.py         Vercel serverless entrypoint
+    ├── public/              App assets and security headers
+    ├── scripts/             Development and static-check helpers
+    ├── package.json         Frontend scripts and dependencies
+    ├── vite.config.js       Vite server, proxy, and security headers
+    └── vercel.json          Vercel build, routing, and deployment settings
+```
 
-- React 19 and Vite frontend
-- Flask API on port `5003`
-- Vite frontend on port `5173`
-- MongoDB for users, workspaces, stories, pitches, records, and activity
-- MongoDB GridFS for uploaded story attachments
-- Optional Google OAuth and Google Drive integration
-- Optional Gemini-powered article/interviewee extraction
-
-The main frontend entrypoint is `v3/falcon-newsroom/src/main.jsx`. Most of the
-authenticated interface and client-side routing is in
+The main frontend entrypoint is `v3/falcon-newsroom/src/main.jsx`. The primary
+authenticated application and client-side routing are in
 `v3/falcon-newsroom/src/App.jsx`. The backend is
-`v3/falcon-newsroom/server/auth_app.py`, and the article extractor is
+`v3/falcon-newsroom/server/auth_app.py`, with article extraction in
 `v3/falcon-newsroom/server/article_extractor.py`.
 
-The main editorial workflow is:
+## Requirements
 
-```text
-Pitch → Approval → Story assignment → Reporting/drafting → Review → Publication
-```
+- Python 3.12 (the version in `v3/falcon-newsroom/.python-version` and CI).
+- Node.js 20.19.x or Node.js 22.12+, plus npm.
+- A MongoDB deployment, either MongoDB Atlas or a local MongoDB server.
+- A root `.env` file with a MongoDB connection string and Flask secret.
 
-Stories can contain comments, activity history, Google Docs links, Google Drive
-attachments, and uploaded files. Publishing a story creates or updates its
-article archive entry. Article extraction stores article metadata and reviewed
-interviewee records in MongoDB.
+The application uses MongoDB for accounts, workspaces, stories, pitches,
+articles, interviewees, activity, feedback, calendar events, and rate limits.
+Story uploads are stored in MongoDB GridFS.
 
-## Prerequisites
+## Quick start
 
-Before starting locally, install or have access to:
-
-1. Python 3.12 or newer. The repository declares 3.12 in `.python-version`, but
-   Python 3.14 should be usable if the pinned dependencies install successfully.
-2. Node.js 20.19.x or Node.js 22.12+ and npm, matching Vite's supported
-   runtime range.
-3. A MongoDB deployment, either MongoDB Atlas or a local MongoDB server. Use a
-   separate local database; the application creates indexes and performs startup
-   migrations.
-4. A root `.env` file containing at least `MONGO_URI` and a local Flask secret.
-
-Gemini and Google credentials are optional for the basic application. Without a
-Gemini key, users can still review and enter interviewees manually. Without
-Google credentials, password authentication and local file attachments still
-work, but Google sign-in and Drive features do not.
-
-## Local setup on macOS/Linux
+### macOS/Linux
 
 From the repository root:
 
 ```bash
-# Python 3.12 is the declared target; Python 3.14 is also acceptable if the
-# dependency installation below completes successfully.
-python3 -m venv venv
+cp .env.example .env
+# Edit .env and replace the placeholder values.
+
+python3.12 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r v3/falcon-newsroom/requirements.txt
 
 cd v3/falcon-newsroom
 npm ci
-
 npm run dev
 ```
 
-Then open <http://127.0.0.1:5173>.
+Open <http://127.0.0.1:5173>. The `dev` command starts both services:
 
-If dependency installation fails on a newer Python version, retry with Python
-3.12, the version recorded in `.python-version`.
+- Vite frontend: `127.0.0.1:5173`
+- Flask API: `127.0.0.1:5003`
 
-## Local setup on Windows
+The development helper automatically uses the repository-root `venv`. To use
+another Python interpreter, set `FALCON_V3_PYTHON` before `npm run dev`.
 
-From the repository root in PowerShell:
+### Windows PowerShell
+
+From the repository root:
 
 ```powershell
+Copy-Item .env.example .env
+# Edit .env and replace the placeholder values.
+
 py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -110,111 +108,129 @@ npm ci
 npm run dev
 ```
 
-## Minimal local `.env`
+If PowerShell blocks activation, allow it for the current user or run the
+commands with the virtual environment's Python directly.
 
-Copy the tracked example to `.env` in the repository root, replace its
-placeholders, and do not commit the resulting `.env` file:
+## Environment configuration
 
-```bash
-cp .env.example .env
-```
+Start with the tracked [`.env.example`](.env.example). Do not commit `.env` or
+any file containing real credentials.
+
+### Required locally
 
 ```dotenv
 FLASK_ENV=development
-FLASK_SECRET_KEY=replace-with-a-long-random-local-secret
-
+FLASK_SECRET_KEY=replace-with-a-unique-random-secret-of-at-least-32-characters
 MONGO_URI=mongodb+srv://username:password@cluster.example.mongodb.net/?retryWrites=true&w=majority
 MONGO_DB=inscribe_local
-
-# Make the first local account an owner so it can create/open workspaces.
-OWNER_EMAILS=your-email@example.com
-
+OWNER_EMAILS=owner@example.com
 FRONTEND_ORIGIN=http://127.0.0.1:5173
 TRUSTED_CSRF_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
-
-# Optional: article metadata extraction and AI interviewee extraction.
-GEMINI_API_KEY=
-GEMINI_MODEL=
 ```
 
-`FLASK_ENV=development` matters locally because production mode enables secure
-cookies and rejects weak or missing secrets. `OWNER_EMAILS` is optional, but it
-is the easiest way to make the first registered local account an owner. Other
-users register normally and join a workspace with its join code. Owners create
-workspaces in the application and set each workspace's own publication website
-there. Optional `DEFAULT_WORKSPACE_*` variables in `.env.example` are only for
-deployments that intentionally bootstrap one workspace; publication settings
-are never read from the environment.
+`MONGO_URI` is required for the backend to start. Use a separate database for
+local development. `OWNER_EMAILS` is optional, but makes the matching account
+an owner so it can create and open workspaces. Other users can join a workspace
+with its join code.
 
-## Optional Google configuration
+`FLASK_ENV=development` enables local cookie and secret behavior. Production
+must use a unique `FLASK_SECRET_KEY` with at least 32 characters. The optional
+`TRUST_PROXY_HEADERS` setting should only be enabled when the app is behind a
+trusted reverse proxy.
 
-To enable Google sign-in and Google Drive features, add these variables:
+### Optional integrations
+
+Google sign-in and Google Drive support use:
 
 ```dotenv
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-OAUTH_TOKEN_ENCRYPTION_KEY=replace-with-a-second-long-random-secret
+OAUTH_TOKEN_ENCRYPTION_KEY=
 GOOGLE_AUTH_REDIRECT_URI=http://127.0.0.1:5173/api/auth/google/callback
 GOOGLE_ALLOWED_DOMAINS=
 GOOGLE_PICKER_API_KEY=
 GOOGLE_PICKER_APP_ID=
+GOOGLE_PICKER_CLIENT_ID=
 ```
 
-The redirect URI must also be registered in the Google Cloud OAuth client. The
-Google Picker variables are needed for the Drive picker UI. A strong
-`FLASK_SECRET_KEY` can serve as the OAuth encryption key when an independent
-`OAUTH_TOKEN_ENCRYPTION_KEY` is not supplied.
+Register the redirect URI in the Google Cloud OAuth client. The Picker values
+are needed for the Drive picker. Use a separate strong
+`OAUTH_TOKEN_ENCRYPTION_KEY` in production; a strong Flask secret can be used
+as the fallback when the independent key is omitted.
+
+Gemini-powered article and interviewee extraction uses:
+
+```dotenv
+GEMINI_API_KEY=
+GEMINI_MODEL=
+```
+
+Extraction is optional. Editors and admins can still add and review records
+manually when no Gemini key is configured. The workspace publication URL must
+be configured before extraction can run.
+
+Optional `DEFAULT_WORKSPACE_*` settings in `.env.example` are intended only for
+deployments that deliberately bootstrap one workspace. In the normal flow,
+owners create workspaces in the application and configure each workspace's
+publication website there.
 
 ## Development commands
 
-Run both services:
+Run the frontend and backend together from `v3/falcon-newsroom/`:
 
 ```bash
-cd v3/falcon-newsroom
 npm run dev
 ```
 
-Run the services separately when debugging:
+Run them separately while debugging:
 
 ```bash
-# Terminal 1, with the virtualenv active
-cd v3/falcon-newsroom
+# Terminal 1, with the virtual environment active
 python -B -m server.auth_app
 
 # Terminal 2
-cd v3/falcon-newsroom
 npm run dev:vite
 ```
 
-Useful checks:
+Available checks:
 
 ```bash
-cd v3/falcon-newsroom
 npm run typecheck
 npm run build
+npm run test:frontend
+npm run test:backend
 npm test
-
-python -m unittest discover -s server -p 'test_*.py' -v
 python -m pip check
 ```
 
-`npm test` runs the static source-contract checks, TypeScript checking, a
-production Vite build, and all Python tests. The Python test suite focuses on
-extraction, security helpers, workspace isolation, and workflow transitions.
+`npm test` runs the frontend static checks, TypeScript validation, production
+Vite build, and Python test suite. The Python tests cover article extraction,
+security helpers, workspace isolation, role-based access, and workflow
+transitions.
 
-## Security and deployment notes
+## Deployment
 
-The v3 backend includes role-based access control, workspace scoping, CSRF
-checks, rate limiting, signed extraction tokens, bounded uploads, encrypted
-OAuth tokens, and SSRF-resistant article fetching.
+The application is configured for Vercel. Set the Vercel project root to
+`v3/falcon-newsroom/`; `vercel.json` builds the Vite frontend, routes `/api/*`
+to `api/index.py`, and serves the single-page application routes.
 
-For production, use a strong secret, TLS, a production WSGI server, correctly
-configured `FRONTEND_ORIGIN` and `TRUSTED_CSRF_ORIGINS`, and a separate strong
-OAuth encryption key. The Vercel configuration serves the frontend statically
-and routes `/api/*` to `api/index.py`.
+Configure these production variables in the deployment environment:
 
-## Current repository notes
+- `MONGO_URI` and `MONGO_DB` for the production database.
+- A strong `FLASK_SECRET_KEY`.
+- `FLASK_ENV=production`.
+- `FRONTEND_ORIGIN` set to the deployed origin.
+- `TRUSTED_CSRF_ORIGINS` containing the deployed origin.
+- Google and Gemini variables if those integrations are enabled.
 
-The previous README described directories that are not present in this
-checkout, including `v2/` and `v3/linear-landing-reference/`. They are not part
-of the current repository.
+Use TLS and keep production credentials out of the repository. Production
+startup rejects weak Flask secrets, uses secure session cookies, and applies
+the security headers configured in `vercel.json` and `public/_headers`.
+
+## Security model
+
+The backend applies workspace-scoped data access, role checks, CSRF validation,
+authentication and action rate limits, signed extraction tokens, bounded file
+uploads, encrypted OAuth tokens, and SSRF-resistant article fetching. Keep
+workspace data and credentials isolated between local, staging, and production
+MongoDB databases.

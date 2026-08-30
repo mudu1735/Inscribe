@@ -66,7 +66,7 @@ MONGO_URI = os.getenv("MONGO_URI", "")
 if not MONGO_URI:
     raise RuntimeError("MONGO_URI is not set. Add it to your .env file.")
 
-MONGO_DB = os.getenv("MONGO_DB", "mudu1735")
+MONGO_DB = os.getenv("MONGO_DB", "Inscribe_dev")
 USER_COLLECTION = os.getenv("USER_COLLECTION", "loginInfov2")
 INTERVIEW_COLLECTION = os.getenv("INTERVIEW_COLLECTION", "interviewRecords")
 ARTICLE_COLLECTION = os.getenv("ARTICLE_COLLECTION", "articleRecords")
