@@ -14,7 +14,7 @@ const v3Backend = await readFile("server/auth_app.py", "utf8");
 const articleExtractor = await readFile("server/article_extractor.py", "utf8");
 const devScript = await readFile("scripts/dev.mjs", "utf8");
 const requirements = await readFile("requirements.txt", "utf8");
-const envExample = await readFile("../../.env.example", "utf8");
+const envExample = await readFile(".env.example", "utf8");
 const viteConfigObject = (await import("../vite.config.js")).default;
 const vercelConfigObject = JSON.parse(vercelConfig);
 

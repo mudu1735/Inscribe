@@ -4,8 +4,8 @@ Inscribe is a collaborative newsroom workspace for student journalism. It
 helps teams develop pitches, assign and report stories, review drafts, manage
 publishing records, and keep research organized across workspaces.
 
-The active application lives in `v3/falcon-newsroom/`. The root `.env.example`
-is the shared configuration template for local development and deployment.
+The active application lives at the repository root. The root `.env.example` is
+the shared configuration template for local development and deployment.
 
 ## Features
 
@@ -34,26 +34,23 @@ Pitch → Approval → Assignment → Reporting/drafting → Review → Publicat
 .
 ├── .env.example
 ├── .github/workflows/ci.yml
-└── v3/falcon-newsroom/
-    ├── src/                 React frontend and client-side UI
-    ├── server/              Flask API, article extractor, and Python tests
-    ├── api/index.py         Vercel serverless entrypoint
-    ├── public/              App assets and security headers
-    ├── scripts/             Development and static-check helpers
-    ├── package.json         Frontend scripts and dependencies
-    ├── vite.config.js       Vite server, proxy, and security headers
-    └── vercel.json          Vercel build, routing, and deployment settings
+├── src/                     React frontend and client-side UI
+├── server/                  Flask API, article extractor, and Python tests
+├── api/index.py             Vercel serverless entrypoint
+├── public/                  App assets and security headers
+├── scripts/                 Development and static-check helpers
+├── package.json             Frontend scripts and dependencies
+├── vite.config.js           Vite server, proxy, and security headers
+└── vercel.json              Vercel build, routing, and deployment settings
 ```
 
-The main frontend entrypoint is `v3/falcon-newsroom/src/main.jsx`. The primary
-authenticated application and client-side routing are in
-`v3/falcon-newsroom/src/App.jsx`. The backend is
-`v3/falcon-newsroom/server/auth_app.py`, with article extraction in
-`v3/falcon-newsroom/server/article_extractor.py`.
+The main frontend entrypoint is `src/main.jsx`. The primary authenticated
+application and client-side routing are in `src/App.jsx`. The backend is
+`server/auth_app.py`, with article extraction in `server/article_extractor.py`.
 
 ## Requirements
 
-- Python 3.12 (the version in `v3/falcon-newsroom/.python-version` and CI).
+- Python 3.12 (the version in `.python-version` and CI).
 - Node.js 20.19.x or Node.js 22.12+, plus npm.
 - A MongoDB deployment, either MongoDB Atlas or a local MongoDB server.
 - A root `.env` file with a MongoDB connection string and Flask secret.
@@ -75,9 +72,7 @@ cp .env.example .env
 python3.12 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r v3/falcon-newsroom/requirements.txt
-
-cd v3/falcon-newsroom
+python -m pip install -r requirements.txt
 npm ci
 npm run dev
 ```
@@ -88,7 +83,7 @@ Open <http://127.0.0.1:5173>. The `dev` command starts both services:
 - Flask API: `127.0.0.1:5003`
 
 The development helper automatically uses the repository-root `venv`. To use
-another Python interpreter, set `FALCON_V3_PYTHON` before `npm run dev`.
+another Python interpreter, set `INSCRIBE_PYTHON` before `npm run dev`.
 
 ### Windows PowerShell
 
@@ -101,9 +96,8 @@ Copy-Item .env.example .env
 py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r v3/falcon-newsroom/requirements.txt
+python -m pip install -r requirements.txt
 
-Set-Location v3/falcon-newsroom
 npm ci
 npm run dev
 ```
@@ -176,7 +170,7 @@ publication website there.
 
 ## Development commands
 
-Run the frontend and backend together from `v3/falcon-newsroom/`:
+Run the frontend and backend together from the repository root:
 
 ```bash
 npm run dev
@@ -210,9 +204,9 @@ transitions.
 
 ## Deployment
 
-The application is configured for Vercel. Set the Vercel project root to
-`v3/falcon-newsroom/`; `vercel.json` builds the Vite frontend, routes `/api/*`
-to `api/index.py`, and serves the single-page application routes.
+The application is configured for Vercel. Set the Vercel project root to the
+repository root; `vercel.json` builds the Vite frontend, routes `/api/*` to
+`api/index.py`, and serves the single-page application routes.
 
 Configure these production variables in the deployment environment:
 
